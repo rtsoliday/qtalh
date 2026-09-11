@@ -100,8 +100,14 @@ QVariant AlarmModel::data(const QModelIndex& i, int role) const {
       return severityColor(severity);
     if (i.column() == 2)
       return n->group ? QColor("#b0c3ca") : QColor("lightblue");
-    if (i.column() == 6 && coloredMasks && (s.mask[Ack] || s.maskCounts[Ack]))
-      return QColor("lightblue");
+    if (i.column() == 6 && coloredMasks) {
+      // ALH colors <CDATL> when C, D, or A (including the timed H) is set.
+      const bool silenced = n->group
+                                ? s.maskCounts[Cancel] || s.maskCounts[Disable] || s.maskCounts[Ack]
+                                : s.mask[Cancel] || s.mask[Disable] || s.mask[Ack];
+      if (silenced || s.noAckUntil)
+        return QColor("blue");
+    }
   }
   if (role == Qt::FontRole) {
     QFont f("monospace", 10);

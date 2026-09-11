@@ -195,7 +195,8 @@ void AlarmView::drawRow(QPainter* painter, const QStyleOptionViewItem& option,
         painter->drawRect(rect.adjusted(2, 2, -2, -2));
       }
       painter->setPen(color == QColor("red") ? Qt::white : Qt::black);
-      painter->drawText(rect.adjusted(2, 0, -2, 0).translated(0, 2), Qt::AlignCenter, text);
+      const int textOffset = column == 2 ? 2 : 0;
+      painter->drawText(rect.adjusted(2, 0, -2, 0).translated(0, textOffset), Qt::AlignCenter, text);
     } else if (column == 1) {
       if (!text.trimmed().isEmpty()) {
         painter->fillRect(rect.adjusted(0, 2, 0, -2), color);
@@ -203,8 +204,10 @@ void AlarmView::drawRow(QPainter* painter, const QStyleOptionViewItem& option,
         painter->drawText(rect, Qt::AlignCenter, text);
       }
     } else {
-      if (column == 6 && color != base)
+      if (column == 6 && color != base) {
         painter->fillRect(rect, color);
+        painter->setPen(color == QColor("blue") ? Qt::white : Qt::black);
+      }
       painter->drawText(rect, Qt::AlignLeft | Qt::AlignVCenter, text);
     }
   }
