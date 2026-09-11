@@ -41,6 +41,39 @@ private slots:
     QCOMPARE(output.readAll().trimmed(), QByteArray("qtalh-command"));
   }
 #endif
+#ifndef Q_OS_WIN
+  void legacyDisplayCommand_data() {
+    QTest::addColumn<QString>("program");
+    QTest::newRow("bare") << "medm";
+    QTest::newRow("quoted") << "\"medm\"";
+    QTest::newRow("absolute") << "'/legacy tools/bin/medm'";
+    QTest::newRow("master only") << "MASTER_ONLY medm";
+    QTest::newRow("already qt") << "qtedm";
+  }
+  void legacyDisplayCommand() {
+    QFETCH(QString, program);
+    QTemporaryDir dir;
+    QFile stub(dir.filePath("qtedm"));
+    QVERIFY(stub.open(QIODevice::WriteOnly));
+    stub.write("#!/bin/sh\nprintf '%s\\n' \"$@\"\n");
+    stub.close();
+    QVERIFY(stub.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    const QString command = program + " -x -attach 'medm display.adl' > '" +
+                            dir.filePath("output") + "'";
+    auto d = parseConfig("GROUP NULL root\n$COMMAND " + command);
+    auto w = std::make_unique<Window>(d, options(false), false);
+    const auto oldPath = qgetenv("PATH");
+    qputenv("PATH", dir.path().toLocal8Bit() + ":" + oldPath);
+    w->alarmEngine().command(w->document().root->option("COMMAND"));
+    qputenv("PATH", oldPath);
+    auto output = [&] {
+      QFile file(dir.filePath("output"));
+      return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    };
+    QTRY_COMPARE(output(), QByteArray("-x\n-attach\nmedm display.adl\n"));
+    QCOMPARE(w->document().root->option("COMMAND"), command);
+  }
+#endif
   void reloadPreservesSilence_data() {
     QTest::addColumn<bool>("startupSilent");
     QTest::newRow("operator-enabled-sound") << true;

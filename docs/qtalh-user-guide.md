@@ -152,7 +152,7 @@ Directives normally apply to the preceding group/channel:
 | --- | --- |
 | `$ALIAS` | Display label text; the underlying PV/group name is unchanged. |
 | `$GUIDANCE` | URL or filename, opened externally. Relative guidance files resolve from the document directory. With no inline value, read text through `$END` into a guidance dialog. |
-| `$COMMAND` | Related command, or `label ! command ! label ! command` menu pairs. |
+| `$COMMAND` | Related command, or `label ! command ! label ! command` menu pairs. Commands starting with `medm` (including a quoted or absolute executable path) silently launch `qtedm` from `PATH` instead, preserving arguments. Configuration text is unchanged. This substitution also applies to severity/status commands. |
 | `$BEEPSEVERITY` | Facility beep threshold (default MINOR); may occur before the root. |
 | `$BEEPSEVR` | Threshold for the current node; ancestor thresholds also apply. |
 | `$HEARTBEATPV` | `pv [interval_seconds [short_integer_value]]`; defaults 1 second and value 1. The first heartbeat in the facility, including includes, wins. Writes require global active mode. |

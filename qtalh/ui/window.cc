@@ -375,6 +375,17 @@ void Window::setupEngine() {
       if (logging && !logging->isMaster())
         return;
     }
+    // Prefer the Qt display manager even for legacy configuration commands.
+    // Replace only the executable; preserve arguments, quoting, and redirects.
+    static const QRegularExpression executable(R"(^\s*("[^"]+"|'[^']+'|[^\s;&|<>]+))");
+    const auto match = executable.match(command);
+    QString program = match.captured(1);
+    if (program.startsWith('"') || program.startsWith('\''))
+      program = program.mid(1, program.size() - 2);
+    program.replace('\\', '/');
+    const auto basename = program.section('/', -1);
+    if (basename == "medm" || basename == "medm.exe")
+      command.replace(match.capturedStart(1), match.capturedLength(1), "qtedm");
 #ifdef Q_OS_WIN
     QProcess process;
     process.setProgram(qEnvironmentVariable("COMSPEC", "cmd.exe"));
@@ -417,9 +428,14 @@ void Window::buildUi() {
   divider->setFixedHeight(17);
   divider->setToolTip("Tree/group window width");
   divider->setStyleSheet(
-      "QSlider { border:2px outset #b0c3ca; background:#b0c3ca; } QSlider::groove:horizontal "
-      "{height:10px; background:#b0c3ca;} QSlider::handle:horizontal {width:26px; border:2px "
-      "outset #b0c3ca; background:#b0c3ca; margin:-1px 0;}");
+      "QSlider {background:#b0c3ca; border:1px solid; border-top-color:#dde6e9; "
+      "border-left-color:#dde6e9; border-bottom-color:#5f696d; border-right-color:#5f696d;}"
+      "QSlider::groove:horizontal {height:11px; margin:1px; background:#b0c3ca; "
+      "border:1px solid; border-top-color:#5f696d; border-left-color:#5f696d; "
+      "border-bottom-color:#dde6e9; border-right-color:#dde6e9;}"
+      "QSlider::handle:horizontal {width:28px; margin:1px 0; background:#b0c3ca; "
+      "border:1px solid; border-top-color:#dde6e9; border-left-color:#dde6e9; "
+      "border-bottom-color:#5f696d; border-right-color:#5f696d;}");
   connect(divider, &QSlider::valueChanged, splitter, [splitter](int value) {
     int width = splitter->width() - splitter->handleWidth();
     splitter->setSizes({width * value / 100, width * (100 - value) / 100});
@@ -944,7 +960,9 @@ void Window::menus() {
   menuBar()->setFont(menuFont);
   menuBar()->setFixedHeight(30);
   menuBar()->setStyleSheet(
-      "QMenuBar {border:2px outset #b0c3ca;} QMenuBar::item {padding:2px 7px; "
+      "QMenuBar {border:1px solid; border-top-color:#dde6e9; border-left-color:#dde6e9; "
+      "border-bottom-color:#5f696d; border-right-color:#5f696d;} "
+      "QMenuBar::item {padding:2px 7px; "
       "background:transparent;} QMenuBar::item:selected {border:1px inset #b0c3ca;}");
   for (auto menu : findChildren<QMenu*>())
     menu->setFont(menuFont);
@@ -959,9 +977,7 @@ void Window::menus() {
   helpButton->setPopupMode(QToolButton::InstantPopup);
   menuBar()->setCornerWidget(helpButton, Qt::TopRightCorner);
   action(help, "Help Topics", [] {
-    QDesktopServices::openUrl(
-        QUrl::fromLocalFile(QDir(QCoreApplication::applicationDirPath())
-                                .absoluteFilePath("../../alh/documentation/ALH.html")));
+    QDesktopServices::openUrl(QUrl("https://ops.aps.anl.gov/manuals/QtALH/"));
   });
   action(help, "About QtALH", [this] {
     QMessageBox::about(this, "About QtALH",
