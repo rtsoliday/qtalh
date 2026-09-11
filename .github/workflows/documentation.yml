@@ -10,6 +10,13 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - base: /
+            artifact: root
+          - base: /manuals/QtALH/
+            artifact: aps
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,8 +28,8 @@ jobs:
         with:
           python-version: '3.x'
       - run: npm ci --prefix docs/site
-      - run: python3 scripts/build-docs.py
+      - run: python3 scripts/build-docs.py --base "${{ matrix.base }}"
       - uses: actions/upload-artifact@v4
         with:
-          name: qtalh-documentation-html
+          name: qtalh-documentation-html-${{ matrix.artifact }}
           path: docs/html

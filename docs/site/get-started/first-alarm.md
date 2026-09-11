@@ -2,7 +2,7 @@
 
 Run a small IOC on your own computer, raise an alarm, and acknowledge it in QtALH. You will see the difference between a current alarm and an alarm that still needs acknowledgement.
 
-**Before you begin:** [build QtALH](/get-started/install) and EPICS Base. You need a desktop session and the Base tools `softIoc` and `caput`. The walkthrough below uses a Linux/macOS shell, two terminals, and the repository's <a href="/downloads/examples/tutorial.db" download>tutorial database</a> and <a href="/downloads/examples/tutorial.alhConfig" download>configuration</a>.
+**Before you begin:** [build QtALH](/get-started/install) and EPICS Base. You need a desktop session and the Base tools `softIoc` and `caput`. The walkthrough below uses a Linux/macOS shell, two terminals, and the repository's <a href="../downloads/examples/tutorial.db" download>tutorial database</a> and <a href="../downloads/examples/tutorial.alhConfig" download>configuration</a>.
 
 ## 1. Set up a local connection
 

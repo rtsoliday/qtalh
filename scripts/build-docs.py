@@ -4,6 +4,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -34,7 +35,7 @@ class Page(HTMLParser):
                 self.links.append((tag, data[attr], data))
 
 
-def verify():
+def verify(base="/"):
     pages = {}
     # Preserve the original manual as an archive; do not impose modern HTML
     # conventions on its historical pages or obsolete external references.
@@ -54,7 +55,16 @@ def verify():
             if split.scheme or split.netloc:
                 continue
             name = unquote(split.path)
-            dest = ((OUTPUT / name.lstrip('/')) if name.startswith('/') else (path.parent / name)).resolve() if name else path
+            if name.startswith('/'):
+                if not name.startswith(base):
+                    issues.append(f'{path.relative_to(OUTPUT)}: URL escapes hosting base {base}: {url}')
+                    continue
+                dest = (OUTPUT / name[len(base):]).resolve()
+            else:
+                dest = (path.parent / name).resolve() if name else path
+            if not dest.is_relative_to(OUTPUT.resolve()):
+                issues.append(f'{path.relative_to(OUTPUT)}: URL escapes documentation directory: {url}')
+                continue
             if dest.is_dir():
                 dest = dest / 'index.html'
             if not dest.exists() and not dest.suffix:
@@ -87,7 +97,12 @@ def verify():
 def main():
     args = argparse.ArgumentParser(description=__doc__)
     args.add_argument('--check-only', action='store_true', help='Validate an existing build without rebuilding')
+    args.add_argument('--base', default=os.environ.get('DOCS_BASE', '/'),
+                      help='Hosting URL prefix, e.g. /manuals/QtALH/ (default: /)')
     options = args.parse_args()
+    if (not re.fullmatch(r'/(?:[A-Za-z0-9_.-]+/)*', options.base)
+            or any(part in ('.', '..') for part in options.base.split('/'))):
+        args.error('--base must be a URL path with leading/trailing slashes and no dot segments')
     if not options.check_only:
         subprocess.run([sys.executable, str(ROOT / 'scripts/sync-docs.py')], check=True)
         npm = shutil.which('npm') or shutil.which('npm.cmd')
@@ -95,16 +110,18 @@ def main():
             raise RuntimeError('Install Node.js and npm to build the documentation.')
         if not (SITE / 'node_modules/vitepress').is_dir():
             subprocess.run([npm, 'ci', '--no-audit', '--no-fund'], cwd=SITE, check=True)
-        subprocess.run([npm, 'run', 'build'], cwd=SITE, check=True)
+        subprocess.run([npm, 'run', 'build'], cwd=SITE, check=True,
+                       env={**os.environ, 'DOCS_BASE': options.base})
     if not (OUTPUT / 'index.html').is_file():
         raise RuntimeError('No built documentation found. Run without --check-only first.')
-    verify()
+    verify(options.base)
     if not options.check_only:
         destination = ROOT / 'docs/html'
         if destination.exists():
             shutil.rmtree(destination)
         shutil.copytree(OUTPUT, destination)
         print('Built documentation: ' + str(destination / 'index.html'))
+        print('Hosting URL prefix: ' + options.base)
 
 
 if __name__ == '__main__':

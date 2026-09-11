@@ -1,3 +1,7 @@
+<script setup>
+import { withBase } from 'vitepress'
+</script>
+
 # Monitor & acknowledge alarms
 
 Use the main window to find a channel, inspect its state, and acknowledge the alarms you have reviewed.
@@ -22,7 +26,7 @@ The compact facility window remains available. Its indication summarizes the fac
 Group indications summarize their eligible descendant channels. Cancelled and disabled channels do not contribute active severity in the same way as monitored, enabled channels. [Mask reference](/reference/configuration) explains the individual settings.
 
 <figure>
-  <img src="/images/main-window.png" alt="QtALH runtime showing a facility tree at left and channel controls at right" loading="lazy" />
+  <img :src="withBase('/images/main-window.png')" alt="QtALH runtime showing a facility tree at left and channel controls at right" loading="lazy" />
   <figcaption>Repository test fixture. ① Left: facility hierarchy. ② Right: the selected group's channels and action controls. ③ Bottom: runtime status and alarm controls. Labels and font rendering vary by platform.</figcaption>
 </figure>
 

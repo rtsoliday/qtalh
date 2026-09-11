@@ -4,6 +4,7 @@ export default defineConfig({
   title: 'QtALH',
   description: 'Guides and reference for operating, configuring, and developing the Qt EPICS Alarm Handler.',
   lang: 'en-US',
+  base: process.env.DOCS_BASE || '/',
   outDir: './dist',
   cleanUrls: false,
   head: [['meta', { name: 'theme-color', content: '#123d52' }]],

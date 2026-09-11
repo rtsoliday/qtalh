@@ -84,8 +84,9 @@ endif
 
 # Build the standalone documentation site without Qt or EPICS.
 .PHONY: docs
+DOCS_BASE ?= /
 docs:
-	python3 scripts/build-docs.py
+	python3 scripts/build-docs.py --base "$(DOCS_BASE)"
 
 # Remove generated docs while preserving authored pages and original archives.
 .PHONY: docs-clean docs-distclean

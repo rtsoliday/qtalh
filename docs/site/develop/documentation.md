@@ -15,6 +15,30 @@ Open `http://127.0.0.1:8000/`. Serve `docs/html` as the web root; opening `index
 
 `make docs` installs the locked documentation dependencies when absent, refreshes imported material, builds the static HTML, validates links and reference coverage, then copies the validated result to `docs/html`. For a clean dependency install, run `npm ci --prefix docs/site` first. EPICS and Qt are not required to build the website.
 
+## Host on your own web server
+
+The site is static: copy the entire contents of `docs/html/`, including all
+subdirectories, into the destination web directory. Node.js, Python, Qt, and
+EPICS are needed only as applicable for building, not for serving these files.
+Configure the server to serve `index.html` as the directory index.
+
+The default `make docs` build uses the website root (`/`), as the Sites mirror does.
+If the destination is a subdirectory, build with that exact URL prefix first:
+
+```sh
+make docs DOCS_BASE=/manuals/QtALH/
+```
+
+Copy the resulting `docs/html/` contents into the directory served at
+`https://ops.aps.anl.gov/manuals/QtALH/`. This sets the stylesheet, script,
+navigation, image, and search URLs correctly. A root build copied into a
+subdirectory will appear unstyled and have broken links. Rebuild and copy all
+files whenever the prefix changes; do not copy only `index.html`.
+
+The equivalent script command is `python3 scripts/build-docs.py --base /manuals/QtALH/`.
+To check that build again, pass the same prefix with `--check-only`.
+`make clean` and `make distclean` remove `docs/html`; `make docs` recreates it.
+
 ## Choose the source to edit
 
 | Content | Edit here |
@@ -60,7 +84,7 @@ Open the local URL printed by VitePress. Changes to authored pages refresh autom
 
 ## Validate a change
 
-The production build checks Markdown links. `scripts/build-docs.py` additionally checks generated page titles, local page/asset links, anchors, command-line spellings, and configuration directive coverage against the parser. Links to standalone HTML archives must use `target="_self"` so VitePress leaves navigation to the browser; the checker verifies this on generated pages. It preserves the legacy manual itself as an archive rather than rewriting its old links.
+The production build checks Markdown links. `scripts/build-docs.py` additionally checks generated page titles, local page/asset links, anchors, command-line spellings, and configuration directive coverage against the parser. Links to standalone HTML archives must use `target="_self"` so VitePress leaves navigation to the browser; the checker verifies this on generated pages. Raw HTML download and archive links use page-relative paths, and the runtime screenshot uses VitePress `withBase`; keep those links portable when editing. The checker rejects URLs that escape the selected hosting prefix. It preserves the legacy manual itself as an archive rather than rewriting its old links.
 
 For an existing build:
 
@@ -72,6 +96,6 @@ Validate new `.alhConfig` examples with `qtalh --validate` when the executable i
 
 ## Publish the same content
 
-Build locally first. The documentation project's `.openai/hosting.json` identifies the Sites mirror and declares `dist` as its static output. Publish only the validated `docs/site/dist` output with the matching documentation source. The local `docs/html` copy must match it byte for byte. No server-side application, account data, or external search service is needed by the documentation itself.
+Build with `make docs DOCS_BASE=/` for Sites, even if the previous build targeted the APS subdirectory. The documentation project's `.openai/hosting.json` identifies the Sites mirror and declares `dist` as its static output. Publish only the validated `docs/site/dist` output with the matching documentation source. The local `docs/html` copy must match it byte for byte. No server-side application, account data, or external search service is needed by the documentation itself.
 
 The repository's documentation workflow builds and validates changes in CI and retains the generated HTML as a downloadable artifact. It does not automatically publish Sites or change the site's access permissions.

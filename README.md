@@ -10,7 +10,9 @@ The [modern documentation site](https://qtalh-documentation.rtsoliday123.chatgpt
 provides searchable tutorials, operator guides, and technical reference.
 The Sites mirror is publicly accessible. Run `make docs` to generate it in `docs/html`, then
 serve it with `python3 -m http.server 8000 --directory docs/html --bind 127.0.0.1`.
-Open `http://127.0.0.1:8000/`. Website builds need Node.js 22+ with npm and Python 3;
+Open `http://127.0.0.1:8000/`. For the APS server, build with
+`make docs DOCS_BASE=/manuals/QtALH/` and copy all contents of `docs/html/`
+into the server directory served at `/manuals/QtALH/`. Website builds need Node.js 22+ with npm and Python 3;
 they do not require Qt or EPICS. See the
 [documentation workflow](docs/site/develop/documentation.md) for details.
 

@@ -13,4 +13,4 @@ The historical circular-logging measurements describe an earlier implementation.
 
 ## Original documentation
 
-The <a href="/legacy/ALH.html" target="_self">original ALH manual</a> and its images are included as a historical reference. For current Qt-specific options and workflows, use the modern [guide](/get-started/first-run) and [reference](/reference/command-line).
+The <a href="../legacy/ALH.html" target="_self">original ALH manual</a> and its images are included as a historical reference. For current Qt-specific options and workflows, use the modern [guide](/get-started/first-run) and [reference](/reference/command-line).
