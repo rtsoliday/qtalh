@@ -1,0 +1,14 @@
+# Used with examples/tutorial.db and a loopback-only Channel Access environment.
+$BEEPSEVERITY MINOR
+GROUP NULL Tutorial
+$ALIAS Local alarm tutorial
+$GUIDANCE
+This facility uses only the local tutorial IOC.
+Return the pressure value to zero, then acknowledge the channel.
+$END
+GROUP Tutorial Vacuum
+CHANNEL Vacuum qtalh_demo:pressure -----
+$ALIAS Vacuum pressure
+$GUIDANCE
+Set qtalh_demo:pressure to 7 for MINOR, 12 for MAJOR, and 0 for normal.
+$END

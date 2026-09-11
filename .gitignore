@@ -11,3 +11,6 @@ O.*/
 /alh/bin/
 /.windows-deps/
 /windows-*.log
+
+# Generated documentation; rebuild with make docs.
+/docs/html/

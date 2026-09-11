@@ -79,3 +79,8 @@ ifneq ($(OS),Windows)
 	$(MAKE) -C alh $@
 endif
 	$(MAKE) -C qtalh $@
+
+# Build the standalone documentation site without Qt or EPICS.
+.PHONY: docs
+docs:
+	python3 scripts/build-docs.py

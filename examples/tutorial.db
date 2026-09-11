@@ -1,0 +1,10 @@
+# Used by the local-IOC documentation tutorial. Bind the IOC to loopback.
+record(ai, "qtalh_demo:pressure") {
+  field(DESC, "Tutorial vacuum pressure")
+  field(VAL, "0")
+  field(HIGH, "5")
+  field(HSV, "MINOR")
+  field(HIHI, "10")
+  field(HHSV, "MAJOR")
+  field(ACKT, "YES")
+}

@@ -6,6 +6,14 @@ port in `qtalh/`. Both use GNU Make and shared EPICS discovery in
 
 ## Documentation
 
+The [modern documentation site](https://qtalh-documentation.rtsoliday123.chatgpt.site)
+provides searchable tutorials, operator guides, and technical reference.
+The Sites mirror is publicly accessible. Run `make docs` to generate it in `docs/html`, then
+serve it with `python3 -m http.server 8000 --directory docs/html --bind 127.0.0.1`.
+Open `http://127.0.0.1:8000/`. Website builds need Node.js 22+ with npm and Python 3;
+they do not require Qt or EPICS. See the
+[documentation workflow](docs/site/develop/documentation.md) for details.
+
 - [QtALH user guide](docs/qtalh-user-guide.md): first run, all command-line
   options, configuration syntax, logging, and troubleshooting.
 - [Test guide](qtalh/tests/README.md): prerequisites, suite commands, artifacts,
