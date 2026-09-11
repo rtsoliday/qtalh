@@ -5,7 +5,6 @@ include Makefile.windows
 else
 include ../Makefile.qt
 OBJ_DIR = O.$(OS)-$(ARCH)-qt$(QT_VERSION)
-BIN_DIR = ../bin/$(OS)-$(ARCH)
 CXXFLAGS ?= -O2 -g -Wall -Wextra -std=c++17 -fPIC
 ifneq ($(filter-out clean distclean,$(or $(MAKECMDGOALS),all)),)
 ifeq ($(filter $(QT_VERSION),5 6),)

@@ -1,4 +1,4 @@
-# Standalone Linux, macOS and Windows builds; override paths on the command line.
+# Linux, macOS and Windows builds; override paths on the command line.
 OS := $(shell uname -s)
 ARCH := $(shell uname -m)
 ifneq ($(filter CYGWIN% MINGW% MSYS% Windows_NT,$(OS)),)
@@ -8,6 +8,48 @@ RULES_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 OBJ_DIR = O.$(OS)-$(ARCH)
 BIN_DIR = ../bin/$(OS)-$(ARCH)
 PKG_CONFIG ?= pkg-config
+
+EPICS_HOST_ARCH_PATHS = lib/perl/EpicsHostArch.pl src/tools/EpicsHostArch.pl startup/EpicsHostArch.pl
+find_epics_host_arch = $(firstword $(wildcard $(addprefix $(1)/,$(EPICS_HOST_ARCH_PATHS))))
+
+# Use the extensions configuration only for a checkout in <top>/src/<package>.
+QTALH_EXTENSIONS_TOP := $(abspath $(RULES_DIR)../..)
+ifeq ($(notdir $(abspath $(RULES_DIR)..)),src)
+ifeq ($(words $(wildcard $(QTALH_EXTENSIONS_TOP)/configure/CONFIG $(QTALH_EXTENSIONS_TOP)/configure/RELEASE)),2)
+TOP := $(QTALH_EXTENSIONS_TOP)
+# Preserve explicit Base choices, including environment settings.
+QTALH_EPICS_BASE := $(EPICS_BASE)
+include $(TOP)/configure/RELEASE
+ifneq ($(QTALH_EPICS_BASE),)
+  EPICS_BASE := $(QTALH_EPICS_BASE)
+endif
+ifeq ($(origin EPICS_HOST_ARCH),undefined)
+  EPICS_HOST_ARCH_SCRIPT := $(call find_epics_host_arch,$(EPICS_BASE))
+ifneq ($(EPICS_HOST_ARCH_SCRIPT),)
+  EPICS_HOST_ARCH := $(shell perl "$(EPICS_HOST_ARCH_SCRIPT)")
+endif
+endif
+T_A ?= $(EPICS_HOST_ARCH)
+# Match the host build's RELEASE override order in extensions/configure/CONFIG.
+-include $(TOP)/configure/RELEASE.$(EPICS_HOST_ARCH)
+-include $(TOP)/configure/RELEASE.Common.$(EPICS_HOST_ARCH)
+-include $(TOP)/configure/RELEASE.$(EPICS_HOST_ARCH).Common
+-include $(TOP)/configure/RELEASE.$(EPICS_HOST_ARCH).$(EPICS_HOST_ARCH)
+ifneq ($(QTALH_EPICS_BASE),)
+  EPICS_BASE := $(QTALH_EPICS_BASE)
+endif
+INSTALL_LOCATION = $(TOP)
+-include $(TOP)/configure/CONFIG_SITE
+-include $(TOP)/configure/os/CONFIG_SITE.$(EPICS_HOST_ARCH).Common
+-include $(TOP)/configure/os/CONFIG_SITE.Common.$(EPICS_HOST_ARCH)
+-include $(TOP)/configure/os/CONFIG_SITE.$(EPICS_HOST_ARCH).$(EPICS_HOST_ARCH)
+BIN_DIR = $(abspath $(or $(INSTALL_LOCATION_EXTENSIONS),$(INSTALL_LOCATION)))/bin/$(EPICS_HOST_ARCH)
+endif
+endif
+
+# The extensions parent invokes install; all already copies the executables.
+.PHONY: install
+install: all
 
 CFLAGS ?= -O2 -g -Wall -std=gnu99
 ALH_HELP_URL ?= https://epics.anl.gov/EpicsDocumentation/ExtensionsManuals/AlarmHandler/current/ALHUserGuide.html
@@ -38,8 +80,6 @@ endif
 # so missing GUI dependency notices are printed before a recursive make fails.
 ifneq ($(QTALH_TOP_LEVEL),1)
 EPICS_SEARCH_PATHS = /usr/local/oag/base $(RULES_DIR)epics-base $(RULES_DIR)../epics-base $(RULES_DIR)../../../base $(HOME)/epics/base $(HOME)/epics/base-7.0
-EPICS_HOST_ARCH_PATHS = lib/perl/EpicsHostArch.pl src/tools/EpicsHostArch.pl startup/EpicsHostArch.pl
-find_epics_host_arch = $(firstword $(wildcard $(addprefix $(1)/,$(EPICS_HOST_ARCH_PATHS))))
 EPICS_BASE ?= $(firstword $(foreach base,$(EPICS_SEARCH_PATHS),$(if $(or $(wildcard $(base)/include/cadef.h),$(call find_epics_host_arch,$(base))),$(base))))
 ifeq ($(strip $(EPICS_BASE)),)
   $(error EPICS Base not found. Run 'git clone --recursive -b 7.0 https://github.com/epics-base/epics-base.git' next to the qtalh repository, then run 'make -C ../epics-base' from the qtalh repository root; or set EPICS_BASE=/path/to/built/base)

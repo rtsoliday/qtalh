@@ -76,12 +76,23 @@ bin/Linux-x86_64/qtalh --validate alh/test.alhConfig
 bin/Linux-x86_64/qtalh --help
 ```
 
-Outputs are `bin/<uname -s>-<uname -m>/{alh,alh_printer,alh_DB,qtalh,qtalh_printer,qtalh_DB}`
+Standalone outputs are `bin/<uname -s>-<uname -m>/{alh,alh_printer,alh_DB,qtalh,qtalh_printer,qtalh_DB}`
 (for example, `bin/Darwin-arm64/qtalh` on Apple Silicon).
 Qt objects and generated resources are separated into
 `qtalh/O.<OS>-<architecture>-qt5/` and `qtalh/O.<OS>-<architecture>-qt6/`.
 Building a different Qt major copies that variant into the common binary directory.
 Legacy objects live in `alh/O.<OS>-<architecture>/`.
+
+When the repository is in an EPICS extensions tree at `extensions/src/qtalh`,
+with `extensions/configure/CONFIG` and `RELEASE` present, the same build commands
+install into `extensions/bin/<EPICS_HOST_ARCH>/` (for example,
+`extensions/bin/linux-x86_64/qtalh`). Base is selected by the extensions
+`configure/RELEASE`, including its local includes and host-specific overrides.
+The extensions `CONFIG_SITE` files can redirect installation with
+`INSTALL_LOCATION` or `INSTALL_LOCATION_EXTENSIONS`. Explicit `EPICS_BASE`,
+`EPICS_HOST_ARCH`, and command-line `BIN_DIR` settings still take precedence.
+`make install` is also supported, including when invoked by the extensions parent.
+Outside a configured extensions tree, discovery and output paths are unchanged.
 
 Requirements common to the builds: Linux or macOS, GNU Make, C/C++ compilers, Perl,
 pkg-config, built EPICS Base with Channel Access/Com headers and libraries,
@@ -124,7 +135,7 @@ packages or changing `PKG_CONFIG_PATH` is unnecessary when `.pc` files are absen
 `QT_VERSION=5` or `6` forces the choice. `MOC` and `RCC` can be
 overridden for unusual installations and must match the selected Qt libraries.
 
-EPICS Base discovery prefers `/usr/local/oag/base`, followed by nearby
+Standalone EPICS Base discovery prefers `/usr/local/oag/base`, followed by nearby
 `epics-base` checkouts, the old extensions-relative location, and
 `$HOME/epics/base` or `$HOME/epics/base-7.0`. A sibling checkout can be shared
 with MEDM/QtEDM. From the qtalh repository root, clone and build Base once:

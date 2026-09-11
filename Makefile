@@ -1,4 +1,4 @@
-# ALH and QtALH standalone builds.
+# ALH and QtALH builds.
 .DEFAULT_GOAL := all
 QTALH_TOP_LEVEL := 1
 include Makefile.rules
@@ -14,7 +14,7 @@ all: check-dependencies $(if $(HAVE_MOTIF),alh) $(if $(HAVE_QT),qtalh)
 	@$(if $(or $(HAVE_MOTIF),$(HAVE_QT)),:,false)
 
 # Complete notices before either recursive build, including with make -j.
-ifneq ($(filter all,$(or $(MAKECMDGOALS),all)),)
+ifneq ($(filter all install,$(or $(MAKECMDGOALS),all)),)
 alh qtalh: | check-dependencies
 endif
 
