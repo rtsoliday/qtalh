@@ -77,7 +77,7 @@ static void popdownProductDescriptionShell(XtPointer xtPointer)
 	XtSetArg(args[1],XmNdeleteResponse,XmDO_NOTHING);
 	XtSetValues(widget,args,2);
 
-	WM_DELETE_WINDOW = XmInternAtom(XtDisplay(widget),
+	WM_DELETE_WINDOW = XInternAtom(XtDisplay(widget),
 	    "WM_DELETE_WINDOW",False);
 	XmAddWMProtocolCallback(widget,WM_DELETE_WINDOW,
 	    (XtCallbackProc)closeProductDescriptionCallback,(XtPointer)widget);
@@ -173,14 +173,13 @@ int seconds)			/* seconds to leave posted	*/
 	form = XmCreateForm(productDescriptionShell,"form",args,n);
 
 	/* Generate XmStrings */
-	if (name != NULL) nameXmString = XmStringCreateLtoR(name,
-	    XmFONTLIST_DEFAULT_TAG);
+	if (name != NULL) nameXmString = XmStringGenerate(name, XmFONTLIST_DEFAULT_TAG, XmCHARSET_TEXT, NULL);
 	if (description != NULL) descriptionXmString =
-	XmStringCreateLtoR(description,XmFONTLIST_DEFAULT_TAG);
+	XmStringGenerate(description, XmFONTLIST_DEFAULT_TAG, XmCHARSET_TEXT, NULL);
 	if (versionInfo != NULL) versionInfoXmString =
-	XmStringCreateLtoR(versionInfo,XmFONTLIST_DEFAULT_TAG);
+	XmStringGenerate(versionInfo, XmFONTLIST_DEFAULT_TAG, XmCHARSET_TEXT, NULL);
 	if (developedAt != NULL) developedAtXmString =
-	XmStringCreateLtoR(developedAt,XmFONTLIST_DEFAULT_TAG);
+	XmStringGenerate(developedAt, XmFONTLIST_DEFAULT_TAG, XmCHARSET_TEXT, NULL);
 
 	/* Create the label children  */
 	/* Name */

@@ -23,7 +23,7 @@
 
 #include <X11/StringDefs.h>
 #include <Xm/Xm.h>
-#include <Xm/AtomMgr.h>
+#include <X11/Xlib.h>
 #include <Xm/CascadeBG.h>
 #include <Xm/Form.h>
 #include <Xm/LabelG.h>
@@ -89,7 +89,7 @@ int tearOff, MenuItem *items, XtPointer user_data)
 	      */
 	PullDown = XmCreatePulldownMenu(parent, "_pulldown", NULL, 0);
 
-	str = XmStringCreateSimple(menu_title);
+	str = XmStringCreateLocalized(menu_title);
 	cascade = XtVaCreateManagedWidget(menu_title,
 	    xmCascadeButtonGadgetClass, parent,
 	    XmNsubMenuId,   PullDown,
@@ -139,7 +139,7 @@ int tearOff, MenuItem *items, XtPointer user_data)
 		/* any item can have an accelerator, except cascade menus. But,
 		         * we don't worry about that; we know better in our declarations.  */
 		if (items[i].accelerator) {
-			str = XmStringCreateSimple(items[i].accel_text);
+			str = XmStringCreateLocalized(items[i].accel_text);
 			XtVaSetValues(widget,
 			    XmNaccelerator, items[i].accelerator,
 			    XmNacceleratorText, str,
@@ -266,7 +266,7 @@ void setupConfig(char *filename,int program,ALINK *areaOld)
 
 		/* update filename string on main window */
 		if (area->label_filename){
-			str = XmStringCreateSimple(psetup.configFile);
+			str = XmStringCreateLocalized(psetup.configFile);
 			XtVaSetValues(area->label_filename,
 			    XmNlabelString,            str,
 			    NULL);
@@ -467,7 +467,7 @@ void createMainWindowWidgets(ALINK *area)
 		XtVaSetValues(area->toplevel,
 		    XmNdeleteResponse,       XmDO_NOTHING,
 		    NULL);
-		WM_DELETE_WINDOW = XmInternAtom(XtDisplay(area->form_main),
+		WM_DELETE_WINDOW = XInternAtom(XtDisplay(area->form_main),
 		    "WM_DELETE_WINDOW", False);
 		if (_main_window_flag)
 			XmAddWMProtocolCallback(area->toplevel,WM_DELETE_WINDOW,
@@ -573,7 +573,7 @@ void createMainWindowWidgets(ALINK *area)
 
 
 	/* Create filename label for the messageArea */
-	str = XmStringCreateSimple(psetup.configFile);
+	str = XmStringCreateLocalized(psetup.configFile);
 	area->label_filename = XtVaCreateManagedWidget("label_filename",
 	    xmLabelGadgetClass,        area->messageArea,
 	    XmNlabelString,            str,
@@ -617,7 +617,7 @@ void createMainWindowWidgets(ALINK *area)
 	    NULL);
 
 	/* Create SilenceForever string for the messageArea */
-	str = XmStringCreateSimple(silenceString[psetup.silenceForever]);
+	str = XmStringCreateLocalized(silenceString[psetup.silenceForever]);
 	area->silenceForever = XtVaCreateManagedWidget("silenceForever",
 	    xmLabelGadgetClass,        area->messageArea,
 	    XmNlabelString,            str,
@@ -630,7 +630,7 @@ void createMainWindowWidgets(ALINK *area)
 	XmStringFree(str);
 
 	/* Create SilenceForeverLabel string for the messageArea */
-	str = XmStringCreateSimple("Silence Forever: ");
+	str = XmStringCreateLocalized("Silence Forever: ");
 	area->silenceForeverLabel = XtVaCreateManagedWidget("silenceForeverLabel",
 	    xmLabelGadgetClass,        area->messageArea,
 	    XmNshadowThickness,        2,
@@ -643,7 +643,7 @@ void createMainWindowWidgets(ALINK *area)
 	XmStringFree(str);
 
 	/* Create BeepSeverity string for the messageArea */
-	str = XmStringCreateSimple(alhAlarmSeverityString[psetup.beepSevr]);
+	str = XmStringCreateLocalized(alhAlarmSeverityString[psetup.beepSevr]);
 	area->beepSeverity = XtVaCreateManagedWidget("beepSeverity",
 	    xmLabelGadgetClass,        area->messageArea,
 	    XmNlabelString,            str,
@@ -656,7 +656,7 @@ void createMainWindowWidgets(ALINK *area)
 	XmStringFree(str);
 
 	/* Create BeepSeverityLabel string for the messageArea */
-	str = XmStringCreateSimple("ALH Beep Severity:");
+	str = XmStringCreateLocalized("ALH Beep Severity:");
 	area->beepSeverityLabel = XtVaCreateManagedWidget("beepSeverityLabel",
 	    xmLabelGadgetClass,        area->messageArea,
 	    XmNshadowThickness,        2,
@@ -675,7 +675,7 @@ void createMainWindowWidgets(ALINK *area)
 	    (XtCallbackProc)silenceCurrent_callback,area);
 
 	/* Create Disabled ForcePV Count string for the messageArea */
-	str = XmStringCreateSimple(disabledForcePVCountString[0]);
+	str = XmStringCreateLocalized(disabledForcePVCountString[0]);
 	area->disabledForcePVCountLabel = XtVaCreateManagedWidget("disabledForcePVCountLabel",
 	    xmLabelGadgetClass,        area->messageArea,
 	    XmNshadowThickness,        2,
@@ -848,7 +848,7 @@ void changeBeepSeverityText(ALINK *area)
 	XmString    str;
 
 	if (area->beepSeverity) {
-		str = XmStringCreateSimple(alhAlarmSeverityString[psetup.beepSevr]);
+		str = XmStringCreateLocalized(alhAlarmSeverityString[psetup.beepSevr]);
 		XtVaSetValues(area->beepSeverity,
 		    XmNlabelString,            str,
 		    NULL);
@@ -864,7 +864,7 @@ void changeSilenceForeverText(ALINK *area)
 	XmString    str;
 
 	if (area->silenceForever) {
-		str = XmStringCreateSimple(silenceString[psetup.silenceForever]);
+		str = XmStringCreateLocalized(silenceString[psetup.silenceForever]);
 		XtVaSetValues(area->silenceForever,
 		    XmNlabelString,            str,
 		    NULL);
@@ -893,7 +893,7 @@ void changeDisabledForcePVText(ALINK *area)
 			sprintf(buff,"%-.18s %4.4d",
 				disabledForcePVCountString[1],area->disabledForcePVCount);
 		} else sprintf(buff,"%-.18s",disabledForcePVCountString[0]);
-		str = XmStringCreateSimple(buff);
+		str = XmStringCreateLocalized(buff);
 		XtVaSetValues(area->disabledForcePVCountLabel,
 		    XmNlabelString,            str,
 		    NULL);

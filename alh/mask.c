@@ -134,7 +134,7 @@ static void maskUpdateDialogWidgets(struct maskWindow *maskWindow)
 	link =getSelectionLinkArea(maskWindow->area);
 
 	if (!link) {
-		string = XmStringCreateSimple("");
+		string = XmStringCreateLocalized("");
 		if (maskWindow->nameTextW )
 			XtVaSetValues(maskWindow->nameTextW,XmNlabelString, string, NULL);
 		XmStringFree(string);
@@ -147,15 +147,15 @@ static void maskUpdateDialogWidgets(struct maskWindow *maskWindow)
 	/* ---------------------------------
 	     Group/Channel Name 
 	     --------------------------------- */
-	if (linkType == GROUP) string = XmStringCreateSimple("Group Name:");
-	else string = XmStringCreateSimple("Channel Name:");
+	if (linkType == GROUP) string = XmStringCreateLocalized("Group Name:");
+	else string = XmStringCreateLocalized("Channel Name:");
 	XtVaSetValues(maskWindow->nameLabelW, XmNlabelString, string, NULL);
 	XmStringFree(string);
 
 	if (pgcData->alias){
-		string = XmStringCreateSimple(pgcData->alias);
+		string = XmStringCreateLocalized(pgcData->alias);
 	} else {
-		string = XmStringCreateSimple(pgcData->name);
+		string = XmStringCreateLocalized(pgcData->name);
 	}
 	XtVaSetValues(maskWindow->nameTextW, XmNlabelString, string, NULL);
 	XmStringFree(string);
@@ -210,7 +210,7 @@ static void maskCreateDialog(ALINK *area)
 		Atom         WM_DELETE_WINDOW;
 		XtVaSetValues(maskDialogShell,
 		    XmNdeleteResponse, XmDO_NOTHING, NULL);
-		WM_DELETE_WINDOW = XmInternAtom(XtDisplay(maskDialogShell),
+		WM_DELETE_WINDOW = XInternAtom(XtDisplay(maskDialogShell),
 		    "WM_DELETE_WINDOW", False);
 		XmAddWMProtocolCallback(maskDialogShell,WM_DELETE_WINDOW,
 		    (XtCallbackProc)maskDismissCallback, (XtPointer)maskWindow);

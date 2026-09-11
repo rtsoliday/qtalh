@@ -302,13 +302,13 @@ void fileViewWindow(Widget w,int option,Widget menuButton)
 		ac++;
 		switch (option) {
 		case CONFIG_FILE:
-			str = XmStringLtoRCreate("Configuration File", XmSTRING_DEFAULT_CHARSET);
+			str = XmStringGenerate("Configuration File", XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 			break;
 		case ALARM_FILE:
-			str = XmStringLtoRCreate("Alarm Log File", XmSTRING_DEFAULT_CHARSET);
+			str = XmStringGenerate("Alarm Log File", XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 			break;
 		case OPMOD_FILE:
-			str = XmStringLtoRCreate("Operator Mod File", XmSTRING_DEFAULT_CHARSET);
+			str = XmStringGenerate("Operator Mod File", XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 			break;
 		}
 		XtSetArg(al[ac], XmNdialogTitle, str); 
@@ -322,7 +322,7 @@ void fileViewWindow(Widget w,int option,Widget menuButton)
 			Atom         WM_DELETE_WINDOW;
 			XtVaSetValues(XtParent(app_shell),
 			    XmNdeleteResponse, XmDO_NOTHING, NULL);
-			WM_DELETE_WINDOW = XmInternAtom(XtDisplay(XtParent(app_shell)),
+			WM_DELETE_WINDOW = XInternAtom(XtDisplay(XtParent(app_shell)),
 			    "WM_DELETE_WINDOW", False);
 			operandFileLong=operandFile;
 			XmAddWMProtocolCallback(XtParent(app_shell),WM_DELETE_WINDOW,
@@ -440,13 +440,13 @@ void fileViewWindow(Widget w,int option,Widget menuButton)
 
 		/* make appropriate item sensitive */
 		XtSetSensitive(viewTextWidget[operandFile], True);
-		XmAddTabGroup(viewTextWidget[operandFile]);
+		XtVaSetValues(viewTextWidget[operandFile], XmNnavigationType, XmEXCLUSIVE_TAB_GROUP, NULL);
 
 		XtManageChild(viewTextWidget[operandFile]);
 
 	}
 	/* update the file name string */
-	str = XmStringLtoRCreate(filename, XmSTRING_DEFAULT_CHARSET);
+	str = XmStringGenerate(filename, XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 	XtVaSetValues(viewFilenameWidget[operandFile], XmNlabelString, str, NULL);
 	XmStringFree(str);
 
@@ -774,13 +774,13 @@ void browser_fileViewWindow(Widget w,int option,Widget menuButton)
 		ac++;
 		switch (option) {
 		case CONFIG_FILE:
-			str = XmStringLtoRCreate("Configuration File", XmSTRING_DEFAULT_CHARSET);
+			str = XmStringGenerate("Configuration File", XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 			break;
 		case ALARM_FILE:
-			str = XmStringLtoRCreate("Alarm Log File", XmSTRING_DEFAULT_CHARSET);
+			str = XmStringGenerate("Alarm Log File", XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 			break;
 		case OPMOD_FILE:
-			str = XmStringLtoRCreate("Operator Mod File", XmSTRING_DEFAULT_CHARSET);
+			str = XmStringGenerate("Operator Mod File", XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 			break;
 		}
 		XtSetArg(al[ac], XmNdialogTitle, str); 
@@ -794,7 +794,7 @@ void browser_fileViewWindow(Widget w,int option,Widget menuButton)
 			Atom         WM_DELETE_WINDOW;
 			XtVaSetValues(XtParent(app_shell),
 			    XmNdeleteResponse, XmDO_NOTHING, NULL);
-			WM_DELETE_WINDOW = XmInternAtom(XtDisplay(XtParent(app_shell)),
+			WM_DELETE_WINDOW = XInternAtom(XtDisplay(XtParent(app_shell)),
 			    "WM_DELETE_WINDOW", False);
 			operandFileLong = operandFile;
 			XmAddWMProtocolCallback(XtParent(app_shell),WM_DELETE_WINDOW,
@@ -886,7 +886,7 @@ void browser_fileViewWindow(Widget w,int option,Widget menuButton)
 			ac++;
 			XtSetArg(al[ac], XmNtopAttachment, (XtArgVal) XmATTACH_FORM); 
 			ac++;
-			str= XmStringCreateLtoR("Search:",XmFONTLIST_DEFAULT_TAG);
+			str= XmStringGenerate("Search:", XmFONTLIST_DEFAULT_TAG, XmCHARSET_TEXT, NULL);
 			XtSetArg(al[ac], XmNlabelString, str);
 			ac++;
 			XtSetArg(al[ac], XmNalignment, (XtArgVal) XmALIGNMENT_CENTER); 
@@ -916,7 +916,7 @@ void browser_fileViewWindow(Widget w,int option,Widget menuButton)
 			findButtonBox=XtCreateManagedWidget("findButtonBox", xmRowColumnWidgetClass,
 			    findPane, al, ac);
 			ac = 0;
-			str= XmStringCreateLtoR("Forward",XmFONTLIST_DEFAULT_TAG);
+			str= XmStringGenerate("Forward", XmFONTLIST_DEFAULT_TAG, XmCHARSET_TEXT, NULL);
 			XtSetArg(al[ac], XmNlabelString,str);
 			ac++;
 			findForwardButton = XtCreateManagedWidget("findForwardButton",
@@ -925,7 +925,7 @@ void browser_fileViewWindow(Widget w,int option,Widget menuButton)
 			    app_shell);
 			XmStringFree(str);
 			ac = 0;
-			str= XmStringCreateLtoR("Reverse",XmFONTLIST_DEFAULT_TAG);
+			str= XmStringGenerate("Reverse", XmFONTLIST_DEFAULT_TAG, XmCHARSET_TEXT, NULL);
 			XtSetArg(al[ac], XmNlabelString, str);
 			ac++;
 			findReverseButton = XtCreateManagedWidget("findReverseButton",
@@ -933,7 +933,7 @@ void browser_fileViewWindow(Widget w,int option,Widget menuButton)
 			XtAddCallback(findReverseButton,XmNactivateCallback,(XtCallbackProc)findReverse,app_shell);
 			XmStringFree(str);
 			ac = 0;
-			str= XmStringCreateLtoR("Dismiss",XmFONTLIST_DEFAULT_TAG);
+			str= XmStringGenerate("Dismiss", XmFONTLIST_DEFAULT_TAG, XmCHARSET_TEXT, NULL);
 			XtSetArg(al[ac], XmNlabelString, str);
 			ac++;
 			findDismissButton = XtCreateManagedWidget("findDismissButton",
@@ -1156,13 +1156,13 @@ void browser_fileViewWindow(Widget w,int option,Widget menuButton)
 
 		/* make appropriate item sensitive */
 		XtSetSensitive(browserWidget, True);
-		XmAddTabGroup(browserWidget);
+		XtVaSetValues(browserWidget, XmNnavigationType, XmEXCLUSIVE_TAB_GROUP, NULL);
 
 		XtManageChild(browserWidget);
 
 	}
 	/* update the file name string */
-	str = XmStringLtoRCreate(filename, XmSTRING_DEFAULT_CHARSET);
+	str = XmStringGenerate(filename, XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 	XtVaSetValues(viewFilenameWidget[operandFile], XmNlabelString, str, NULL);
 	XmStringFree(str);
 

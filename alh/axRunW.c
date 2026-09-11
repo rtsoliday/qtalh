@@ -18,7 +18,7 @@
 #include <stdio.h>
 
 #include <Xm/Xm.h>
-#include <Xm/AtomMgr.h>
+#include <X11/Xlib.h>
 #include <Xm/Form.h>
 #include <Xm/MessageB.h>
 #include <Xm/Protocols.h>
@@ -148,7 +148,7 @@ void createRuntimeWindow(ALINK *area)
 			XtVaSetValues(area->runtimeToplevel,
 			    XmNdeleteResponse,       XmDO_NOTHING,
 			    NULL);
-			WM_DELETE_WINDOW = XmInternAtom(XtDisplay(area->runtimeToplevel),
+			WM_DELETE_WINDOW = XInternAtom(XtDisplay(area->runtimeToplevel),
 			    "WM_DELETE_WINDOW", False);
 			if (programId == ALH)
 				XmAddWMProtocolCallback(area->runtimeToplevel,WM_DELETE_WINDOW,
@@ -168,8 +168,7 @@ void createRuntimeWindow(ALINK *area)
 		}
 		
 		/* create control button */
-		str  = XmStringCreateLtoR( "--- No config file specified. ---",
-		    XmSTRING_DEFAULT_CHARSET);
+		str  = XmStringGenerate( "--- No config file specified. ---", XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 		area->blinkButton = XtVaCreateManagedWidget("iconButton",
 		    xmPushButtonWidgetClass,  area->runtimeForm,
 		    XmNalignment,              XmALIGNMENT_CENTER,
@@ -201,7 +200,7 @@ void createRuntimeWindow(ALINK *area)
 	pixelData(area->runtimeForm);
 
 	/*  update blinkButton string */
-	str = XmStringCreateSimple(area->blinkString);
+	str = XmStringCreateLocalized(area->blinkString);
 	XtVaSetValues(area->blinkButton,
 	    XmNlabelString,         str,
 	    NULL);
@@ -250,7 +249,7 @@ void createRuntimeWindow(ALINK *area)
 
 	}
 
-	str = XmStringCreateSimple(labelStr);
+	str = XmStringCreateLocalized(labelStr);
 	XtVaSetValues(area->blinkButton,
 	    XmNlabelString,         str,
 	    NULL);

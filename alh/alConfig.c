@@ -175,7 +175,7 @@ static void GetGroupLine(char *buf,GLINK **pglink,
 struct mainGroup *pmainGroup)
 {
 	GLINK		*glink;
-	char 		command[20];
+	char 		command[21];
 	int  		rtn;
 	char 		parent[PVNAME_SIZE];
 	char 		name[PVNAME_SIZE];
@@ -248,7 +248,7 @@ static void GetIncludeLine(char *buf,GLINK **pglink,int caConnect,
 struct mainGroup *pmainGroup)
 {
 	GLINK *glinkHold;
-	char command[20];
+	char command[21];
 	int  rtn;
 	char parent[PVNAME_SIZE];
 	char name[NAMEDEFAULT_SIZE];
@@ -415,10 +415,10 @@ int context,int caConnect,struct mainGroup *pmainGroup)
 {
 	struct gcData *gcdata;
 	struct chanData *cdata=0;
-	char command[20];
+	char command[33]; /* Up to 32 scanned characters plus the terminating NUL. */
 	char name[PVNAME_SIZE];
 	char buf2[MAX_STRING_LENGTH];
-	char mask[6];
+	char mask[7];
 	char string[10];
 	double dbl;
 	short value = 1;

@@ -61,8 +61,8 @@ struct DBSend {
 typedef struct DBSend DBSend;
 #define	DB_VERS ((unsigned long)(1))
 #define	dbSend ((unsigned long)(1))
-extern  void * dbsend_1();
-extern bool_t xdr_DBSend();
+extern void *dbsend_1(DBSend *argp, CLIENT *clnt);
+extern bool_t xdr_DBSend(XDR *xdrs, DBSend *objp);
 static struct timeval TIMEOUT = { 10, 0 };
 #endif
 
@@ -72,9 +72,7 @@ int put2RPC(char *host ,int port,char *msg,int len);
 
 char msg[250];
 
-int main(argc,argv)
-int argc;
-char *argv[];
+int main(int argc, char *argv[])
 {
 struct msqid_ds infoBuf;  
 int DBMsgQId;
@@ -160,9 +158,7 @@ int put2RPC(char *host ,int port,char *msg,int len)
 return (0);
 }
 void *
-dbsend_1(argp, clnt)
-	DBSend *argp;
-	CLIENT *clnt;
+dbsend_1(DBSend *argp, CLIENT *clnt)
 {
 	static char clnt_res;
 
@@ -177,9 +173,7 @@ dbsend_1(argp, clnt)
 }
 
 bool_t
-xdr_DBSend(xdrs, objp)
-	register XDR *xdrs;
-	DBSend *objp;
+xdr_DBSend(XDR *xdrs, DBSend *objp)
 {
 
 	if (!xdr_string(xdrs, &objp->msg, ~0))

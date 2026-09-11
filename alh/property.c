@@ -22,7 +22,7 @@
 #include <stdio.h>
 
 #include <Xm/Xm.h>
-#include <Xm/AtomMgr.h>
+#include <X11/Xlib.h>
 #include <Xm/DialogS.h>
 #include <Xm/Form.h>
 #include <Xm/Frame.h>
@@ -179,11 +179,11 @@ static void propUpdateDialogWidgets(struct propWindow *propWindow)
 	if (!link) {
 
 		XmTextFieldSetString(propWindow->nameTextW, "");
-		string = XmStringCreateSimple("-----");
+		string = XmStringCreateLocalized("-----");
 		XtVaSetValues(propWindow->alarmMaskStringLabelW, XmNlabelString, string, NULL);
 		XmStringFree(string);
 		if (programId == ALH) {
-			string = XmStringCreateSimple("-");
+			string = XmStringCreateLocalized("-");
 			XtVaSetValues(propWindow->resetMaskStringLabelW, XmNlabelString, string, NULL);
 			XmStringFree(string);
 		}
@@ -203,12 +203,12 @@ static void propUpdateDialogWidgets(struct propWindow *propWindow)
 
 		/* ForcePV data */
 		XmTextFieldSetString(propWindow->forcePVnameTextW,"");
-		string = XmStringCreateSimple("-----");
+		string = XmStringCreateLocalized("-----");
 		XtVaSetValues(propWindow->forcePVForceMaskStringLabelW, XmNlabelString, string, NULL);
 		XmStringFree(string);
 /*
 		if (programId == ALH) {
-			string = XmStringCreateSimple("");
+			string = XmStringCreateLocalized("");
 			XtVaSetValues(propWindow->forcePVcurrentValueTextW, XmNlabelString, string, NULL);
 			XmStringFree(string);
 		}
@@ -237,8 +237,8 @@ static void propUpdateDialogWidgets(struct propWindow *propWindow)
 	/* ---------------------------------
 	     Group/Channel Name 
 	     --------------------------------- */
-	if (linkType == GROUP) string = XmStringCreateSimple("Group  ");
-	else string = XmStringCreateSimple("Channel");
+	if (linkType == GROUP) string = XmStringCreateLocalized("Group  ");
+	else string = XmStringCreateLocalized("Channel");
 	XtVaSetValues(propWindow->nameLabelW, XmNlabelString, string, NULL);
 	XmStringFree(string);
 
@@ -255,7 +255,7 @@ static void propUpdateDialogWidgets(struct propWindow *propWindow)
 	     --------------------------------- */
 	if (linkType == GROUP) awGetMaskString(((struct groupData *)pgcData)->mask,buff);
 	else alGetMaskString(pcData->curMask,buff);
-	string = XmStringCreateSimple(buff);
+	string = XmStringCreateLocalized(buff);
 	XtVaSetValues(propWindow->alarmMaskStringLabelW, XmNlabelString, string, NULL);
 	XmStringFree(string);
 
@@ -287,9 +287,9 @@ static void propUpdateDialogWidgets(struct propWindow *propWindow)
 	if (programId == ALH ) {
 		if ( linkType == CHANNEL) {
 			alGetMaskString(pcData->defaultMask,buff);
-			string = XmStringCreateSimple(buff);
+			string = XmStringCreateLocalized(buff);
 		} else {
-			string = XmStringCreateSimple("");
+			string = XmStringCreateLocalized("");
 		}
 		XtVaSetValues(propWindow->resetMaskStringLabelW, XmNlabelString, string, NULL);
 		XmStringFree(string);
@@ -341,8 +341,8 @@ static void propUpdateDialogWidgets(struct propWindow *propWindow)
 	if(pgcData->pforcePV){
 		XmTextFieldSetString(propWindow->forcePVnameTextW,pgcData->pforcePV->name);
 		alGetMaskString(pgcData->pforcePV->forceMask,buff);
-		string = XmStringCreateSimple(buff);
-	} else string = XmStringCreateSimple("-----");
+		string = XmStringCreateLocalized(buff);
+	} else string = XmStringCreateLocalized("-----");
 	XtVaSetValues(propWindow->forcePVForceMaskStringLabelW, XmNlabelString, string, NULL);
 	XmStringFree(string);
 	if (programId != ALH) {
@@ -394,7 +394,7 @@ static void propUpdateDialogWidgets(struct propWindow *propWindow)
 	} else {
 		/* ForcePV data */
 		XmTextFieldSetString(propWindow->forcePVnameTextW,"");
-		string = XmStringCreateSimple("-----");
+		string = XmStringCreateLocalized("-----");
 		XtVaSetValues(propWindow->forcePVForceMaskStringLabelW, XmNlabelString, string, NULL);
 		XmStringFree(string);
 		XmTextFieldSetString(propWindow->forcePVforceValueTextW,"");
@@ -552,7 +552,7 @@ static void propCreateDialog(ALINK *area)
 		Atom         WM_DELETE_WINDOW;
 		XtVaSetValues(propDialogShell,
 		    XmNdeleteResponse, XmDO_NOTHING, NULL);
-		WM_DELETE_WINDOW = XmInternAtom(XtDisplay(propDialogShell),
+		WM_DELETE_WINDOW = XInternAtom(XtDisplay(propDialogShell),
 		    "WM_DELETE_WINDOW", False);
 		XmAddWMProtocolCallback(propDialogShell,WM_DELETE_WINDOW,
 		    (XtCallbackProc)propDismissCallback, (XtPointer)propWindow);
@@ -596,8 +596,8 @@ static void propCreateDialog(ALINK *area)
 	/* ---------------------------------
 	     Current Alarm Mask 
 	     --------------------------------- */
-	if (programId != ALH) string = XmStringCreateSimple("Alarm Mask ");
-	else string = XmStringCreateSimple("Current Mask ");
+	if (programId != ALH) string = XmStringCreateLocalized("Alarm Mask ");
+	else string = XmStringCreateLocalized("Current Mask ");
 	alarmMaskLabel = XtVaCreateManagedWidget("alarmMaskLabel",
 	    xmLabelGadgetClass, form,
 	    XmNlabelString,     string,
@@ -608,7 +608,7 @@ static void propCreateDialog(ALINK *area)
 	XmStringFree(string);
 	prev = alarmMaskLabel;
 
-	string = XmStringCreateSimple("-----");
+	string = XmStringCreateLocalized("-----");
 	alarmMaskStringLabelW = XtVaCreateManagedWidget("alarmMaskStringLabelW",
 	    xmLabelGadgetClass, form,
 	    XmNlabelString,     string,
@@ -623,7 +623,7 @@ static void propCreateDialog(ALINK *area)
 	     Reset Mask 
 	     --------------------------------- */
 	if (programId == ALH ) {
-		string = XmStringCreateSimple("Reset Mask ");
+		string = XmStringCreateLocalized("Reset Mask ");
 		resetMaskLabel = XtVaCreateManagedWidget("resetMaskLabel",
 		    xmLabelGadgetClass, form,
 		    XmNlabelString,     string,
@@ -634,7 +634,7 @@ static void propCreateDialog(ALINK *area)
 		XmStringFree(string);
 		prev = resetMaskLabel;
 
-		string = XmStringCreateSimple("     ");
+		string = XmStringCreateLocalized("     ");
 		resetMaskStringLabelW = XtVaCreateManagedWidget("resetMaskStringLabelW",
 		    xmLabelGadgetClass, form,
 		    XmNlabelString,     string,
@@ -693,7 +693,7 @@ static void propCreateDialog(ALINK *area)
 	    XmNmarginHeight,     0,
 	    NULL);
 
-	string = XmStringCreateSimple("Alarm Count Filter             ");
+	string = XmStringCreateLocalized("Alarm Count Filter             ");
 	countFilterLabel = XtVaCreateManagedWidget("countFilterLabel",
 	    xmLabelGadgetClass, form1,
 	    XmNlabelString,            string,
@@ -702,7 +702,7 @@ static void propCreateDialog(ALINK *area)
 	    NULL);
 	XmStringFree(string);
 
-	string = XmStringCreateSimple("Count ");
+	string = XmStringCreateLocalized("Count ");
 	countFilterCountLabel = XtVaCreateManagedWidget("countFilterCountLabel",
 	    xmLabelGadgetClass, form1,
 	    XmNlabelString,            string,
@@ -728,7 +728,7 @@ static void propCreateDialog(ALINK *area)
 	XtAddCallback(countFilterCountTextW, XmNactivateCallback,
 	    (XtCallbackProc)XmProcessTraversal, (XtPointer)XmTRAVERSE_NEXT_TAB_GROUP);
 
-	string = XmStringCreateSimple("Seconds ");
+	string = XmStringCreateLocalized("Seconds ");
 	countFilterSecondsLabel = XtVaCreateManagedWidget("countFilterSecondsLabel",
 	    xmLabelGadgetClass, form1,
 	    XmNlabelString,            string,
@@ -776,7 +776,7 @@ static void propCreateDialog(ALINK *area)
 	    XmNmarginHeight,     0,
 	    NULL);
 
-	string = XmStringCreateSimple("Force Process Variable");
+	string = XmStringCreateLocalized("Force Process Variable");
 	forcePVLabel = XtVaCreateManagedWidget("forcePVLabel",
 	    xmLabelGadgetClass, form2,
 	    XmNlabelString,            string,
@@ -785,7 +785,7 @@ static void propCreateDialog(ALINK *area)
 	    NULL);
 	XmStringFree(string);
 
-	string = XmStringCreateSimple("PV Name ");
+	string = XmStringCreateLocalized("PV Name ");
 	forcePVnameLabel = XtVaCreateManagedWidget("forcePVnameLabel",
 	    xmLabelGadgetClass, form2,
 	    XmNlabelString,            string,
@@ -813,7 +813,7 @@ static void propCreateDialog(ALINK *area)
 	XtAddCallback(forcePVnameTextW, XmNactivateCallback,
 	    (XtCallbackProc)XmProcessTraversal, (XtPointer)XmTRAVERSE_NEXT_TAB_GROUP);
 
-	string = XmStringCreateSimple("Force Mask ");
+	string = XmStringCreateLocalized("Force Mask ");
 	forcePVForceMaskLabel = XtVaCreateManagedWidget("forcePVForceMaskLabel",
 	    xmLabelGadgetClass, form2,
 	    XmNlabelString,            string,
@@ -825,7 +825,7 @@ static void propCreateDialog(ALINK *area)
 	prev = forcePVForceMaskLabel;
 
 /*
-	string = XmStringCreateSimple("-----");
+	string = XmStringCreateLocalized("-----");
 */
 	forcePVForceMaskStringLabelW = XtVaCreateManagedWidget("forcePVmaskStringLabelW",
 	    xmLabelGadgetClass, form2,
@@ -839,7 +839,7 @@ static void propCreateDialog(ALINK *area)
 	XmStringFree(string);
 */
 
-	string = XmStringCreateSimple("    Force Value ");
+	string = XmStringCreateLocalized("    Force Value ");
 	forcePVforceValueLabel = XtVaCreateManagedWidget("forcePVvalue",
 	    xmLabelGadgetClass, form2,
 	    XmNlabelString,            string,
@@ -865,7 +865,7 @@ static void propCreateDialog(ALINK *area)
 	XtAddCallback(forcePVforceValueTextW, XmNactivateCallback,
 	    (XtCallbackProc)XmProcessTraversal, (XtPointer)XmTRAVERSE_NEXT_TAB_GROUP);
 
-	string = XmStringCreateSimple("     Reset Value ");
+	string = XmStringCreateLocalized("     Reset Value ");
 	forcePVresetValueLabel = XtVaCreateManagedWidget("forcePVresetValueLabel",
 	    xmLabelGadgetClass, form2,
 	    XmNlabelString,            string,
@@ -905,7 +905,7 @@ static void propCreateDialog(ALINK *area)
 	    XmNmarginHeight,     0,
 	    NULL);
 
-	string = XmStringCreateSimple("Force CALC");
+	string = XmStringCreateLocalized("Force CALC");
 	forcePVCalcLabel = XtVaCreateManagedWidget("forcePVCalcLabel",
 	    xmLabelGadgetClass, form3,
 	    XmNlabelString,            string,
@@ -914,7 +914,7 @@ static void propCreateDialog(ALINK *area)
 	    NULL);
 	XmStringFree(string);
 
-	string = XmStringCreateSimple("       Expression ");
+	string = XmStringCreateLocalized("       Expression ");
 	forcePVCalcExpressionLabel = XtVaCreateManagedWidget("forcePVCalcExpression",
 	    xmLabelGadgetClass, form3,
 	    XmNlabelString,            string,
@@ -943,7 +943,7 @@ static void propCreateDialog(ALINK *area)
 	for (i=0;i<NO_OF_CALC_PVS/2;i++) {
 
 		pvid[0]=letter[i];
-        string = XmStringCreateSimple(pvid);
+        string = XmStringCreateLocalized(pvid);
 		forcePVCalcPVLabel[i] = XtVaCreateManagedWidget("forcePVCalcPVLabel",
 		    xmLabelGadgetClass, form3,
 		    XmNlabelString,            string,
@@ -979,7 +979,7 @@ static void propCreateDialog(ALINK *area)
 	for (i=NO_OF_CALC_PVS/2;i<NO_OF_CALC_PVS;i++) {
 
 		pvid[0]=letter[i];
-        string = XmStringCreateSimple(pvid);
+        string = XmStringCreateLocalized(pvid);
 		forcePVCalcPVLabel[i] = XtVaCreateManagedWidget("forcePVCalcPVLabel",
 		    xmLabelGadgetClass, form3,
 		    XmNlabelString,            string,
@@ -1018,7 +1018,7 @@ static void propCreateDialog(ALINK *area)
 	/* ----------------
 	     Beep Severity
 	     -------------- */
-	string = XmStringCreateSimple("Beep Severity ");
+	string = XmStringCreateLocalized("Beep Severity ");
 	beepSeverityLabel = XtVaCreateManagedWidget("beepSeverityLabel",
 	    xmLabelGadgetClass, form,
 	    XmNlabelString,            string,
@@ -1047,7 +1047,7 @@ static void propCreateDialog(ALINK *area)
 	/* ---------------------------------
 	     Severity Process Variable
 	     --------------------------------- */
-	string = XmStringCreateSimple("Severity PV Name");
+	string = XmStringCreateLocalized("Severity PV Name");
 	severityPVlabel = XtVaCreateManagedWidget("severityPVlabel",
 	    xmLabelGadgetClass, form,
 	    XmNlabelString,    string,
@@ -1079,7 +1079,7 @@ static void propCreateDialog(ALINK *area)
 	/* ---------------------------------
 	     Alias
 	     --------------------------------- */
-	string = XmStringCreateSimple("Alias");
+	string = XmStringCreateLocalized("Alias");
 	aliasLabel = XtVaCreateManagedWidget("aliasLabel",
 	    xmLabelGadgetClass,        form,
 	    XmNlabelString,            string,
@@ -1109,7 +1109,7 @@ static void propCreateDialog(ALINK *area)
 	/* ---------------------------------
 	     Related Process Command
 	     --------------------------------- */
-	string = XmStringCreateSimple("Related Process Command");
+	string = XmStringCreateLocalized("Related Process Command");
 	processLabel = XtVaCreateManagedWidget("processLabel",
 	    xmLabelGadgetClass,        form,
 	    XmNlabelString,            string,
@@ -1136,7 +1136,7 @@ static void propCreateDialog(ALINK *area)
 	/* ---------------------------------
 	     Sevr Command
 	     --------------------------------- */
-	string = XmStringCreateSimple("Alarm Severity Commands");
+	string = XmStringCreateLocalized("Alarm Severity Commands");
 	sevrProcessLabel = XtVaCreateManagedWidget("sevrProcessLabel",
 	    xmLabelGadgetClass, form,
 	    XmNlabelString,     string,
@@ -1168,7 +1168,7 @@ static void propCreateDialog(ALINK *area)
 	/* ---------------------------------
 	     Stat Command
 	     --------------------------------- */
-	string = XmStringCreateSimple("Alarm Status Commands");
+	string = XmStringCreateLocalized("Alarm Status Commands");
 	statProcessLabel = XtVaCreateManagedWidget("statProcessLabel",
 	    xmLabelGadgetClass, form,
 	    XmNlabelString,     string,
@@ -1200,7 +1200,7 @@ static void propCreateDialog(ALINK *area)
 	/* ---------------------------------
 	     Guidance URL Location
 	     --------------------------------- */
-	string = XmStringCreateSimple("Guidance URL");
+	string = XmStringCreateLocalized("Guidance URL");
 	guidanceUrlLabel = XtVaCreateManagedWidget("guidanceUrlLabel",
 	    xmLabelGadgetClass,        form,
 	    XmNlabelString,            string,
@@ -1227,7 +1227,7 @@ static void propCreateDialog(ALINK *area)
 	/* ---------------------------------
 	     Guidance Text
 	     --------------------------------- */
-	string = XmStringCreateSimple("Guidance Text              ");
+	string = XmStringCreateLocalized("Guidance Text              ");
 	guidanceLabel = XtVaCreateManagedWidget("guidanceLabel",
 	    xmLabelGadgetClass, form,
 	    XmNlabelString,     string,
@@ -1330,7 +1330,8 @@ static void propMaskChangeCallback( Widget widget,XtPointer calldata,XtPointer c
 	XtVaGetValues(widget, XmNuserData, &maskWidget, NULL);
 
 	XtVaGetValues(maskWidget, XmNlabelString, &string, NULL);
-	XmStringGetLtoR(string, XmFONTLIST_DEFAULT_TAG, &mask);
+	mask = XmStringUnparse(string, NULL, XmCHARSET_TEXT, XmCHARSET_TEXT,
+	    NULL, 0, XmOUTPUT_ALL);
 	XmStringFree(string);
 
 	if (!XmToggleButtonGadgetGetState(widget)) {
@@ -1356,7 +1357,7 @@ static void propMaskChangeCallback( Widget widget,XtPointer calldata,XtPointer c
 		}
 	}
 
-	string = XmStringCreateSimple(mask);
+	string = XmStringCreateLocalized(mask);
 	XtVaSetValues(maskWidget, XmNlabelString, string, NULL);
 	XmStringFree(string);
 	XtFree(mask);
@@ -1411,7 +1412,8 @@ static void propApplyCallback( Widget widget,XtPointer calldata,XtPointer cbs)
 	     --------------------------------- */
 	if (linkType == CHANNEL) {
 		XtVaGetValues(propWindow->alarmMaskStringLabelW, XmNlabelString, &string, NULL);
-		XmStringGetLtoR(string,XmFONTLIST_DEFAULT_TAG,&buff);
+		buff = XmStringUnparse(string, NULL, XmCHARSET_TEXT, XmCHARSET_TEXT,
+		    NULL, 0, XmOUTPUT_ALL);
 		XmStringFree(string);
 		cdata = (struct chanData *)pgcData;
 		alSetMask(buff,&mask);
@@ -1482,7 +1484,8 @@ static void propApplyCallback( Widget widget,XtPointer calldata,XtPointer cbs)
 
 	/*  update link field  - forcePVMask */
 	XtVaGetValues(propWindow->forcePVForceMaskStringLabelW, XmNlabelString, &string, NULL);
-	XmStringGetLtoR(string,XmFONTLIST_DEFAULT_TAG,&buff);
+	buff = XmStringUnparse(string, NULL, XmCHARSET_TEXT, XmCHARSET_TEXT,
+	    NULL, 0, XmOUTPUT_ALL);
 	XmStringFree(string);
 	alSetMask(buff,&(pgcData->pforcePV->forceMask));
 	XtFree(buff);
@@ -1695,8 +1698,7 @@ static void propCancelCallback( Widget widget,XtPointer calldata,XtPointer cbs)
 /******************************************************
   propUndo
 ******************************************************/
-void propUndo(area)
-void *area;
+void propUndo(void *area)
 {
 	GCLINK *link;
 	int linkType;

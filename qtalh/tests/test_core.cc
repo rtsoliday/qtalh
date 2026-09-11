@@ -1,3 +1,4 @@
+#include "test_compat.h"
 #include "core/engine.h"
 #include "core/model.h"
 #include "services/ipc.h"
@@ -5,7 +6,6 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QTemporaryDir>
-#include <QtTest>
 #include <alarm.h>
 #include <cstring>
 #include <limits>
@@ -106,7 +106,7 @@ $GUIDANCE https://example.invalid/guide
       QCOMPARE(e.state(d.channels()[0]).mask.text(), i.value());
       QCOMPARE(parseConfig(writeConfig(d)).channels()[0]->mask.text(), i.value());
     }
-    QVERIFY_EXCEPTION_THROWN(Mask::parse("DX"), ParseError);
+    QVERIFY_THROWS_EXCEPTION(ParseError, Mask::parse("DX"));
   }
   void siblingGroupNames() {
     auto d = parseConfig("GROUP NULL root\nGROUP root child\nCHANNEL child pv1\n"
@@ -137,7 +137,7 @@ $GUIDANCE https://example.invalid/guide
   }
   void malformed() {
     QFETCH(QString, text);
-    QVERIFY_EXCEPTION_THROWN(parseConfig(text), ParseError);
+    QVERIFY_THROWS_EXCEPTION(ParseError, parseConfig(text));
   }
   void calcRequiresExpression() {
     QTemporaryDir dir;
@@ -146,9 +146,9 @@ $GUIDANCE https://example.invalid/guide
     QVERIFY(child.open(QIODevice::WriteOnly));
     child.write(invalid.toUtf8());
     child.close();
-    QVERIFY_EXCEPTION_THROWN(loadConfig(child.fileName()), ParseError);
-    QVERIFY_EXCEPTION_THROWN(parseConfig("GROUP NULL parent\nINCLUDE parent child\n", dir.path()),
-                             ParseError);
+    QVERIFY_THROWS_EXCEPTION(ParseError, loadConfig(child.fileName()));
+    QVERIFY_THROWS_EXCEPTION(ParseError,
+                             parseConfig("GROUP NULL parent\nINCLUDE parent child\n", dir.path()));
     // The expression may precede the FORCEPV directive or follow an include.
     auto d = parseConfig("GROUP NULL root\n$FORCEPV_CALC 1\n$FORCEPV CALC -D--- 1 NE\n");
     QCOMPARE(d.root->option("FORCEPV_CALC"), QString("1"));
@@ -170,11 +170,11 @@ $GUIDANCE https://example.invalid/guide
     auto d = parseConfig("GROUP NULL root\nINCLUDE root child", temp.path());
     QCOMPARE(d.channels().size(), 1);
     QCOMPARE(d.root->children[0]->parent, d.root.get());
-    f.open(QIODevice::WriteOnly | QIODevice::Truncate);
+    QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
     f.write("GROUP NULL child\nINCLUDE child child\n");
     f.close();
-    QVERIFY_EXCEPTION_THROWN(parseConfig("GROUP NULL root\nINCLUDE root child", temp.path()),
-                             ParseError);
+    QVERIFY_THROWS_EXCEPTION(ParseError,
+                             parseConfig("GROUP NULL root\nINCLUDE root child", temp.path()));
   }
   void nestedIncludesUseConfiguredDirectory() {
     QTemporaryDir dir;
@@ -197,7 +197,7 @@ $GUIDANCE https://example.invalid/guide
     auto parsed = parseConfig("GROUP NULL root\nINCLUDE root sub/child\n", dir.path());
     QCOMPARE(parsed.channels()[0]->name, QString("expected"));
     QVERIFY(write("shared", "GROUP NULL shared\nINCLUDE shared sub/child\n"));
-    QVERIFY_EXCEPTION_THROWN(loadConfig(dir.filePath("entry/main"), dir.path()), ParseError);
+    QVERIFY_THROWS_EXCEPTION(ParseError, loadConfig(dir.filePath("entry/main"), dir.path()));
   }
   void valueUpdatesDoNotLogAlarms() {
     auto d = parseConfig("GROUP NULL root\nCHANNEL root pv");
@@ -1075,8 +1075,8 @@ $GUIDANCE https://example.invalid/guide
     QVERIFY(o.editor);
     QCOMPARE(o.filter, 2);
     QCOMPARE(o.maxRecords, 0);
-    QVERIFY_EXCEPTION_THROWN(parseOptions({"qtalh", "-m", "bad"}), ParseError);
-    QVERIFY_EXCEPTION_THROWN(parseOptions({"qtalh", "-xrm", "foo"}), ParseError);
+    QVERIFY_THROWS_EXCEPTION(ParseError, parseOptions({"qtalh", "-m", "bad"}));
+    QVERIFY_THROWS_EXCEPTION(ParseError, parseOptions({"qtalh", "-xrm", "foo"}));
   }
   void queueCodec() {
     QByteArray record = "1 2 10-Sep-2026 12:00:00 service error";
@@ -1089,8 +1089,8 @@ $GUIDANCE https://example.invalid/guide
     QString error;
     QVERIFY(!sendQueue(123, record, &error));
     QVERIFY(error.contains("unavailable on Windows"));
-    QVERIFY_EXCEPTION_THROWN(parseOptions({"qtalh", "-P", "123"}), ParseError);
-    QVERIFY_EXCEPTION_THROWN(parseOptions({"qtalh", "-O", "123"}), ParseError);
+    QVERIFY_THROWS_EXCEPTION(ParseError, parseOptions({"qtalh", "-P", "123"}));
+    QVERIFY_THROWS_EXCEPTION(ParseError, parseOptions({"qtalh", "-O", "123"}));
 #else
     int id = msgget(IPC_PRIVATE, 0600 | IPC_CREAT);
     QVERIFY(id >= 0);
@@ -1098,14 +1098,14 @@ $GUIDANCE https://example.invalid/guide
     QCOMPARE(receiveQueue(id), record);
     QCOMPARE(msgctl(id, IPC_RMID, nullptr), 0);
 #endif
-    QVERIFY_EXCEPTION_THROWN(encodeQueue(QByteArray(260, 'a')), std::runtime_error);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error, encodeQueue(QByteArray(260, 'a')));
   }
   void printerCodec() {
     auto r = QByteArray("1 2 10-Sep-2026 12:00:00 service error");
     QCOMPARE(printerRecord(r, "bw"), QByteArray("10-Sep-2026 12:00:00 service error"));
     QCOMPARE(printerRecord(r, "bw_bold"),
              QByteArray("\033[1m10-Sep-2026 12:00:00 service error\033[0m"));
-    QVERIFY_EXCEPTION_THROWN(printerRecord("1 1 short", "bw"), std::runtime_error);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error, printerRecord("1 1 short", "bw"));
   }
   void tenThousandChannels() {
     QString text = "GROUP NULL large\n";

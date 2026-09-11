@@ -11,10 +11,19 @@ volatile sig_atomic_t stopped = 0;
 void stop(int) {
   stopped = 1;
 }
-bool_t voidResult(XDR*, void*) {
+#ifdef __APPLE__
+bool_t voidResult(XDR*, void*, unsigned int) {
+#else
+bool_t voidResult(XDR*, void*, ...) {
+#endif
   return TRUE;
 }
-bool_t encode(XDR* x, char** s) {
+#ifdef __APPLE__
+bool_t encode(XDR* x, void* data, unsigned int) {
+#else
+bool_t encode(XDR* x, void* data, ...) {
+#endif
+  auto s = static_cast<char**>(data);
   return xdr_string(x, s, 8192);
 }
 } // namespace
@@ -69,8 +78,8 @@ int main(int argc, char** argv) {
     char* text = record.data();
     timeval timeout{10, 0};
     char result = 0;
-    if (clnt_call(client, 1, reinterpret_cast<xdrproc_t>(encode), reinterpret_cast<caddr_t>(&text),
-                  reinterpret_cast<xdrproc_t>(voidResult), &result, timeout) != RPC_SUCCESS)
+    if (clnt_call(client, 1, encode, reinterpret_cast<caddr_t>(&text),
+                  voidResult, &result, timeout) != RPC_SUCCESS)
       clnt_perror(client, diagnostic);
     clnt_destroy(client);
   });

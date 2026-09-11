@@ -246,14 +246,14 @@ void alCMLOGdisconnect(void);
   alView.c   function prototypes
 *********************************************************************/
 
-int alViewAdjustGroupW( GLINK *glink, int (*viewFilter)());
-int alViewAdjustTreeW( GLINK *glink, int command, int (*viewFilter)());
-GCLINK *alViewNextTreeW( GLINK  *glink, int *plinkType);
-GCLINK *alViewNextGroupW( GCLINK  *link, int *plinkType);
-GCLINK *alViewNthTreeW( GLINK *glinkStart, int *plinkType, int n);
-GCLINK *alViewNthGroupW( GLINK *link, int *plinkType, int n);
-int alViewMaxSevrNGroupW( GCLINK *linkStart, int n);
-int alViewMaxSevrNTreeW( GLINK *glinkStart, int n);
+int alViewAdjustGroupW( GLINK *glink, int (*viewFilter)(GCLINK *));
+int alViewAdjustTreeW( GLINK *glink, int command, int (*viewFilter)(GCLINK *));
+GCLINK *alViewNextTreeW( void *start, int *plinkType);
+GCLINK *alViewNextGroupW( void *start, int *plinkType);
+GCLINK *alViewNthTreeW( void *start, int *plinkType, int n);
+GCLINK *alViewNthGroupW( void *start, int *plinkType, int n);
+int alViewMaxSevrNGroupW( void *start, int n);
+int alViewMaxSevrNTreeW( void *start, int n);
 
 
 /********************************************************************

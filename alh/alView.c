@@ -27,13 +27,13 @@
 #include "ax.h"
 
 /* forward declarations */
-static void treeView( GLINK *glink, int command, char *treeSym, int (*viewFilter)());
+static void treeView( GLINK *glink, int command, char *treeSym, int (*viewFilter)(GCLINK *));
 
 
 /***************************************************
   Returns groupWindow viewCount for new glink
 ****************************************************/
-int alViewAdjustGroupW(GLINK *glink,int (*viewFilter)())
+int alViewAdjustGroupW(GLINK *glink,int (*viewFilter)(GCLINK *))
 {
 	SNODE *pt;
 	int count=0;
@@ -58,7 +58,7 @@ int alViewAdjustGroupW(GLINK *glink,int (*viewFilter)())
 /***************************************************
   Uses command to adjust treeW view at glink and return new viewCount
 ****************************************************/
-int alViewAdjustTreeW(GLINK *glink,int command,int (*viewFilter)())
+int alViewAdjustTreeW(GLINK *glink,int command,int (*viewFilter)(GCLINK *))
 {
 	GLINK             *glinkTemp;
 	int                holdViewCount, diffCount, count;
@@ -87,7 +87,7 @@ int alViewAdjustTreeW(GLINK *glink,int command,int (*viewFilter)())
 /***************************************************
   treeView
 ****************************************************/
-static void treeView(GLINK *glink,int command,char *treeSym,int (*viewFilter)())
+static void treeView(GLINK *glink,int command,char *treeSym,int (*viewFilter)(GCLINK *))
 {
 	SNODE	*pt;
 	int	 subcommand;
@@ -174,8 +174,9 @@ static void treeView(GLINK *glink,int command,char *treeSym,int (*viewFilter)())
 /***************************************************
   Return next treeWindow item open for view
 ****************************************************/
-GCLINK *alViewNextTreeW(GLINK *glink,int *plinkType)
+GCLINK *alViewNextTreeW(void *start,int *plinkType)
 {
+	GLINK *glink = start;
 	GLINK  *glinkTemp;
 	SNODE *pt;
 
@@ -217,8 +218,9 @@ GCLINK *alViewNextTreeW(GLINK *glink,int *plinkType)
 /***************************************************
   Return next groupWindow item open for view
 ****************************************************/
-GCLINK *alViewNextGroupW(GCLINK *link,int *plinkType)
+GCLINK *alViewNextGroupW(void *start,int *plinkType)
 {
+	GCLINK *link = start;
 	SNODE *pt;
 	GLINK  *parent;
 
@@ -242,8 +244,9 @@ GCLINK *alViewNextGroupW(GCLINK *link,int *plinkType)
 /***************************************************
   Return nth treeWindow item open for view
 ****************************************************/
-GCLINK *alViewNthTreeW(GLINK *glinkStart,int *plinkType,int n)
+GCLINK *alViewNthTreeW(void *start,int *plinkType,int n)
 {
+	GLINK *glinkStart = start;
 	GLINK        *glink;
 	int           count;
 	SNODE       *pt;
@@ -280,8 +283,9 @@ GCLINK *alViewNthTreeW(GLINK *glinkStart,int *plinkType,int n)
 /***************************************************
   Return nth groupWindow item open for view
 ****************************************************/
-GCLINK *alViewNthGroupW(GLINK *link,int *plinkType,int n)
+GCLINK *alViewNthGroupW(void *start,int *plinkType,int n)
 {
+	GLINK *link = start;
 
 	SNODE       *pt;
 	int          count= 0;
@@ -315,8 +319,9 @@ GCLINK *alViewNthGroupW(GLINK *link,int *plinkType,int n)
  Get groupWindow max sevr in range from glinkstart
  to Nth item following linkstart
 ****************************************************/
-int alViewMaxSevrNGroupW(GCLINK *linkStart,int n)
+int alViewMaxSevrNGroupW(void *start,int n)
 {
+	GCLINK *linkStart = start;
 	GLINK       *glink;
 	GLINK       *parent;
 	CLINK       *clink=0;
@@ -377,8 +382,9 @@ int alViewMaxSevrNGroupW(GCLINK *linkStart,int n)
  Get treeWindow max sevr in range from glinkstart
  to nth item following glinkstart
 ****************************************************/
-int alViewMaxSevrNTreeW(GLINK *glinkStart,int n)
+int alViewMaxSevrNTreeW(void *start,int n)
 {
+	GLINK *glinkStart = start;
 	GLINK       *glink;
 	CLINK       *clink=0;
 	SNODE       *pt;

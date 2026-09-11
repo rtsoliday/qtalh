@@ -25,6 +25,8 @@
 
 #include "sllLib.h"
 
+struct anyLink;
+
 /* display sub window structure */
 struct subWindow {
 	/* ----- Window info ----- */
@@ -47,9 +49,9 @@ struct subWindow {
 	int              oldViewConfigCount;
 	unsigned int     viewOffset;
 	/* ----- view routines ----- */
-	void            *(*alViewNth)();
-	void            *(*alViewNext)();
-	int             (*alViewMaxSevrN)();
+	struct anyLink  *(*alViewNth)(void *, int *, int);
+	struct anyLink  *(*alViewNext)(void *, int *);
+	int             (*alViewMaxSevrN)(void *, int);
 	/* ----- Selection info ----- */
 	void            *selectionLink;
 	Widget           selectionWidget;

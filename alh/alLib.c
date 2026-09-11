@@ -1148,9 +1148,6 @@ static void alUpdateGroupMask(CLINK *clink,int index,int op)
 	  if ( !top->pgroupData ) {
 	    ok = 0;
 	  }
-	  else if ( !top->pgroupData->mask ) {
-	    ok = 0;
-	  }
 
 	  if ( ok ) {
 	
@@ -1206,7 +1203,7 @@ static void alUpdateGroupMask(CLINK *clink,int index,int op)
 
 	    }
             if (areaTop->blinkButton) {
-	      str = XmStringCreateSimple(labelStr);
+	      str = XmStringCreateLocalized(labelStr);
 	      XtVaSetValues(areaTop->blinkButton,
 	        XmNlabelString, str, NULL);
 	      XmStringFree(str);

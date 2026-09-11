@@ -137,16 +137,14 @@ void xs_help_callback(Widget w,char *str[],void *call_data)
 	/*
 	 * We won't use the cancel widget. Unmanage it.
 	 */
-	XtUnmanageChild(XmMessageBoxGetChild(dialog,
-	    XmDIALOG_CANCEL_BUTTON));
+	XtUnmanageChild(XtNameToWidget(dialog, "Cancel"));
 	/*
 	 * Retrieve the label widget and make the 
 	 * text left justified
 	 */
 
 	/*
-		label = XmMessageBoxGetChild(dialog, 
-				XmDIALOG_MESSAGE_LABEL);
+		label = XtNameToWidget(dialog, "Message");
 	
 		n = 0;
 		XtSetArg(wargs[n],XmNalignment,XmALIGNMENT_BEGINNING); n++;
@@ -183,8 +181,7 @@ void xs_help_callback(Widget w,char *str[],void *call_data)
 	 */
 
 	if (str[++i][0] == '\0')
-		XtUnmanageChild( XmMessageBoxGetChild(dialog,
-		    XmDIALOG_HELP_BUTTON));
+		XtUnmanageChild( XtNameToWidget(dialog, "Help"));
 
 		/*
 		 * otherwise add a help callback function with the address of

@@ -62,7 +62,7 @@ void awUpdateRowWidgets(line)                 Update line widgets
 
 #include <X11/Intrinsic.h>
 #include <X11/StringDefs.h>
-#include <Xm/AtomMgr.h>
+#include <X11/Xlib.h>
 #include <Xm/DragDrop.h>
 #include <Xm/CutPaste.h>
 #include <X11/Xos.h>
@@ -171,8 +171,8 @@ static void alhViewBrowserCallback( Widget widget, XtPointer item, XtPointer cbs
 static void messBroadcast(Widget widget, XtPointer item, XtPointer cbs);          /* Albert1 */
 static void alhSetupCallback( Widget widget, XtPointer calldata, XtPointer cbs);
 static void alhHelpCallback( Widget widget, XtPointer calldata, XtPointer cbs);
-static void browserFBSDialogCbOk();     /* Ok-button     for FSBox. Albert*/
-static void browserFBSDialogCbCancel(); /* Cancel-button for FSBox. Albert*/
+static void browserFBSDialogCbOk(Widget w, Widget wdgt, XmSelectionBoxCallbackStruct *call_data);     /* Ok-button     for FSBox. Albert*/
+static void browserFBSDialogCbCancel(Widget w, int client_data, XmSelectionBoxCallbackStruct *call_data); /* Cancel-button for FSBox. Albert*/
 static void writeMessBroadcast(Widget dialog, Widget text_w);
 static void helpMessBroadcast(Widget,XtPointer,XtPointer);
 static void cancelMessBroadcast(Widget w);
@@ -349,7 +349,7 @@ size_t l;
 char *dragData;
 
   d = XtDisplay( w );
-  MOTIF_DROP = XmInternAtom( d, "_MOTIF_DROP", FALSE );
+  MOTIF_DROP = XInternAtom( d, "_MOTIF_DROP", FALSE );
 
   if ( *selection != MOTIF_DROP ) {
     return FALSE;
@@ -1056,15 +1056,15 @@ static void alhViewBrowserCallback(Widget widget,XtPointer item,XtPointer cbs)
 	switch ( ch )
 	  {
 	  case MENU_VIEW_ALARMLOG:
-	    Xtitle=XmStringCreateSimple("Alarm Log File");          
-	    Xpattern = XmStringCreateSimple(psetup.logFile);
-	    Xcurrentdir = XmStringCreateSimple(psetup.logDir); 
+	    Xtitle=XmStringCreateLocalized("Alarm Log File");
+	    Xpattern = XmStringCreateLocalized(psetup.logFile);
+	    Xcurrentdir = XmStringCreateLocalized(psetup.logDir);
 	    break;
 	    
 	  case MENU_VIEW_OPMOD:
-	    Xtitle=XmStringCreateSimple("Operator File");          
-	    Xpattern = XmStringCreateSimple(psetup.opModFile);
-	    Xcurrentdir = XmStringCreateSimple(psetup.logDir);  /* Albert1 ???? */  
+	    Xtitle=XmStringCreateLocalized("Operator File");
+	    Xpattern = XmStringCreateLocalized(psetup.opModFile);
+	    Xcurrentdir = XmStringCreateLocalized(psetup.logDir);  /* Albert1 ???? */
 	    break;
 
 	  default:
@@ -1086,8 +1086,7 @@ static void alhViewBrowserCallback(Widget widget,XtPointer item,XtPointer cbs)
 	  }     
 		XtAddCallback(dialog,XmNokCallback,(XtCallbackProc)browserFBSDialogCbOk,widget);
 		XtAddCallback(dialog,XmNcancelCallback,(XtCallbackProc)browserFBSDialogCbCancel,NULL);
-		XtUnmanageChild(XmFileSelectionBoxGetChild(dialog,
-		    XmDIALOG_HELP_BUTTON));
+		XtUnmanageChild(XtNameToWidget(dialog, "Help"));
 
 		XtVaSetValues(dialog,
 		    XmNdirectory,     Xcurrentdir,
@@ -1118,7 +1117,8 @@ XmSelectionBoxCallbackStruct *call_data)
 	ALINK   *area;
 	char *s;
 	int fileType;
-	XmStringGetLtoR(call_data->value,XmSTRING_DEFAULT_CHARSET,&s);
+	s = XmStringUnparse(call_data->value, NULL, XmCHARSET_TEXT, XmCHARSET_TEXT,
+	    NULL, 0, XmOUTPUT_ALL);
 	strcpy(FS_filename,s);
 	XtFree(s);
 	XtVaGetValues(w, XmNuserData, &fileType, NULL);
@@ -1176,7 +1176,7 @@ static void messBroadcast(Widget widget,XtPointer item,XtPointer cbs)  /* Albert
 	    
 	    XtAddCallback(dialog, XmNcancelCallback,(XtCallbackProc)cancelMessBroadcast, NULL);
 	    XtAddCallback(dialog, XmNhelpCallback,(XtCallbackProc)helpMessBroadcast, NULL);
-	    text_w = XmSelectionBoxGetChild(dialog, XmDIALOG_TEXT);
+	    text_w = XtNameToWidget(dialog, "Text");
 	    if(itemi == 1)
 	      {
 		XtVaSetValues(text_w, XmNvalue,"0 min no write to LOG file", NULL);
@@ -1218,7 +1218,7 @@ int type;
     XtVaGetValues(dialog, XmNuserData,&mBDpt, NULL);
 
     type=mBDpt->type;
-    if (( type <0) && ( type >2)) return;
+    if (( type <0) || ( type >2)) return;
     
     ar= mBDpt->area;
 
@@ -1562,7 +1562,7 @@ void awRowWidgets(struct anyLine *line,void *area)
 
 		if ( isTreeWindow(area,subWindow) && line->linkType == GROUP) {
 			if ( glink->pgroupData->treeSym) {
-				str = XmStringCreateSimple(glink->pgroupData->treeSym);
+				str = XmStringCreateLocalized(glink->pgroupData->treeSym);
 				wline->treeSym = XtVaCreateManagedWidget("treeSym",
 				    xmLabelWidgetClass,        wline->row_widget,
 				    XmNbackground,             backgroundColor,
@@ -1575,7 +1575,7 @@ void awRowWidgets(struct anyLine *line,void *area)
 			}
 		}
 
-		str = XmStringCreateSimple(bg_char[line->unackSevr]);
+		str = XmStringCreateLocalized(bg_char[line->unackSevr]);
 		wline->ack = XtVaCreateManagedWidget("ack",
 		    xmPushButtonWidgetClass,   wline->row_widget,
 		    XmNmarginHeight,           0,
@@ -1591,7 +1591,7 @@ void awRowWidgets(struct anyLine *line,void *area)
 		nextX = nextX + width + 3;
 
 
-		str = XmStringCreateSimple(bg_char[line->curSevr]);
+		str = XmStringCreateLocalized(bg_char[line->curSevr]);
 		wline->sevr = XtVaCreateManagedWidget("sevr",
 		    xmLabelWidgetClass,        wline->row_widget,
 		    XmNlabelString,            str,
@@ -1609,7 +1609,7 @@ void awRowWidgets(struct anyLine *line,void *area)
                   XtAppAddActions( appContext, g_dragActions, XtNumber(g_dragActions) );
                 }
 
-		str = XmStringCreateSimple(line->alias);
+		str = XmStringCreateLocalized(line->alias);
 		wline->name = XtVaCreateManagedWidget("pushButtonName",
 		    xmPushButtonWidgetClass,   wline->row_widget,
 		    XmNmarginHeight,           0,
@@ -1692,7 +1692,7 @@ void awRowWidgets(struct anyLine *line,void *area)
 
                 /* A.Luedeke : Added color when mask is silencing: 'C', 'D', 'A' or 'H' */
                 if (_mask_color_flag&&(line->mask[1]!='-'||line->mask[2]!='-'||line->mask[3]!='-')) {bgMask=noack_bg_pixel;} else {bgMask=bg_pixel[0];} /* A.L.: added color */
-		str = XmStringCreateSimple(line->mask);
+		str = XmStringCreateLocalized(line->mask);
 		wline->mask = XtVaCreateManagedWidget("mask",
 		    xmLabelWidgetClass,        wline->row_widget,
 		    XmNlabelString,            str,
@@ -1709,7 +1709,7 @@ void awRowWidgets(struct anyLine *line,void *area)
 		XtVaSetValues(wline->mask,XmNbackground,bgMask,NULL); /* A.L.: added color */
 #endif
 
-		str = XmStringCreateSimple(line->highestBeepSevrString);
+		str = XmStringCreateLocalized(line->highestBeepSevrString);
 		wline->highestbeepsevr = XtVaCreateManagedWidget("highestbeepsevr",
 		    xmLabelWidgetClass,        wline->row_widget,
 		    XmNlabelString,            str,
@@ -1721,7 +1721,7 @@ void awRowWidgets(struct anyLine *line,void *area)
 		XtVaGetValues(wline->highestbeepsevr,XmNwidth,&width,NULL);
 		nextX = nextX + width + 3;
 
-		str = XmStringCreateSimple(line->message);
+		str = XmStringCreateLocalized(line->message);
 		wline->message = XtVaCreateManagedWidget("message",
 		    xmLabelWidgetClass,        wline->row_widget,
 		    XmNlabelString,            str,
@@ -1748,7 +1748,7 @@ void awRowWidgets(struct anyLine *line,void *area)
 
 		nextX = 0;
 		if ( isTreeWindow(area,subWindow) && line->linkType == GROUP) {
-			str = XmStringCreateSimple(glink->pgroupData->treeSym);
+			str = XmStringCreateLocalized(glink->pgroupData->treeSym);
 			XtVaSetValues(wline->treeSym,
 			    XmNlabelString,            str,
 			    NULL);
@@ -1780,7 +1780,7 @@ void awRowWidgets(struct anyLine *line,void *area)
 		XtVaGetValues(wline->sevr,XmNwidth,&width,NULL);
 		nextX = nextX + width +3;
 
-		str = XmStringCreateSimple(line->alias);
+		str = XmStringCreateLocalized(line->alias);
 		XtVaSetValues(wline->name,
 		    XmNlabelString,            str,
 		    XmNx,                      nextX,
@@ -1913,7 +1913,7 @@ void awUpdateRowWidgets(struct anyLine *line)
 			    XmNsensitive,            TRUE,
 			    NULL);
 	}
-	str = XmStringCreateSimple(bg_char[line->unackSevr]);
+	str = XmStringCreateLocalized(bg_char[line->unackSevr]);
 	if (!XmStringCompare(str,strOld))
 		XtVaSetValues(wline->ack,
 		    XmNlabelString,            str,
@@ -1934,7 +1934,7 @@ void awUpdateRowWidgets(struct anyLine *line)
 	    XmNlabelString,           &strOld,
 	    NULL);
 
-	str = XmStringCreateSimple(bg_char[line->curSevr]);
+	str = XmStringCreateLocalized(bg_char[line->curSevr]);
 	if (!XmStringCompare(str,strOld))
 		XtVaSetValues(wline->sevr,
 		    XmNlabelString,            str,
@@ -1955,7 +1955,7 @@ void awUpdateRowWidgets(struct anyLine *line)
             XmNbackground,            &backgroundColor,
 	    NULL);
 
-	str = XmStringCreateSimple(line->mask);
+	str = XmStringCreateLocalized(line->mask);
         /* A.Luedeke : Added color when mask is silencing: 'C', 'D', 'A' or 'H' */
 
         if (_mask_color_flag&&(line->mask[1]!='-'||line->mask[2]!='-'||line->mask[3]!='-')) {bgMask=noack_bg_pixel;} else {bgMask=bg_pixel[0];} /* A.L.: added color */
@@ -1975,7 +1975,7 @@ void awUpdateRowWidgets(struct anyLine *line)
 	XtVaGetValues(wline->message,
 	    XmNlabelString,           &strOld,
 	    NULL);
-	str = XmStringCreateSimple(line->message);
+	str = XmStringCreateLocalized(line->message);
 	if (!XmStringCompare(str,strOld))
 		XtVaSetValues(wline->message,
 		    XmNlabelString,            str,
@@ -1986,7 +1986,7 @@ void awUpdateRowWidgets(struct anyLine *line)
 	XtVaGetValues(wline->highestbeepsevr,
 	    XmNlabelString,           &strOld,
 	    NULL);
-	str = XmStringCreateSimple(line->highestBeepSevrString);
+	str = XmStringCreateLocalized(line->highestBeepSevrString);
 	if (!XmStringCompare(str,strOld))
 		XtVaSetValues(wline->highestbeepsevr,
 		    XmNlabelString,            str,

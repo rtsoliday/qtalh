@@ -1,8 +1,8 @@
+#include "test_compat.h"
 #include "ui/window.h"
 #include "ui/dialogs.h"
 #include "ui/alarm_view.h"
 #include "services/log_browser.h"
-#include <QtTest>
 #include <QtWidgets>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #include <QAudioOutput>
@@ -292,7 +292,7 @@ private slots:
   void rejectAmbiguousGroupInsertion() {
     auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\n"), options(true), false);
     const auto original = writeConfig(w->document());
-    QVERIFY_EXCEPTION_THROWN(w->addNode(true, "root"), ParseError);
+    QVERIFY_THROWS_EXCEPTION(ParseError, w->addNode(true, "root"));
     QCOMPARE(writeConfig(w->document()), original);
     w->addNode(true, "first");
     w->addNode(true, "second");

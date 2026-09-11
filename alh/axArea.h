@@ -31,6 +31,8 @@
 #define SeparatorGadgetClass 1
 #define ToggleButtonGadgetClass 2
 
+struct anyLink;
+
 typedef struct  areaLink{
 	SNODE            node;
 	int              mapped;
@@ -68,7 +70,7 @@ typedef struct  areaLink{
 	int              changed;
 	char             *blinkString;
 	/* ----- setup info ----- */
-	int              (* viewFilter)();
+	int              (*viewFilter)(struct anyLink *);
 	int              beepCondition;
 	int              disabledForcePVCount;
 	char             *configFile;

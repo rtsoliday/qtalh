@@ -61,8 +61,7 @@ static void beepSevrChangeCallback( Widget widget,XtPointer calldata,XtPointer c
 /******************************************************
   beepSevrUpdateDialog
 ******************************************************/
-void beepSevrUpdateDialog(area)
-ALINK  *area;
+void beepSevrUpdateDialog(ALINK  *area)
 {
 	struct beepSevrWindow *beepSevrWindow;
 
@@ -78,9 +77,7 @@ ALINK  *area;
 /******************************************************
   beepSevrShowDialog
 ******************************************************/
-void beepSevrShowDialog(area, menuButton)
-ALINK    *area;
-Widget   menuButton;
+void beepSevrShowDialog(ALINK    *area, Widget   menuButton)
 {
 	struct beepSevrWindow *beepSevrWindow;
 
@@ -118,8 +115,7 @@ Widget   menuButton;
   beepSevrUpdateDialogWidgets
 ******************************************************/
 
-static void beepSevrUpdateDialogWidgets(beepSevrWindow)
-struct beepSevrWindow *beepSevrWindow;
+static void beepSevrUpdateDialogWidgets(struct beepSevrWindow *beepSevrWindow)
 {
 	struct gcData *pgcData;
 	GCLINK *link;
@@ -133,7 +129,7 @@ struct beepSevrWindow *beepSevrWindow;
 
 	if (!link) {
 
-		string = XmStringCreateSimple("");
+		string = XmStringCreateLocalized("");
 		XtVaSetValues(beepSevrWindow->nameTextW,XmNlabelString, string, NULL);
 		XmStringFree(string);
 		return;
@@ -146,15 +142,15 @@ struct beepSevrWindow *beepSevrWindow;
 	/* ---------------------------------
 	     Group/Channel Name 
 	     --------------------------------- */
-	if (linkType == GROUP) string = XmStringCreateSimple("Group Name:");
-	else string = XmStringCreateSimple("Channel Name:");
+	if (linkType == GROUP) string = XmStringCreateLocalized("Group Name:");
+	else string = XmStringCreateLocalized("Channel Name:");
 	XtVaSetValues(beepSevrWindow->nameLabelW, XmNlabelString, string, NULL);
 	XmStringFree(string);
 
 	if (pgcData->alias){
-		string = XmStringCreateSimple(pgcData->alias);
+		string = XmStringCreateLocalized(pgcData->alias);
 	} else {
-		string = XmStringCreateSimple(pgcData->name);
+		string = XmStringCreateLocalized(pgcData->name);
 	}
 	XtVaSetValues(beepSevrWindow->nameTextW, XmNlabelString, string, NULL);
 	XmStringFree(string);
@@ -174,8 +170,7 @@ struct beepSevrWindow *beepSevrWindow;
 /******************************************************
   beepSevrCreateDialog
 ******************************************************/
-static void beepSevrCreateDialog(area)
-ALINK    *area;
+static void beepSevrCreateDialog(ALINK    *area)
 {
 	struct beepSevrWindow *beepSevrWindow;
 
@@ -213,7 +208,7 @@ ALINK    *area;
 		Atom         WM_DELETE_WINDOW;
 		XtVaSetValues(beepSevrDialogShell,
 		    XmNdeleteResponse, XmDO_NOTHING, NULL);
-		WM_DELETE_WINDOW = XmInternAtom(XtDisplay(beepSevrDialogShell),
+		WM_DELETE_WINDOW = XInternAtom(XtDisplay(beepSevrDialogShell),
 		    "WM_DELETE_WINDOW", False);
 		XmAddWMProtocolCallback(beepSevrDialogShell,WM_DELETE_WINDOW,
 		    (XtCallbackProc)beepSevrDismissCallback, (XtPointer)beepSevrWindow);

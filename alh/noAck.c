@@ -134,7 +134,7 @@ static void noAckUpdateDialogWidgets(struct noAckWindow *noAckWindow)
 	     Group/Channel name
 	     --------------------------------- */
 	if (!link) {
-		string = XmStringCreateSimple("");
+		string = XmStringCreateLocalized("");
 		if (noAckWindow->nameTextW )
 			XtVaSetValues(noAckWindow->nameTextW,XmNlabelString, string, NULL);
 		XmStringFree(string);
@@ -147,15 +147,15 @@ static void noAckUpdateDialogWidgets(struct noAckWindow *noAckWindow)
 	/* ---------------------------------
 	     Group/Channel label
 	     --------------------------------- */
-	if (linkType == GROUP) string = XmStringCreateSimple("Group: ");
-	else string = XmStringCreateSimple("Channel: ");
+	if (linkType == GROUP) string = XmStringCreateLocalized("Group: ");
+	else string = XmStringCreateLocalized("Channel: ");
 	XtVaSetValues(noAckWindow->nameLabelW, XmNlabelString, string, NULL);
 	XmStringFree(string);
 
 	if (pgcData->alias){
-		string = XmStringCreateSimple(pgcData->alias);
+		string = XmStringCreateLocalized(pgcData->alias);
 	} else {
-		string = XmStringCreateSimple(pgcData->name);
+		string = XmStringCreateLocalized(pgcData->name);
 	}
 	XtVaSetValues(noAckWindow->nameTextW, XmNlabelString, string, NULL);
 	XmStringFree(string);
@@ -207,7 +207,7 @@ static void noAckCreateDialog(ALINK *area)
 		Atom         WM_DELETE_WINDOW;
 		XtVaSetValues(noAckDialogShell,
 		    XmNdeleteResponse, XmDO_NOTHING, NULL);
-		WM_DELETE_WINDOW = XmInternAtom(XtDisplay(noAckDialogShell),
+		WM_DELETE_WINDOW = XInternAtom(XtDisplay(noAckDialogShell),
 		    "WM_DELETE_WINDOW", False);
 		XmAddWMProtocolCallback(noAckDialogShell,WM_DELETE_WINDOW,
 		    (XtCallbackProc)noAckDismissCallback, (XtPointer)noAckWindow);

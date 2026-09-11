@@ -952,7 +952,7 @@ void Window::menus() {
   helpButton->setMenu(help);
   helpButton->setPopupMode(QToolButton::InstantPopup);
   menuBar()->setCornerWidget(helpButton, Qt::TopRightCorner);
-  action(help, "Help Topics", [this] {
+  action(help, "Help Topics", [] {
     QDesktopServices::openUrl(
         QUrl::fromLocalFile(QDir(QCoreApplication::applicationDirPath())
                                 .absoluteFilePath("../../alh/documentation/ALH.html")));

@@ -45,7 +45,7 @@ private:
   QHash<QString, bool> initialAckT;
   QHash<QString, double> pendingSeverity;
   QTimer timer;
-  bool polling = false, active = false, clearing = false;
+  bool active = false, clearing = false;
   Channel* add(const QString&);
   void subscribe(Channel*);
   void report(int, const QString&);

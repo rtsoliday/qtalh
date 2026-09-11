@@ -25,7 +25,7 @@
 #include <Xm/MessageB.h>
 #include <Xm/FileSB.h>
 #include <Xm/Protocols.h>
-#include <Xm/AtomMgr.h>
+#include <X11/Xlib.h>
 
 #include "ax.h"
 
@@ -85,7 +85,7 @@ String title,String pattern,String directory)
 		XtVaSetValues(fileselectdialog,
 		    XmNallowShellResize, FALSE,
 		    NULL);
-		WM_DELETE_WINDOW = XmInternAtom(XtDisplay(fileselectdialog),
+		WM_DELETE_WINDOW = XInternAtom(XtDisplay(fileselectdialog),
 		    "WM_DELETE_WINDOW", False);
 		XtAddCallback(fileselectdialog,XmNhelpCallback,
 		    (XtCallbackProc)helpCallback,(XtPointer)NULL);
@@ -99,10 +99,10 @@ String title,String pattern,String directory)
 		    WM_DELETE_WINDOW,(XtCallbackProc)oldCancel,(XtPointer)oldCancelParm );
 	}
 
-	Xtitle=XmStringCreateLtoR(title,XmSTRING_DEFAULT_CHARSET);
-	Xpattern=XmStringCreateLtoR(pattern,XmSTRING_DEFAULT_CHARSET);
+	Xtitle=XmStringGenerate(title, XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
+	Xpattern=XmStringGenerate(pattern, XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 	if ( !directory  && Xcurrentdir ) Xdirectory = Xcurrentdir;
-	else Xdirectory = XmStringCreateLtoR(directory,XmSTRING_DEFAULT_CHARSET);
+	else Xdirectory = XmStringGenerate(directory, XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 
 	XtVaSetValues(fileselectdialog,
 	    XmNuserData,      userParm,
@@ -144,40 +144,40 @@ void createDialog(Widget parent,int dialogType,char *message1,char *message2)
 	Widget   dialog = 0;
 
 	dialog = XmCreateMessageDialog(parent, "Dialog", NULL, 0);
-	XtUnmanageChild(XmMessageBoxGetChild(dialog,XmDIALOG_CANCEL_BUTTON));
-	XtUnmanageChild(XmMessageBoxGetChild(dialog,XmDIALOG_HELP_BUTTON));
-	XtSetSensitive(XmMessageBoxGetChild(dialog,XmDIALOG_HELP_BUTTON),FALSE);
+	XtUnmanageChild(XtNameToWidget(dialog, "Cancel"));
+	XtUnmanageChild(XtNameToWidget(dialog, "Help"));
+	XtSetSensitive(XtNameToWidget(dialog, "Help"),FALSE);
 	XtAddCallback(dialog,XmNokCallback,killDialog,NULL);
 
 	switch(dialogType) {
 	case XmDIALOG_WARNING:
-		str=XmStringCreateLtoR("WarningDialog",XmSTRING_DEFAULT_CHARSET);
+		str=XmStringGenerate("WarningDialog", XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 		break;
 	case XmDIALOG_ERROR:
-		str=XmStringCreateLtoR("ErrorDialog",XmSTRING_DEFAULT_CHARSET);
+		str=XmStringGenerate("ErrorDialog", XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 		break;
 	case XmDIALOG_INFORMATION:
-		str=XmStringCreateLtoR("InformationDialog",XmSTRING_DEFAULT_CHARSET);
+		str=XmStringGenerate("InformationDialog", XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 		break;
 	case XmDIALOG_MESSAGE:
-		str=XmStringCreateLtoR("MessageDialog",XmSTRING_DEFAULT_CHARSET);
+		str=XmStringGenerate("MessageDialog", XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 		break;
 	case XmDIALOG_QUESTION:
-		str=XmStringCreateLtoR("QuestionDialog",XmSTRING_DEFAULT_CHARSET);
+		str=XmStringGenerate("QuestionDialog", XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 		break;
 	case XmDIALOG_WORKING:
-		str=XmStringCreateLtoR("WorkDialog",XmSTRING_DEFAULT_CHARSET);
+		str=XmStringGenerate("WorkDialog", XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 		break;
 	default:
-		str=XmStringCreateLtoR("Dialog",XmSTRING_DEFAULT_CHARSET);
+		str=XmStringGenerate("Dialog", XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 		break;
 	}
 
-	str1 = XmStringCreateLtoR(message1,XmFONTLIST_DEFAULT_TAG);
-	str2 = XmStringCreateLtoR(message2,XmFONTLIST_DEFAULT_TAG);
+	str1 = XmStringGenerate(message1, XmFONTLIST_DEFAULT_TAG, XmCHARSET_TEXT, NULL);
+	str2 = XmStringGenerate(message2, XmFONTLIST_DEFAULT_TAG, XmCHARSET_TEXT, NULL);
 	string = XmStringConcat(str1,str2);
 
-	str3 = XmStringCreateLtoR("ALH ",XmFONTLIST_DEFAULT_TAG);
+	str3 = XmStringGenerate("ALH ", XmFONTLIST_DEFAULT_TAG, XmCHARSET_TEXT, NULL);
 	string2 = XmStringConcat(str3,str);
 
 	XtVaSetValues(dialog,
@@ -220,7 +220,7 @@ XtCallbackProc okCallback,XtPointer okParm,XtPointer userParm)
 
 	if (!dialog) {
 		dialog = XmCreateMessageDialog(parent, "Dialog", NULL, 0);
-		XtSetSensitive(XmMessageBoxGetChild(dialog,XmDIALOG_HELP_BUTTON),FALSE);
+		XtSetSensitive(XtNameToWidget(dialog, "Help"),FALSE);
 		XtAddCallback(dialog,XmNcancelCallback,(XtCallbackProc) XtUnmanageChild,NULL);
 
 	} else {
@@ -229,29 +229,29 @@ XtCallbackProc okCallback,XtPointer okParm,XtPointer userParm)
 
 	switch(dialogType) {
 	case XmDIALOG_WARNING:
-		str = XmStringCreateSimple("ALH WarningDialog");
+		str = XmStringCreateLocalized("ALH WarningDialog");
 		break;
 	case XmDIALOG_ERROR:
-		str = XmStringCreateSimple("ALH ErrorDialog");
+		str = XmStringCreateLocalized("ALH ErrorDialog");
 		break;
 	case XmDIALOG_INFORMATION:
-		str = XmStringCreateSimple("ALH InformationDialog");
+		str = XmStringCreateLocalized("ALH InformationDialog");
 		break;
 	case XmDIALOG_MESSAGE:
-		str = XmStringCreateSimple("ALH MessageDialog");
+		str = XmStringCreateLocalized("ALH MessageDialog");
 		break;
 	case XmDIALOG_QUESTION:
-		str = XmStringCreateSimple("ALH QuestionDialog");
+		str = XmStringCreateLocalized("ALH QuestionDialog");
 		break;
 	case XmDIALOG_WORKING:
-		str = XmStringCreateSimple("ALH WorkingDialog");
+		str = XmStringCreateLocalized("ALH WorkingDialog");
 		break;
 	default:
-		str = XmStringCreateSimple("ALH InformationDialog");
+		str = XmStringCreateLocalized("ALH InformationDialog");
 		break;
 	}
 
-	str2=XmStringCreateLtoR(message1,XmSTRING_DEFAULT_CHARSET);
+	str2=XmStringGenerate(message1, XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 	XtVaSetValues(dialog,
 	    XmNuserData,      userParm,
 #ifndef WIN32 
@@ -309,15 +309,14 @@ void errMsg(const char *fmt, ...)
 
 		if (warningboxMessages > 30) return;
 
-		cstring=XmStringCreateLtoR(lstring,XmSTRING_DEFAULT_CHARSET);
+		cstring=XmStringGenerate(lstring, XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 		XtVaGetValues(warningbox, XmNmessageString, &cstringOld, NULL);
 		cstringNew = XmStringConcat(cstringOld,cstring);
 		XmStringFree(cstring);
 		XmStringFree(cstringOld);
 		if (warningboxMessages == 30){
-			cstring=XmStringCreateLtoR(
-				"\nOnly first 30 messages are displayed and logged\n",
-				XmSTRING_DEFAULT_CHARSET);
+			cstring=XmStringGenerate(
+				"\nOnly first 30 messages are displayed and logged\n", XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 			cstringOld = cstringNew;
 			cstringNew = XmStringConcat(cstringOld,cstring);
 			XmStringFree(cstring);
@@ -331,7 +330,7 @@ void errMsg(const char *fmt, ...)
 		alBeep(display);
 		alBeep(display);
 		alBeep(display);
-		cstring=XmStringCreateLtoR(lstring,XmSTRING_DEFAULT_CHARSET);
+		cstring=XmStringGenerate(lstring, XmSTRING_DEFAULT_CHARSET, XmCHARSET_TEXT, NULL);
 		nargs=0;
 		XtSetArg(args[nargs],XmNtitle,"ALH Warning"); 
 		nargs++;
@@ -344,8 +343,8 @@ void errMsg(const char *fmt, ...)
 #endif
 		    args,nargs);
 		XmStringFree(cstring);
-		XtDestroyWidget(XmMessageBoxGetChild(warningbox,XmDIALOG_CANCEL_BUTTON));
-		XtDestroyWidget(XmMessageBoxGetChild(warningbox,XmDIALOG_HELP_BUTTON));
+		XtDestroyWidget(XtNameToWidget(warningbox, "Cancel"));
+		XtDestroyWidget(XtNameToWidget(warningbox, "Help"));
 		/*XtAddCallback(warningbox,XmNokCallback,logMessageString,NULL);*/
 		XtAddCallback(warningbox,XmNokCallback,killWidget,NULL);
 		warningboxMessages = 1;

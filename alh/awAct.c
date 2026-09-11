@@ -266,7 +266,7 @@ static void actFileCallback(Widget widget, XtPointer calldata, XtPointer cbs)
 		/* New Name for Save Config File  */
 		createFileDialog(area->form_main,(void *)fileSetupCallback,
 		    (XtPointer)FILE_SAVEAS,(void *)XtUnmanageChild,(XtPointer)0,
-		    (XtPointer)area, "Save Config File",CONFIG_PATTERN,'\0');
+		    (XtPointer)area, "Save Config File",CONFIG_PATTERN,NULL);
 		break;
 
 	case MENU_FILE_SAVE:
@@ -299,7 +299,7 @@ static void actFileCallback(Widget widget, XtPointer calldata, XtPointer cbs)
 		/* Name for PrintTree Report  */
 		createFileDialog(area->form_main,(void *)fileSetupCallback,
 		    (XtPointer)FILE_PRINT,(void *)XtUnmanageChild,(XtPointer)0,
-		    (XtPointer)area, "Report File ",TREEREPORT_PATTERN,'\0');
+		    (XtPointer)area, "Report File ",TREEREPORT_PATTERN,NULL);
 		break;
 
 	case MENU_FILE_QUIT:
@@ -698,8 +698,7 @@ static void actHelpCallback(Widget widget, XtPointer calldata, XtPointer cbs)
 /******************************************************
   checkActiveSelection
 ******************************************************/
-static int checkActiveSelection(area)
-ALINK *area;
+static int checkActiveSelection(ALINK *area)
 {
 
 	if (!area->selectionLink){
@@ -713,8 +712,7 @@ ALINK *area;
 /******************************************************
   checkActiveSelectionMainGroup
 ******************************************************/
-static int checkActiveSelectionMainGroup(area)
-ALINK *area;
+static int checkActiveSelectionMainGroup(ALINK *area)
 {
 	GCLINK *link;
 

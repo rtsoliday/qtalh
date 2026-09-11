@@ -22,7 +22,7 @@
 #include <ctype.h>
 
 #include <Xm/Xm.h>
-#include <Xm/AtomMgr.h>
+#include <X11/Xlib.h>
 #include <Xm/DialogS.h>
 #include <Xm/Form.h>
 #include <Xm/Frame.h>
@@ -146,7 +146,7 @@ static void forcePVUpdateDialogWidgets(struct forcePVWindow *forcePVWindow)
 	link =getSelectionLinkArea(forcePVWindow->area);
 
 	if (!link) {
-		string = XmStringCreateSimple("");
+		string = XmStringCreateLocalized("");
 		XtVaSetValues(forcePVWindow->nameTextW,XmNlabelString, string, NULL);
 		XmStringFree(string);
 		return;
@@ -157,15 +157,15 @@ static void forcePVUpdateDialogWidgets(struct forcePVWindow *forcePVWindow)
 		/* ---------------------------------
 	     	Group/Channel Name 
 	     	--------------------------------- */
-		if (linkType == GROUP) string = XmStringCreateSimple("Group Name:");
-		else string = XmStringCreateSimple("Channel Name:");
+		if (linkType == GROUP) string = XmStringCreateLocalized("Group Name:");
+		else string = XmStringCreateLocalized("Channel Name:");
 		XtVaSetValues(forcePVWindow->nameLabelW, XmNlabelString, string, NULL);
 		XmStringFree(string);
 	
 		if (pgcData->alias){
-			string = XmStringCreateSimple(pgcData->alias);
+			string = XmStringCreateLocalized(pgcData->alias);
 		} else {
-			if (pgcData->name) string = XmStringCreateSimple(pgcData->name);
+			if (pgcData->name) string = XmStringCreateLocalized(pgcData->name);
 		}
 	}
 	XtVaGetValues(forcePVWindow->nameTextW, XmNlabelString, &oldString, NULL);
@@ -178,7 +178,7 @@ static void forcePVUpdateDialogWidgets(struct forcePVWindow *forcePVWindow)
 		XmToggleButtonGadgetSetState(forcePVWindow->forcePVdisabledToggleButton,
 			FALSE,FALSE);
 		XmTextFieldSetString(forcePVWindow->forcePVnameTextW,"");
-		string = XmStringCreateSimple("-----");
+		string = XmStringCreateLocalized("-----");
 		XtVaSetValues(forcePVWindow->forcePVmaskStringLabelW,
 		    XmNlabelString,string,NULL);
 		XmStringFree(string);
@@ -213,7 +213,7 @@ static void forcePVUpdateDialogWidgets(struct forcePVWindow *forcePVWindow)
 		(Boolean)pgcData->pforcePV->disabled,FALSE);
 
 	alGetMaskString(pgcData->pforcePV->forceMask,buff);
-	string = XmStringCreateSimple(buff);
+	string = XmStringCreateLocalized(buff);
 	XtVaSetValues(forcePVWindow->forcePVmaskStringLabelW, XmNlabelString, string, NULL);
 	XmStringFree(string);
 
@@ -334,7 +334,7 @@ static void forcePVCreateDialog(ALINK *area)
 		Atom         WM_DELETE_WINDOW;
 		XtVaSetValues(forcePVDialogShell,
 		    XmNdeleteResponse, XmDO_NOTHING, NULL);
-		WM_DELETE_WINDOW = XmInternAtom(XtDisplay(forcePVDialogShell),
+		WM_DELETE_WINDOW = XInternAtom(XtDisplay(forcePVDialogShell),
 		    "WM_DELETE_WINDOW", False);
 		XmAddWMProtocolCallback(forcePVDialogShell,WM_DELETE_WINDOW,
 		    (XtCallbackProc)forcePVDismissCallback, (XtPointer)forcePVWindow);
@@ -399,7 +399,7 @@ static void forcePVCreateDialog(ALINK *area)
         xmToggleButtonGadgetClass, form2,
         NULL);
 
-	string = XmStringCreateSimple("Force Process Variable Name (or CALC):");
+	string = XmStringCreateLocalized("Force Process Variable Name (or CALC):");
 	forcePVnameLabel = XtVaCreateManagedWidget("forcePVnameLabel",
 	    xmLabelGadgetClass, form2,
 	    XmNlabelString,            string,
@@ -424,7 +424,7 @@ static void forcePVCreateDialog(ALINK *area)
 	XtAddCallback(forcePVnameTextW, XmNactivateCallback,
 	    (XtCallbackProc)XmProcessTraversal, (XtPointer)XmTRAVERSE_NEXT_TAB_GROUP);
 
-	string = XmStringCreateSimple("Force Mask ");
+	string = XmStringCreateLocalized("Force Mask ");
 	forceMaskLabel = XtVaCreateManagedWidget("forceMaskLabel",
 	    xmLabelGadgetClass, form2,
 	    XmNlabelString,            string,
@@ -435,7 +435,7 @@ static void forcePVCreateDialog(ALINK *area)
 	XmStringFree(string);
 	prev = forceMaskLabel;
 
-	string = XmStringCreateSimple("-----");
+	string = XmStringCreateLocalized("-----");
 	forcePVmaskStringLabelW = XtVaCreateManagedWidget("forcePVmaskStringLabelW",
 	    xmLabelGadgetClass, form2,
 	    XmNlabelString,            string,
@@ -473,7 +473,7 @@ static void forcePVCreateDialog(ALINK *area)
 
 	XtManageChild(rowcol3);
 
-	string = XmStringCreateSimple("Force Value ");
+	string = XmStringCreateLocalized("Force Value ");
 	forcePVforceValueLabel = XtVaCreateManagedWidget("forcePVvalue",
 	    xmLabelGadgetClass, form2,
 	    XmNlabelString,            string,
@@ -498,7 +498,7 @@ static void forcePVCreateDialog(ALINK *area)
 	XtAddCallback(forcePVforceValueTextW, XmNactivateCallback,
 	    (XtCallbackProc)XmProcessTraversal, (XtPointer)XmTRAVERSE_NEXT_TAB_GROUP);
 
-	string = XmStringCreateSimple("Reset Value ");
+	string = XmStringCreateLocalized("Reset Value ");
 	forcePVresetValueLabel = XtVaCreateManagedWidget("forcePVresetValueLabel",
 	    xmLabelGadgetClass, form2,
 	    XmNlabelString,            string,
@@ -537,7 +537,7 @@ static void forcePVCreateDialog(ALINK *area)
 	    XmNmarginHeight,     0,
 	    NULL);
 
-	string = XmStringCreateSimple("Force CALC");
+	string = XmStringCreateLocalized("Force CALC");
 	forcePVCalcLabel = XtVaCreateManagedWidget("forcePVCalcLabel",
 	    xmLabelGadgetClass, form3,
 	    XmNlabelString,            string,
@@ -547,7 +547,7 @@ static void forcePVCreateDialog(ALINK *area)
 	    NULL);
 	XmStringFree(string);
 
-	string = XmStringCreateSimple("Expression: ");
+	string = XmStringCreateLocalized("Expression: ");
 	forcePVCalcExpressionLabel = XtVaCreateManagedWidget("forcePVCalcExpression",
 	    xmLabelGadgetClass, form3,
 	    XmNlabelString,            string,
@@ -580,7 +580,7 @@ static void forcePVCreateDialog(ALINK *area)
 	for (i=0;i<NO_OF_CALC_PVS;i++) {
 
 		pvid[0]=letter[i];
-		string = XmStringCreateSimple(pvid);
+		string = XmStringCreateLocalized(pvid);
 
 		XtVaCreateManagedWidget("forcePVCalcPVLabel",
 		    xmLabelGadgetClass, form3,
@@ -672,7 +672,8 @@ XtPointer cbs)
 	XtVaGetValues(widget, XmNuserData, &maskWidget, NULL);
 
 	XtVaGetValues(maskWidget, XmNlabelString, &string, NULL);
-	XmStringGetLtoR(string, XmFONTLIST_DEFAULT_TAG, &mask);
+	mask = XmStringUnparse(string, NULL, XmCHARSET_TEXT, XmCHARSET_TEXT,
+	    NULL, 0, XmOUTPUT_ALL);
 	XmStringFree(string);
 
 	if (!XmToggleButtonGadgetGetState(widget)) {
@@ -698,7 +699,7 @@ XtPointer cbs)
 		}
 	}
 
-	string = XmStringCreateSimple(mask);
+	string = XmStringCreateLocalized(mask);
 	XtVaSetValues(maskWidget, XmNlabelString, string, NULL);
 	XmStringFree(string);
 	XtFree(mask);
@@ -741,7 +742,8 @@ XtPointer cbs)
 	     --------------------------------- */
 	/*  update link field  - forcePVMask */
 	XtVaGetValues(forcePVWindow->forcePVmaskStringLabelW, XmNlabelString, &string, NULL);
-	XmStringGetLtoR(string,XmFONTLIST_DEFAULT_TAG,&buff);
+	buff = XmStringUnparse(string, NULL, XmCHARSET_TEXT, XmCHARSET_TEXT,
+	    NULL, 0, XmOUTPUT_ALL);
 	XmStringFree(string);
 	alSetMask(buff,&(pforcePV->forceMask));
 	XtFree(buff);

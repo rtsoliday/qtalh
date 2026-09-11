@@ -69,8 +69,7 @@ static void forceMaskChangeCallback( Widget widget,XtPointer calldata,XtPointer 
 /******************************************************
   forceMaskUpdateDialog
 ******************************************************/
-void forceMaskUpdateDialog(area)
-ALINK  *area;
+void forceMaskUpdateDialog(ALINK  *area)
 {
 	struct forceMaskWindow *forceMaskWindow;
 
@@ -86,9 +85,7 @@ ALINK  *area;
 /******************************************************
   forceMaskShowDialog
 ******************************************************/
-void forceMaskShowDialog(area, menuButton)
-ALINK    *area;
-Widget   menuButton;
+void forceMaskShowDialog(ALINK    *area, Widget   menuButton)
 {
 	struct forceMaskWindow *forceMaskWindow;
 
@@ -126,8 +123,7 @@ Widget   menuButton;
   forceMaskUpdateDialogWidgets
 ******************************************************/
 
-static void forceMaskUpdateDialogWidgets(forceMaskWindow)
-struct forceMaskWindow *forceMaskWindow;
+static void forceMaskUpdateDialogWidgets(struct forceMaskWindow *forceMaskWindow)
 {
 	struct gcData *pgcData;
 	GCLINK *link;
@@ -141,10 +137,10 @@ struct forceMaskWindow *forceMaskWindow;
 
 	if (!link) {
 
-		string = XmStringCreateSimple("");
+		string = XmStringCreateLocalized("");
 		XtVaSetValues(forceMaskWindow->nameTextW,XmNlabelString, string, NULL);
 		XmStringFree(string);
-		string = XmStringCreateSimple("-----");
+		string = XmStringCreateLocalized("-----");
 		XtVaSetValues(forceMaskWindow->currentMaskStringLabelW, XmNlabelString, string, NULL);
 		XtVaSetValues(forceMaskWindow->resetMaskStringLabelW, XmNlabelString, string, NULL);
 		XtVaSetValues(forceMaskWindow->alarmMaskStringLabelW, XmNlabelString, string, NULL);
@@ -164,15 +160,15 @@ struct forceMaskWindow *forceMaskWindow;
 	/* ---------------------------------
 	     Group/Channel Name 
 	     --------------------------------- */
-	if (linkType == GROUP) string = XmStringCreateSimple("Group Name:");
-	else string = XmStringCreateSimple("Channel Name:");
+	if (linkType == GROUP) string = XmStringCreateLocalized("Group Name:");
+	else string = XmStringCreateLocalized("Channel Name:");
 	XtVaSetValues(forceMaskWindow->nameLabelW, XmNlabelString, string, NULL);
 	XmStringFree(string);
 
 	if (pgcData->alias){
-		string = XmStringCreateSimple(pgcData->alias);
+		string = XmStringCreateLocalized(pgcData->alias);
 	} else {
-		string = XmStringCreateSimple(pgcData->name);
+		string = XmStringCreateLocalized(pgcData->name);
 	}
 	XtVaSetValues(forceMaskWindow->nameTextW, XmNlabelString, string, NULL);
 	XmStringFree(string);
@@ -180,14 +176,14 @@ struct forceMaskWindow *forceMaskWindow;
 	/* ---------------------------------
 	     Current Mask 
 	     --------------------------------- */
-	if (linkType == GROUP) string = XmStringCreateSimple("Current Mask Summary:");
-	else string = XmStringCreateSimple("Current Mask:");
+	if (linkType == GROUP) string = XmStringCreateLocalized("Current Mask Summary:");
+	else string = XmStringCreateLocalized("Current Mask:");
 	XtVaSetValues(forceMaskWindow->currentMaskLabel, XmNlabelString, string, NULL);
 	XmStringFree(string);
 
 	if (linkType == GROUP) awGetMaskString(((struct groupData *)pgcData)->mask,buff);
 	else alGetMaskString(((struct chanData *)pgcData)->curMask,buff);
-	string = XmStringCreateSimple(buff);
+	string = XmStringCreateLocalized(buff);
 	XtVaSetValues(forceMaskWindow->currentMaskStringLabelW, XmNlabelString, string, NULL);
 
 	/*
@@ -215,10 +211,10 @@ struct forceMaskWindow *forceMaskWindow;
 	/* ---------------------------------
 	     Reset Mask 
 	     --------------------------------- */
-	if (linkType == GROUP) string = XmStringCreateSimple("   ");
+	if (linkType == GROUP) string = XmStringCreateLocalized("   ");
 	else {
 		alGetMaskString(((struct chanData *)pgcData)->defaultMask,buff);
-		string = XmStringCreateSimple(buff);
+		string = XmStringCreateLocalized(buff);
 	}
 	XtVaSetValues(forceMaskWindow->resetMaskStringLabelW, XmNlabelString, string, NULL);
 	XmStringFree(string);
@@ -228,8 +224,7 @@ struct forceMaskWindow *forceMaskWindow;
 /******************************************************
   forceMaskCreateDialog
 ******************************************************/
-static void forceMaskCreateDialog(area)
-ALINK    *area;
+static void forceMaskCreateDialog(ALINK    *area)
 {
 	struct forceMaskWindow *forceMaskWindow;
 
@@ -281,7 +276,7 @@ ALINK    *area;
 		Atom         WM_DELETE_WINDOW;
 		XtVaSetValues(maskDialogShell,
 		    XmNdeleteResponse, XmDO_NOTHING, NULL);
-		WM_DELETE_WINDOW = XmInternAtom(XtDisplay(maskDialogShell),
+		WM_DELETE_WINDOW = XInternAtom(XtDisplay(maskDialogShell),
 		    "WM_DELETE_WINDOW", False);
 		XmAddWMProtocolCallback(maskDialogShell,WM_DELETE_WINDOW,
 		    (XtCallbackProc)forceMaskDismissCallback, (XtPointer)forceMaskWindow);
@@ -324,7 +319,7 @@ ALINK    *area;
 	/* ---------------------------------
 	     Alarm Mask 
 	     --------------------------------- */
-	string = XmStringCreateSimple("Current Mask:");
+	string = XmStringCreateLocalized("Current Mask:");
 	currentMaskLabel = XtVaCreateManagedWidget("currentMaskLabel",
 	    xmLabelGadgetClass, form,
 	    XmNlabelString,     string,
@@ -337,7 +332,7 @@ ALINK    *area;
 	    NULL);
 	XmStringFree(string);
 
-	string = XmStringCreateSimple("-----");
+	string = XmStringCreateLocalized("-----");
 	currentMaskStringLabelW = XtVaCreateManagedWidget("currentMaskStringLabelW",
 	    xmLabelGadgetClass, form,
 	    XmNlabelString,     string,
@@ -350,7 +345,7 @@ ALINK    *area;
 	    NULL);
 	XmStringFree(string);
 
-	string = XmStringCreateSimple("Reset Mask:");
+	string = XmStringCreateLocalized("Reset Mask:");
 	resetMaskLabel = XtVaCreateManagedWidget("resetMaskLabel",
 	    xmLabelGadgetClass, form,
 	    XmNlabelString,     string,
@@ -363,7 +358,7 @@ ALINK    *area;
 	    NULL);
 	XmStringFree(string);
 
-	string = XmStringCreateSimple("-----");
+	string = XmStringCreateLocalized("-----");
 	resetMaskStringLabelW = XtVaCreateManagedWidget("resetMaskStringLabelW",
 	    xmLabelGadgetClass, form,
 	    XmNlabelString,     string,
@@ -375,7 +370,7 @@ ALINK    *area;
 	    NULL);
 	XmStringFree(string);
 
-	string = XmStringCreateSimple("Mask:");
+	string = XmStringCreateLocalized("Mask:");
 	alarmMaskLabel = XtVaCreateManagedWidget("alarmMaskLabel",
 	    xmLabelGadgetClass, form,
 	    XmNlabelString,     string,
@@ -388,7 +383,7 @@ ALINK    *area;
 	    NULL);
 	XmStringFree(string);
 
-	string = XmStringCreateSimple("-----");
+	string = XmStringCreateLocalized("-----");
 	alarmMaskStringLabelW = XtVaCreateManagedWidget("alarmMaskStringLabelW",
 	    xmLabelGadgetClass, form,
 	    XmNlabelString,     string,
@@ -472,7 +467,8 @@ static void forceMaskChangeCallback(Widget widget,XtPointer calldata,XtPointer c
 	XtVaGetValues(widget, XmNuserData, &maskWidget, NULL);
 
 	XtVaGetValues(maskWidget, XmNlabelString, &string, NULL);
-	XmStringGetLtoR(string, XmFONTLIST_DEFAULT_TAG, &mask);
+	mask = XmStringUnparse(string, NULL, XmCHARSET_TEXT, XmCHARSET_TEXT,
+	    NULL, 0, XmOUTPUT_ALL);
 	XmStringFree(string);
 
 	if (!XmToggleButtonGadgetGetState(widget)) {
@@ -498,7 +494,7 @@ static void forceMaskChangeCallback(Widget widget,XtPointer calldata,XtPointer c
 		}
 	}
 
-	string = XmStringCreateSimple(mask);
+	string = XmStringCreateLocalized(mask);
 	XtVaSetValues(maskWidget, XmNlabelString, string, NULL);
 	XmStringFree(string);
 	XtFree(mask);
@@ -549,7 +545,8 @@ static void forceMaskApplyCallback(Widget widget,XtPointer calldata,XtPointer cb
 	     Update alarm Mask 
 	     --------------------------------- */
 	XtVaGetValues(forceMaskWindow->alarmMaskStringLabelW, XmNlabelString, &string, NULL);
-	XmStringGetLtoR(string,XmFONTLIST_DEFAULT_TAG,&buff);
+	buff = XmStringUnparse(string, NULL, XmCHARSET_TEXT, XmCHARSET_TEXT,
+	    NULL, 0, XmOUTPUT_ALL);
 	XmStringFree(string);
 	alSetMask(buff,&mask);
 	if (linkType == CHANNEL) {

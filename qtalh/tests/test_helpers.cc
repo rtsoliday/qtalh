@@ -52,10 +52,19 @@ struct Queue {
 };
 QByteArray receivedRpc;
 QVector<QByteArray> receivedRpcRecords;
-bool_t stringXdr(XDR* x, char** p) {
+#ifdef __APPLE__
+bool_t stringXdr(XDR* x, void* data, unsigned int) {
+#else
+bool_t stringXdr(XDR* x, void* data, ...) {
+#endif
+  auto p = static_cast<char**>(data);
   return xdr_string(x, p, 8192);
 }
-bool_t voidXdr(XDR*, void*) {
+#ifdef __APPLE__
+bool_t voidXdr(XDR*, void*, unsigned int) {
+#else
+bool_t voidXdr(XDR*, void*, ...) {
+#endif
   return TRUE;
 }
 bool_t rpcArgs(SVCXPRT* transport, xdrproc_t codec, caddr_t data, bool release = false) {
@@ -78,7 +87,7 @@ void destroyRpcTransport(SVCXPRT* transport) {
 }
 void rpcDispatch(svc_req* request, SVCXPRT* transport) {
   if (request->rq_proc == 0) {
-    svc_sendreply(transport, reinterpret_cast<xdrproc_t>(voidXdr), nullptr);
+    svc_sendreply(transport, voidXdr, nullptr);
     return;
   }
   if (request->rq_proc != 1) {
@@ -86,15 +95,14 @@ void rpcDispatch(svc_req* request, SVCXPRT* transport) {
     return;
   }
   char* text = nullptr;
-  if (!rpcArgs(transport, reinterpret_cast<xdrproc_t>(stringXdr),
-                   reinterpret_cast<caddr_t>(&text))) {
+  if (!rpcArgs(transport, stringXdr, reinterpret_cast<caddr_t>(&text))) {
     svcerr_decode(transport);
     return;
   }
   receivedRpc = text ? QByteArray(text) : QByteArray();
   receivedRpcRecords.append(receivedRpc);
-  svc_sendreply(transport, reinterpret_cast<xdrproc_t>(voidXdr), nullptr);
-  rpcArgs(transport, reinterpret_cast<xdrproc_t>(stringXdr), reinterpret_cast<caddr_t>(&text), true);
+  svc_sendreply(transport, voidXdr, nullptr);
+  rpcArgs(transport, stringXdr, reinterpret_cast<caddr_t>(&text), true);
 }
 struct RpcServer {
   SVCXPRT* transport = nullptr;

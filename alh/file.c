@@ -26,7 +26,7 @@
 #include <sys/stat.h>  
 
 #include <Xm/Protocols.h>
-#include <Xm/AtomMgr.h>
+#include <X11/Xlib.h>
 
 #include "alh.h"
 
@@ -105,7 +105,7 @@ int _message_broadcast_flag=0;         /* MessBroadcast Sys Albert */
 char messBroadcastLockFileName[250];   /* FN for lock file. Albert */
 char messBroadcastInfoFileName[250];   /* FN for info file. Albert */
 int  messBroadcastDeskriptor;          /* FD for lock file. Albert */
-void broadcastMessTesting();
+void broadcastMessTesting(Widget w);
 XtIntervalId broadcastMessTimeoutId=0;
 int amIsender=0;
 int notsave=0;     
@@ -446,7 +446,8 @@ XmFileSelectionBoxCallbackStruct *cbs)
 
 
 	/* get the filename string */
-	XmStringGetLtoR(cbs->value, XmSTRING_DEFAULT_CHARSET, &filename);
+	filename = XmStringUnparse(cbs->value, NULL, XmCHARSET_TEXT, XmCHARSET_TEXT,
+	    NULL, 0, XmOUTPUT_ALL);
 
 	if ( DEBUG == 1 )
 	   printf("\nfileSetupCallback: filename is %s \n", filename);
@@ -537,7 +538,7 @@ int programId,Widget widget)
 			break;
 
 		default:
-			pattern = '\0';
+			pattern = NULL;
 			dir = psetup.configDir;
 			strcpy(fileTypeString,"Filename");
 			break;
@@ -556,7 +557,7 @@ int programId,Widget widget)
 			    (void *)exit_quit,(XtPointer)FALSE,
 			    (XtPointer)NULL,
 			    fileTypeString, (String)pattern, dir);
-			WM_DELETE_WINDOW = XmInternAtom(XtDisplay(fileSelectionBox),
+			WM_DELETE_WINDOW = XInternAtom(XtDisplay(fileSelectionBox),
 			    "WM_DELETE_WINDOW", False);
 			XmAddWMProtocolCallback(XtParent(fileSelectionBox),WM_DELETE_WINDOW,
 			    (XtCallbackProc)exit_quit,(XtPointer)FALSE );
@@ -1139,10 +1140,7 @@ static void printUsage(char *pgm)
 /******************************************************
   fileSetupInit
 ******************************************************/
-void fileSetupInit( widget, argc, argv)
-Widget widget;
-int argc;
-char *argv[];
+void fileSetupInit(Widget widget, int argc, char *argv[])
 {
 	size_t len;
 	char   configFile[NAMEDEFAULT_SIZE];
@@ -1285,7 +1283,7 @@ char messBuff[500];
 char buff[250];
 char *blank;
 int notsave_time;
-void notsaveProc();
+void notsaveProc(Widget w);
 
 broadcastMessTimeoutId=XtAppAddTimeOut(appContext,broadcastMessDelay,(XtTimerCallbackProc)broadcastMessTesting,w);
 if ( (fp=fopen(messBroadcastInfoFileName,"r")) == NULL )

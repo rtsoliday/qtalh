@@ -90,12 +90,12 @@ void setLineRoutine(void *area,struct subWindow *subWindow,int program)
 {
 	/* Set line widget creation/modify routines to default values */
 	if (isTreeWindow(area,subWindow)) {
-		subWindow->alViewNth = ( void  *(*)())alViewNthTreeW;
-		subWindow->alViewNext = ( void *(*)())alViewNextTreeW;
+		subWindow->alViewNth = alViewNthTreeW;
+		subWindow->alViewNext = alViewNextTreeW;
 		subWindow->alViewMaxSevrN = alViewMaxSevrNTreeW;
 	} else {
-		subWindow->alViewNth = (void  *(*)())alViewNthGroupW;
-		subWindow->alViewNext = (void *(*)())alViewNextGroupW;
+		subWindow->alViewNth = alViewNthGroupW;
+		subWindow->alViewNext = alViewNextGroupW;
 		subWindow->alViewMaxSevrN = alViewMaxSevrNGroupW;
 	}
 }

@@ -22,7 +22,7 @@
 #include <stdlib.h>
 
 #include <Xm/Xm.h>
-#include <Xm/AtomMgr.h>
+#include <X11/Xlib.h>
 #include <Xm/DialogS.h>
 #include <Xm/PushB.h>
 #include <Xm/RowColumn.h>
@@ -82,7 +82,7 @@ void currentAlarmHistoryWindow(ALINK *area,Widget menuButton)
 		XtVaSetValues(popup_shell,
 		    XmNdeleteResponse,       XmDO_NOTHING,
 		    NULL);
-		WM_DELETE_WINDOW = XmInternAtom(XtDisplay(popup_shell),
+		WM_DELETE_WINDOW = XInternAtom(XtDisplay(popup_shell),
 		    "WM_DELETE_WINDOW", False);
 		XmAddWMProtocolCallback(popup_shell,WM_DELETE_WINDOW,
 		    (XtCallbackProc)closeCurrentCallback,
@@ -104,7 +104,7 @@ void currentAlarmHistoryWindow(ALINK *area,Widget menuButton)
 		previous = button;
 
 		/* add title line */
-		xstr = XmStringCreateSimple(
+		xstr = XmStringCreateLocalized(
 		    "    TIME_STAMP       PROCESS_VARIABLE_NAME          "
 		    "STATUS     SEVERITY   VALUE       ");
 		XtVaCreateManagedWidget("CurrentTitle",
@@ -213,7 +213,7 @@ void updateCurrentAlarmWindow(ALINK *area)
 
 		j = area->currentAlarmIndex;
 		for (i=0;i<10;i++){
-			xstr = XmStringCreateSimple(area->currentAlarmString[j]);
+			xstr = XmStringCreateLocalized(area->currentAlarmString[j]);
 			XtVaSetValues(area->currentAlarm[i],
 			    XmNlabelString, xstr,
 			    NULL);
