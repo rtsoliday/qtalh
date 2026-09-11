@@ -95,7 +95,8 @@ $GUIDANCE https://example.invalid/guide
   }
   void legacyMasks() {
     const QHash<QString, QString> masks = {{"D", "-D---"},     {"DA", "-DA--"}, {"---D-", "-D---"},
-                                           {"LATDC", "CDATL"}, {"DD", "-D---"}, {"-", "-----"}};
+                                           {"LATDC", "CDATL"}, {"DD", "-D---"}, {"-", "-----"},
+                                           {"0", "-----"}, {"DX", "-D---"}, {"cdatl", "-----"}};
     for (auto i = masks.cbegin(); i != masks.cend(); ++i) {
       auto d = parseConfig("GROUP NULL root\nCHANNEL root pv " + i.key() + "\n$FORCEPV gate " +
                            i.key() + " 1 0\n");
@@ -106,7 +107,33 @@ $GUIDANCE https://example.invalid/guide
       QCOMPARE(e.state(d.channels()[0]).mask.text(), i.value());
       QCOMPARE(parseConfig(writeConfig(d)).channels()[0]->mask.text(), i.value());
     }
-    QVERIFY_THROWS_EXCEPTION(ParseError, Mask::parse("DX"));
+  }
+  void legacyForceValues_data() {
+    QTest::addColumn<QString>("input");
+    QTest::addColumn<QString>("effective");
+    QTest::newRow("linac order") << "gate 0 1 -D---" << "gate ----- 1 0";
+    QTest::newRow("invalid force") << "gate D bad 2" << "gate -D--- 1 0";
+    QTest::newRow("invalid reset") << "gate D 1 bad" << "gate -D--- 1 0";
+    QTest::newRow("numeric prefix") << "gate D 1 0junk" << "gate -D--- 1 0";
+    QTest::newRow("force suffix") << "gate D 1junk 2" << "gate -D--- 1 0";
+    QTest::newRow("defaults") << "gate D" << "gate -D--- 1 0";
+    QTest::newRow("pv only") << "gate" << "gate ----- 1 0";
+    QTest::newRow("lowercase ne") << "gate D 1 ne" << "gate -D--- 1 NE";
+    QTest::newRow("extra tokens") << "gate D 1 0 ignored" << "gate -D--- 1 0";
+  }
+  void legacyForceValues() {
+    QFETCH(QString, input);
+    QFETCH(QString, effective);
+    auto d = parseConfig("GROUP NULL root\n$FORCEPV " + input +
+                         "\nCHANNEL root pv ---T-\n");
+    QCOMPARE(d.root->option("FORCEPV"), effective);
+    Engine e(d);
+    auto n = d.channels()[0];
+    e.forceValue(d.root.get(), 1);
+    QCOMPARE(e.state(n).mask.text(), effective.split(' ')[1]);
+    e.forceValue(d.root.get(), 0);
+    QCOMPARE(e.state(n).mask.text(), QString("---T-"));
+    QCOMPARE(writeConfig(parseConfig(writeConfig(d))), writeConfig(d));
   }
   void siblingGroupNames() {
     auto d = parseConfig("GROUP NULL root\nGROUP root child\nCHANNEL child pv1\n"
@@ -125,7 +152,6 @@ $GUIDANCE https://example.invalid/guide
     QTest::newRow("missing root") << "CHANNEL root pv";
     QTest::newRow("bad parent") << "GROUP NULL root\nCHANNEL missing pv";
     QTest::newRow("two roots") << "GROUP NULL a\nGROUP NULL b";
-    QTest::newRow("mask") << "GROUP NULL a\nCHANNEL a pv X----";
     QTest::newRow("guidance") << "GROUP NULL a\n$GUIDANCE\nunclosed";
     QTest::newRow("unknown") << "GROUP NULL a\n$UNKNOWN abc";
     QTest::newRow("bad count") << "GROUP NULL a\nCHANNEL a pv\n$ALARMCOUNTFILTER -2 4";

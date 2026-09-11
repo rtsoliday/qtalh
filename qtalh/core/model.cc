@@ -15,14 +15,13 @@ Mask Mask::parse(const QString& text) {
   Mask result;
   const QString letters = "CDATL";
   // Legacy ALH treats masks as sets of letters, including short/reordered masks.
-  // Keep diagnostics for unknown letters instead of silently accepting typos.
+  // Like alSetMask, ignore all characters other than the five mask letters.
   for (auto ch : text) {
     if (ch == '-')
       continue;
     int bit = letters.indexOf(ch);
-    if (bit < 0)
-      throw ParseError("Invalid mask: " + text);
-    result[bit] = true;
+    if (bit >= 0)
+      result[bit] = true;
   }
   return result;
 }

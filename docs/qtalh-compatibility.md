@@ -55,6 +55,14 @@ reconfiguring its Force PV, or closing/reloading the engine, discards it. Succes
 settings are not replayed over subsequent IOC changes. Manual ACKT changes retain
 the existing explicit-retry behavior.
 
+Mask parsing follows legacy `alSetMask`: only uppercase `C`, `D`, `A`, `T`,
+and `L` set bits; other characters are ignored. `$FORCEPV` retains the legacy
+PV/mask/force/reset order and numeric parsing defaults (force 1, reset 0).
+An invalid force value stops numeric parsing; an invalid reset value becomes 0.
+Lowercase `ne` is accepted. Loaded directives are normalized to their effective
+values for runtime, editing, and saving. For example, `gate 0 1 -D---` becomes
+`gate ----- 1 0`; the misplaced mask is not moved to another field.
+
 A `FORCEPV CALC` directive requires a nonempty `FORCEPV_CALC` expression. This
 check runs after the entire configuration and its includes have been read, so
 expression ordering remains flexible. Invalid reloads preserve the running

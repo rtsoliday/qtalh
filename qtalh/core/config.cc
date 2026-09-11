@@ -9,6 +9,7 @@
 #include <QSet>
 #include <QTextStream>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 #include <postfix.h>
 namespace alh {
@@ -169,18 +170,25 @@ public:
         if (name == "BEEPSEVR")
           severityValue(value);
         if (name == "FORCEPV") {
-          if (args.size() < 2 || args.size() > 4)
-            fail("FORCEPV needs PV, mask, optional force/reset values");
-          Mask::parse(args[1]);
-          bool ok = true;
-          if (args.size() > 2)
-            args[2].toDouble(&ok);
-          if (!ok)
-            fail("Invalid force value");
-          if (args.size() > 3 && args[3] != "NE")
-            args[3].toDouble(&ok);
-          if (!ok)
-            fail("Invalid reset value");
+          // alConfig.c reads the numeric tail with sscanf: a failed force
+          // conversion leaves force=1/reset=0 and stops reading; an invalid
+          // reset defaults to zero. Normalize once so runtime and editor use
+          // the same effective values, without guessing a different order.
+          double forced = 1, reset = 0;
+          char resetText[10] = {};
+          const auto tail = args.mid(2).join(' ').toLocal8Bit();
+          double parsed = 0;
+          const int count = std::sscanf(tail.constData(), "%lf%9s", &parsed, resetText);
+          if (count >= 1)
+            forced = parsed;
+          const bool ne = count == 2 &&
+                          (QString::fromLatin1(resetText).startsWith("NE") ||
+                           QString::fromLatin1(resetText).startsWith("ne"));
+          if (count == 2 && !ne && std::sscanf(resetText, "%lf", &reset) != 1)
+            reset = 0;
+          value = args[0] + " " + Mask::parse(args.value(1)).text() + " " +
+                  QString::number(forced, 'g', 17) + " " +
+                  (ne ? QString("NE") : QString::number(reset, 'g', 17));
         }
         if (name == "FORCEPV_CALC") {
           QByteArray encoded = value.toLocal8Bit(),
