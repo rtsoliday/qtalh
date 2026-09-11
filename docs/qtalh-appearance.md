@@ -1,19 +1,25 @@
 # Motif appearance comparison
 
-The Qt presentation was compared on the local X display using
-`/usr/local/iocapps/opsys/asdops/alh/Rad_Mon.alhConfig` with these commands:
+This page records historical comparisons and remaining appearance differences.
+The initial Qt/Motif comparison used a site-local Radiation Monitors
+configuration (`Rad_Mon.alhConfig`) and an installed `bell.oga` sound. Those
+site files and the original log directories are not part of this repository.
+The configuration was used for viewing/navigation; automated transitions used
+an isolated test IOC.
+
+For a reproducible comparison using repository-owned fixtures on Linux, install
+the [test prerequisites](../qtalh/tests/README.md), then run from the root:
 
 ```sh
-./bin/Linux-x86_64/alh -m 0 \
-  -p /usr/share/sounds/freedesktop/stereo/bell.oga \
-  -l /home/oxygen/SOLIDAY/github/alh/junklogs \
-  /usr/local/iocapps/opsys/asdops/alh/Rad_Mon.alhConfig
-
-./bin/Linux-x86_64/qtalh -m 0 \
-  -p /usr/share/sounds/freedesktop/stereo/bell.oga \
-  -l /home/oxygen/SOLIDAY/github/alh/qtjunklogs \
-  /usr/local/iocapps/opsys/asdops/alh/Rad_Mon.alhConfig
+make alh QT_VERSION=5
+xvfb-run -a -s '-screen 0 1600x1000x24' \
+  env QT_QPA_PLATFORM=xcb make -C qtalh QT_VERSION=5 test-visual
 ```
+
+This creates fresh Motif/Qt reference captures and a Qt dialog gallery under
+`qtalh/O.Linux-x86_64-qt5/test-artifacts/`. It does not recreate the site-specific
+Radiation Monitors screen. On macOS use an available X11/XQuartz display and
+the matching object-directory suffix.
 
 The compact runtime window now matches Motif's 220×35 default size, single
 facility-name button, aggregated mask suffix and blue-gray normal background.
@@ -36,9 +42,9 @@ continues to own selection data and alarm updates. Single-clicking a group name
 in the right pane selects it; double-clicking opens its contents. The arrow
 expands or collapses that group's branch in the left pane.
 
-Regression coverage in `tests/test_ui.cc` checks runtime size and labels, long
+Regression coverage in `qtalh/tests/test_ui.cc` checks runtime size and labels, long
 names, row hit targets, default expansion, leaf-group arrows, channel selection,
-normal annotations and pane resizing. `make -C qtalh test-ui test-visual` passes;
+normal annotations and pane resizing. The recorded `make -C qtalh test-ui test-visual` run passed;
 the visual test also compares alarm logs against Motif using an isolated IOC.
 Valgrind reports no memory errors or lost allocations in the checked runtime,
 row-interaction, dialog and repeated-window tests.
@@ -47,12 +53,12 @@ transitions for automated testing remain confined to the test IOC.
 
 Remaining appearance differences include platform font rasterization and window-manager decorations. The subsequent auxiliary-window pass is described below. Printing still uses the Qt system print dialog.
 
-Alarm files now use QMediaPlayer instead of QSoundEffect, allowing the supplied
+Alarm audio playback uses QMediaPlayer instead of QSoundEffect, allowing the site
 Ogg/Vorbis `bell.oga` to decode. Qt 5 uses its platform media backend;
 Qt 6 uses QMediaPlayer with QAudioOutput. The UI test decodes and plays a bundled
 Ogg/Vorbis fixture twice with output muted. On macOS it runs this case in a
 native Cocoa child process so media callbacks receive the correct event loop.
-The radiation-monitor launch produces no sound-decoding error. Audible output
+The recorded Radiation Monitors launch produced no sound-decoding error. Audible output
 through the operator's speakers still needs a listening check. See the
 [Qt audio overview](https://doc.qt.io/qt-6.10/audiooverview.html) for media-format
 support and backend requirements.
@@ -92,7 +98,8 @@ The print dialog retains Qt's printer controls; its structure is platform
 specific. Help topics still open the external browser. Pixel-identical rendering
 is not expected across font libraries, Qt versions, and window managers.
 
-`test_visual dialogGallery` captures both runtime and editor windows plus their
+From `qtalh/`, `O.Linux-x86_64-qt5/test_visual dialogGallery` captures both
+runtime and editor windows plus their
 auxiliary dialogs in `qtalh/O.<OS>-<ARCH>-qt<version>/test-artifacts/dialogs/`.
 The full `test-visual` target also runs the loopback-only IOC comparison and
 writes the Motif/Qt main-window captures and alarm transition trace.

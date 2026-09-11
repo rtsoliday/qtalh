@@ -112,7 +112,7 @@ explicit directory, the `loadConfig` library API uses the top-level file's direc
 | Group/channel properties, cut/copy/paste/clear, undo/redo | Editor and snapshot model | Add/undo/redo/save and cross-window clipboard tests; properties dialog smoke test |
 | Reports and printing | Text report, QPrinter | Implemented; actual paper output unverified |
 | Guidance URL/file/text, related processes, help | QDesktopServices, detached QProcess | Guidance dialog tested; external browser/command integration needs operator review |
-| Beep and audio files, including Ogg/Vorbis | QApplication beep, QMediaPlayer | Threshold logic tested; supplied bell.oga decoded and played twice muted; speaker output unverified |
+| Beep and audio files, including Ogg/Vorbis | QApplication beep, QMediaPlayer | Threshold logic tested; bundled tests/alarm.ogg decoded and played twice muted; speaker output unverified |
 | Main/runtime fonts, geometry, display | options.cc and Window | Options parsed; screenshot checks at fixed scale |
 | Master/slave lock and message/stop-logging/reload broadcast | services/logging.cc | Legacy-format broadcast/reload/stop messages; native POSIX lock handoff and shared-window lock lifetime tests |
 | Alarm/opmod files, bounded rotation, dated names, XML-ish format | services/logging.cc | File logging, bounded rotation, and dated/XML tests |
@@ -174,8 +174,9 @@ Regression checks cover date boundaries, mixed timestamp formats, filtering,
 result limits/cancellation, both browser actions, selection and action-target
 rebinding, unfinished edits, Properties Apply/Cancel and undo/redo, the disabled
 count, independent runtime activation, and quiet/enabled debug CLI output.
-The complete suites pass locally: 90 core, 42 UI, 29 IOC, 53 helper, and 4 visual
-checks (including setup/cleanup and data rows). Targeted Valgrind runs for the
+At the 2026-09-10 workflow checkpoint, the local suites passed 90 core, 42 UI,
+29 IOC, 53 helper, and 4 visual checks (including setup/cleanup and data rows).
+Targeted Valgrind runs for the
 new browser and dialog/runtime lifetimes report zero errors and no lost blocks.
 
 ## Command line and environment
@@ -183,7 +184,7 @@ new browser and dialog/runtime lifetimes report zero errors and no lost blocks.
 Supported legacy switches: `-c`, `-global`, `-S`, `-D`, `-s`, `-B`, `-L`,
 `-Lfile`, `-T`, `-xml`, `-debug`, `-desc_field`, `-caputackt`, `-mainwindow`,
 `-noerrorpopup`, `-maskcolor`, `-a`, `-o`, `-f`, `-l`, `-p`, `-P`, `-O`,
-`-m`, `-filter`, `-display`, `-geometry`, `-fn`, `-font`, `-help`, `-h`,
+`-m`, `-filter`, `-display`, `--display`, `-geometry`, `-fn`, `-font`, `-help`, `-h`,
 `-v`, `-version`. Help/version work without a GUI connection. Qt-specific
 `-platform` and `-style` are accepted. `--help`, `--version`, `--validate`, and
 `--` are additional conveniences. Unknown switches, including arbitrary Xt
@@ -192,17 +193,23 @@ resource overrides, fail with a diagnostic.
 `ALARMHANDLER` sets the configuration directory and `ALHMAINFONT` the runtime
 button font. Unless `-l` is supplied, the log directory follows the configuration
 directory from `-f` or `ALARMHANDLER`, matching legacy ALH. Standard `EPICS_CA_*` variables are read by EPICS Base. `DISPLAY`
-and `QT_QPA_PLATFORM` control the display backend. Win32-only `ComSpec` is
-outside scope. CDEV/CMLOG command-line extensions are outside scope.
+and `QT_QPA_PLATFORM` control the display backend. Windows uses `COMSPEC`
+(default `cmd.exe`) for configured shell commands. CDEV/CMLOG command-line
+extensions are outside scope.
 
-## Linux helper and service protocols
+For defaults, option arguments, configuration syntax, and operational guidance,
+see the [QtALH user guide](qtalh-user-guide.md). Windows builds the GUI and
+portable file services; System V queue helpers and `-P`/`-O` are unavailable.
+
+## Linux/macOS helper and service protocols
 
 `qtalh_printer host port key color` and `qtalh_DB host program key` are headless
 QCoreApplication programs. They preserve the original executable argument order
-without replacing `alh_printer` or `alh_DB`. The database program calls TI-RPC
+without replacing `alh_printer` or `alh_DB`. The database program calls the RPC
 program supplied in argument 2, version 1, procedure 1, using a single XDR string
-and a void reply. The Qt printer uses asynchronous TCP; blocking TI-RPC calls
-are confined to the separate database helper process.
+and a void reply. The Qt printer uses asynchronous TCP; blocking RPC calls
+are confined to the separate database helper process. Linux uses TI-RPC
+`netpath` transport selection; macOS uses TCP through the system Sun RPC SDK.
 
 Legacy `msgsnd(text, strlen(text), ...)` uses the first native `sizeof(long)`
 text bytes as `mtype`, followed by `strlen(text)` bytes of payload. The original
@@ -221,7 +228,8 @@ Tests cover Qt-sender to each legacy helper and each Qt helper against local
 TCP/RPC endpoints, plus a legacy-layout sender received by the Qt queue decoder.
 All four printer color modes are covered. Both Qt helpers continue draining
 queued records immediately after processing a record; the 50 ms poll delay is
-used while idle (and for printer connection retries). Ordered 100-record bursts
+used while idle (and for printer connection retries). Ordered bursts (100 records
+on Linux, 32 on macOS to fit its default queue limits)
 are tested against local TCP and RPC endpoints. The printer test collects each
 TCP stream in connection acceptance order; callback order across independent
 sockets does not determine record order. With database logging enabled,
@@ -236,8 +244,8 @@ Bounded alarm logs save their circular write position in a sibling
 `.qtalh-position` file, kept open by the shared log writer. The file contains two
 96-byte binary checkpoints. Each contains the format marker, a sequence number,
 record count, next slot, an incremental ring fingerprint, and a SHA-256 checksum
-of the checkpoint. Position updates alternate between slots using `pwrite` after
-the alarm record is flushed, without per-record file creation, rename, or fsync.
+of the checkpoint. Position updates alternate between slots using `pwrite` on Unix or
+`QFile::seek`/`write`/`flush` on Windows after the alarm record is flushed, without per-record file creation, rename, or fsync.
 Recovery selects the newest intact checkpoint whose fingerprint matches the log.
 A torn or stale checkpoint is rejected; a matching checkpoint in the other slot
 remains usable, including when the second slot is truncated. This preserves
@@ -245,7 +253,7 @@ insertion order across restart, capacity changes, and master handoff even when
 timestamps are equal. The incremental fingerprint combines hashes of individual
 records and their physical slots without rehashing the entire log per alarm.
 
-QtALH-specific JSON metadata formats are not supported; QtALH has not been deployed.
+Earlier experimental QtALH JSON metadata formats are not supported.
 Plain ALH logs remain supported. Without a matching checkpoint, recovery uses the
 oldest record timestamp; the original order of equal or out-of-order timestamps
 cannot be recovered reliably from the legacy format alone. An alarm write and its
@@ -268,16 +276,21 @@ between windows in the same process. Attempts to overwrite a pending broadcast
 return a busy error. Message IDs include a monotonic millisecond value and process
 ID within the legacy reader's buffer, so successive sends remain distinguishable.
 
-Log lock files use POSIX `lockf` and the legacy `.LOCK` basename; broadcasts use
+On Linux/macOS, log lock files use POSIX `lockf` and the legacy `.LOCK` basename;
+broadcasts use
 `.MESS`/`.MESSLOCK` and the legacy four-line record. Native POSIX lock handoff
-and closing a second window are tested. Windows share lock descriptors and
+and closing a second window are tested. Application windows on Unix share lock
+descriptors and
 broadcast ownership by device/inode, so directory symlinks, file symlinks, and
 hard links cannot cause duplicate descriptors to release another window's lock.
-End-to-end legacy GUI broadcast consumption still requires validation.
+Windows uses native file locking and shares lock lifetime between application
+windows; it does not interoperate with POSIX locks. End-to-end legacy GUI
+broadcast consumption still requires validation.
 
 ## Validation status and remaining acceptance work
 
-The latest Qt 5 results pass core (92), UI (43), IOC (29), helpers (63), and visual (4),
+The recorded 2026-09-11 Linux Qt 5 checkpoint passed core (92), UI (43),
+IOC (29), helpers (63), and visual (4),
 with no failures or skipped tests. Regressions cover Force PV ACKT recovery before
 the first IOC value, alias-safe lock lifetime and broadcast ownership, runtime
 Save As/reload identity, reload silence, incomplete CALC rejection, and heartbeat
@@ -299,7 +312,8 @@ pixel equivalence.
 The 10,000-channel core benchmark asserts final severity and acknowledgement
 counts. The offscreen 10,000-row window plus alarm burst took approximately
 0.73 seconds locally; model child lists are cached to avoid quadratic lookup.
-A like-for-like Motif responsiveness/log-completeness/memory benchmark,
+The [CPU and logging comparisons](qtalh-performance.md) cover controlled
+Motif/Qt workloads. Broader responsiveness/memory comparisons,
 complete differential alarm traces, exhaustive menu/dialog action coverage,
 and complete operational memory profiling remain acceptance work. Live CALC
 inputs and changing access-rights IOC scenarios pass. Valgrind reports no memory
@@ -313,6 +327,10 @@ including muted Ogg/Vorbis alarm playback through the native Cocoa event loop.
 A Qt-only root build with MOTIF_INC=/nonexistent passes and reports the omitted
 legacy variant. Qt binaries have no direct Motif/Xt dependency. A separate
 machine/container with Motif packages physically absent has not been tested.
+
+These are historical validation records, not a guarantee for every host or
+revision. Use the [test guide](../qtalh/tests/README.md) to reproduce checks;
+platform-specific cases and result counts differ.
 
 Do not treat this inventory or successful build as completion of every criterion
 in the original parity plan. The implementation is available for testing while

@@ -139,7 +139,7 @@ QString usage() {
   -L -Lfile file     Master/slave logging lock / alternate lock basename
   -B                 Message broadcast using configuration .MESS files
   -P key -O key      Printer / database System V queue keys (Linux/macOS only)
-  -s -p sound        Silent / WAV sound file
+  -s -p sound        Silent / audio file (formats depend on Qt media backend)
   -filter no|active|unack
   -mainwindow -maskcolor -noerrorpopup -desc_field -debug
   -display display -geometry geometry -fn font

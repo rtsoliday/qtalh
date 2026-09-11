@@ -5,7 +5,8 @@ below describes the earlier implementation; see [implemented changes](#implement
 
 Investigation on 2026-09-11, using the same i7-4770/Linux/Qt 5.15.3/EPICS 7.0.8
 setup as the [CPU comparison](qtalh-performance.md). Application code was not
-changed. All PVs belonged to an isolated loopback IOC; logs were on `/tmp` (XFS).
+changed during that initial investigation. All PVs belonged to an isolated
+loopback IOC; logs were on `/tmp` (XFS).
 
 **The alarm data is the same in the tested workload. The main extra cost is
 QtALH's per-record filesystem work for circular-log position metadata.**
@@ -59,11 +60,11 @@ the file-specific trace below separates the alarm and metadata writes.
 
 [All CPU/I/O trials](benchmarks/alh-vs-qtalh-logging-2026-09-11.csv).
 
-## What QtALH does for each circular alarm record
+## What the earlier QtALH did for each circular alarm record
 
-[`AlarmLogFile::write`](../qtalh/services/logging.cc) writes and flushes the
-ordinary alarm record, updates hashes for the overwritten/new record, and calls
-`savePosition()`. That function serializes a small JSON document containing the
+In the investigated version, `AlarmLogFile::write` wrote and flushed the
+ordinary alarm record, updated hashes for the overwritten/new record, and called
+`savePosition()`. That function serialized a small JSON document containing the
 record count, next ring slot, format version, and content fingerprint into
 `alarm.log.qtalh-position`.
 
@@ -123,8 +124,9 @@ hashing and formatting are smaller contributors.
 QtALH persists the exact ring position, including when several records have the
 same timestamp. Its fingerprint rejects stale position metadata after an
 external writer, truncation, or interrupted update changes the alarm file.
-Atomic replacement ensures readers see a complete position document. These
-behaviors have existing regression coverage in `tests/test_helpers.cc`.
+The earlier JSON implementation used atomic replacement for a complete position
+document. The current binary checkpoints validate each slot with a checksum.
+Recovery behavior is covered in `qtalh/tests/test_helpers.cc`.
 
 Legacy [`filePrintf`](../alh/alLog.c) maintains a fixed-length circular cursor
 in memory and writes and flushes alarm records directly; it does not maintain this
@@ -132,14 +134,15 @@ per-record metadata file. QtALH also handles variable-length ring records by
 rewriting the ring when a replacement's size changes. Such configurations can
 add further I/O, but this did not occur in the fixed-width benchmark.
 
-The primary optimization target is therefore the way QtALH persists circular
+The primary optimization target was therefore the way QtALH persists circular
 position metadata while preserving its recovery behavior. Reducing the number
-of alarm records is not necessary to address the measured CPU gap.
+of alarm records was not necessary to address the measured CPU gap.
 
 ## Implemented changes
 
 The shared writer keeps the 192-byte position file open. After each flushed
-alarm record, a 96-byte pwrite updates the alternate checkpoint slot. Per-record
+alarm record, a 96-byte `pwrite` updates the alternate checkpoint slot on Unix
+(Windows uses `QFile::seek`/`write`/`flush`). Per-record
 temporary-file creation, permission changes, linking, renaming, cleanup, and JSON
 serialization are removed. Log timestamps are cached within their existing
 one-second precision, including older event times and clock reversals.
@@ -149,16 +152,17 @@ Each slot contains an 8-byte ALHPOS01 marker, three big-endian 64-bit integers
 32-byte SHA-256 checksum over the preceding 64 bytes. Sequence parity selects the
 physical slot. Recovery selects the newest intact checkpoint matching the log.
 Torn, truncated, and stale checkpoints are rejected; a valid other slot is usable.
-Short writes and EINTR are retried. Other errors are reported; a later record can
+On Unix, short writes and EINTR are retried. Other errors are reported; a later record can
 reopen and repair metadata. Retention and flush-only durability are unchanged.
 
-Old QtALH JSON metadata is unsupported because QtALH has not been deployed.
+The earlier experimental QtALH JSON metadata format is unsupported.
 Plain ALH logs remain supported. As before, interruption between the separate
 log and checkpoint writes can require timestamp recovery when neither slot
 matches. Equal timestamps alone cannot reconstruct the exact cursor. This does
 not claim an atomic transaction across both files or stronger power-loss durability.
 
-All 231 checks passed: 92 core, 43 UI, 29 IOC, 63 helpers, and 4 visual checks,
+At the 2026-09-11 Linux Qt 5 implementation checkpoint, all 231 checks passed:
+92 core, 43 UI, 29 IOC, 63 helpers, and 4 visual checks,
 including setup/cleanup and data rows. New tests cover corruption, truncation,
 stale fingerprints, invalid cursors, equal timestamps, inode/size reuse, forced
 short writes with RLIMIT_FSIZE, recovery after errors, and timestamp boundaries.

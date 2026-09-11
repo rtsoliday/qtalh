@@ -1,0 +1,13 @@
+# Replace these placeholder channel names with records from your IOC.
+$BEEPSEVERITY MAJOR
+GROUP NULL Example
+$ALIAS Example facility
+$GUIDANCE
+This example contains two placeholder PV names.
+Open it in the editor to replace them with records from your IOC.
+$END
+GROUP Example Vacuum
+CHANNEL Vacuum example:pressure -----
+$ALIAS Vacuum pressure
+CHANNEL Vacuum example:pump -----
+$ALIAS Pump status

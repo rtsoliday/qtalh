@@ -3,8 +3,21 @@
 The repository contains the original Motif programs in `alh/` and a C++17 Qt
 port in `qtalh/`. Both use GNU Make and shared EPICS discovery in
 `Makefile.rules`; neither requires an EPICS extensions tree or MEDM checkout.
-The Git directory is now at this repository root. History and the origin remote
-are preserved.
+
+## Documentation
+
+- [QtALH user guide](docs/qtalh-user-guide.md): first run, all command-line
+  options, configuration syntax, logging, and troubleshooting.
+- [Test guide](qtalh/tests/README.md): prerequisites, suite commands, artifacts,
+  and the audio fixture.
+- [Compatibility inventory](docs/qtalh-compatibility.md): implementation evidence
+  and remaining acceptance work.
+- [Appearance comparison](docs/qtalh-appearance.md): Motif/Qt workflow and visual differences.
+- [CPU benchmarks](docs/qtalh-performance.md) and
+  [logging investigation](docs/qtalh-logging-analysis.md): historical measurements
+  and the subsequent checkpoint optimization.
+- [Original ALH manual](alh/documentation/ALH.html): legacy operator reference;
+  consult the QtALH guide and inventory for port-specific behavior.
 
 ## Build and run
 
@@ -70,11 +83,15 @@ make qtalh QT_VERSION=5          # explicitly build the three Qt programs
 make -C qtalh -j4                # standalone Qt build
 make -C qtalh QT_VERSION=6 -j4   # when Qt 6 development packages are installed
 
-bin/Linux-x86_64/qtalh -mainwindow example.alhConfig
-bin/Linux-x86_64/qtalh -c example.alhConfig
+bin/Linux-x86_64/qtalh -c examples/minimal.alhConfig
+bin/Linux-x86_64/qtalh -S -D -s -mainwindow examples/minimal.alhConfig
 bin/Linux-x86_64/qtalh --validate alh/test.alhConfig
 bin/Linux-x86_64/qtalh --help
 ```
+
+The example uses placeholder PV names; replace them with your IOC records to
+monitor live values. The second command opens a passive, silent preview with
+file logging disabled. Use `--validate` to check syntax without CA connections.
 
 Standalone outputs are `bin/<uname -s>-<uname -m>/{alh,alh_printer,alh_DB,qtalh,qtalh_printer,qtalh_DB}`
 (for example, `bin/Darwin-arm64/qtalh` on Apple Silicon).
@@ -182,7 +199,7 @@ make -C qtalh test-core
 make -C qtalh test-ui            # offscreen UI; native macOS child for audio
 make -C qtalh test-ioc           # starts its own softIoc on loopback
 make -C qtalh test-helpers       # requires legacy binaries and local rpcbind
-make -C qtalh test-visual        # requires X display, xwininfo, and legacy ALH
+make -C qtalh test-visual        # requires built legacy ALH, X11, xwininfo, softIoc
 ```
 
 See [CPU benchmarks](docs/qtalh-performance.md) for measured improvements and
@@ -193,6 +210,9 @@ ports and PV prefixes, and an explicit loopback-only address list. Helper tests
 use isolated System V queues, a local TCP capture server, and a temporary RPC
 program registered with the local rpcbind. They do not contact production IOCs,
 printers, or database services. They remove their own queues and RPC registration.
+On Linux/macOS the full helper suite needs the legacy helper executables even
+for a Qt-only installation; `make -C qtalh test` does not build them. See the
+[test guide](qtalh/tests/README.md) for preparation and individual suites.
 An unavailable prerequisite is a test failure, not a silently passing test.
 The UI suite uses a bundled Ogg/Vorbis sound and tests muted playback twice.
 On macOS, that case runs in a Cocoa child process because the offscreen plugin
