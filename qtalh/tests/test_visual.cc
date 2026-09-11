@@ -1,11 +1,11 @@
 // Optional real-display comparison. Only the test IOC is contacted.
+#include "test_compat.h"
 #include "ui/window.h"
 #include "ui/dialogs.h"
 #include <QGuiApplication>
 #include <QProcess>
 #include <QRegularExpression>
 #include <QScreen>
-#include <QtTest>
 using namespace alh;
 struct Child : QProcess {
   ~Child() {

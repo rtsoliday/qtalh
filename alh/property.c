@@ -61,7 +61,6 @@ struct propWindow {
 	Widget countFilterSecondsTextW;
 	Widget forcePVnameTextW;
 	Widget forcePVForceMaskStringLabelW;
-	Widget forceMaskToggleButtonW[ALARM_NMASK];
 	Widget forcePVcurrentValueTextW;
 	Widget forcePVforceValueTextW;
 	Widget forcePVresetValueTextW;
@@ -345,24 +344,6 @@ static void propUpdateDialogWidgets(struct propWindow *propWindow)
 	} else string = XmStringCreateLocalized("-----");
 	XtVaSetValues(propWindow->forcePVForceMaskStringLabelW, XmNlabelString, string, NULL);
 	XmStringFree(string);
-	if (programId != ALH) {
-		if(pgcData->pforcePV) mask = pgcData->pforcePV->forceMask;
-		if (mask.Cancel == 1 )
-			XmToggleButtonSetState(propWindow->forceMaskToggleButtonW[0],TRUE,TRUE);
-		else XmToggleButtonSetState(propWindow->forceMaskToggleButtonW[0],FALSE,TRUE);
-		if (mask.Disable == 1 )
-			XmToggleButtonSetState(propWindow->forceMaskToggleButtonW[1],TRUE,TRUE);
-		else XmToggleButtonSetState(propWindow->forceMaskToggleButtonW[1],FALSE,TRUE);
-		if (mask.Ack == 1 )
-			XmToggleButtonSetState(propWindow->forceMaskToggleButtonW[2],TRUE,TRUE);
-		else XmToggleButtonSetState(propWindow->forceMaskToggleButtonW[2],FALSE,TRUE);
-		if (mask.AckT == 1 )
-			XmToggleButtonSetState(propWindow->forceMaskToggleButtonW[3],TRUE,TRUE);
-		else XmToggleButtonSetState(propWindow->forceMaskToggleButtonW[3],FALSE,TRUE);
-		if (mask.Log == 1 )
-			XmToggleButtonSetState(propWindow->forceMaskToggleButtonW[4],TRUE,TRUE);
-		else XmToggleButtonSetState(propWindow->forceMaskToggleButtonW[4],FALSE,TRUE);
-	}
 
 	if(pgcData->pforcePV){
 
@@ -480,7 +461,6 @@ static void propCreateDialog(ALINK *area)
 	Widget nameLabelW, nameTextW;
 	Widget beepSeverityLabel, severityPVlabel;
 	Widget alarmMaskToggleButtonW[ALARM_NMASK];
-	Widget forceMaskToggleButtonW[ALARM_NMASK];
 	Widget aliasLabel, aliasTextW;
 	Widget processLabel, processTextW;
 	Widget sevrProcessLabel, sevrProcessTextW;
@@ -1306,7 +1286,6 @@ static void propCreateDialog(ALINK *area)
 	if (programId != ALH) {
 		for (i = 0; i < ALARM_NMASK; i++){
 			propWindow->alarmMaskToggleButtonW[i] = alarmMaskToggleButtonW[i];
-			propWindow->forceMaskToggleButtonW[i] = forceMaskToggleButtonW[i];
 		}
 	}
 

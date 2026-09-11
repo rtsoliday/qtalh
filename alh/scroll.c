@@ -657,12 +657,12 @@ void browser_fileViewWindow(Widget w,int option,Widget menuButton)
 	Widget app_shell=NULL,title=0,button,button1;
 	Widget previous;
 #ifndef WIN32
-	char sbuf[120];
+	char sbuf[sizeof(FS_filename) + sizeof(" is a directory\n")];
 	DIR *directory;
 #endif
 	struct stat statbuf;         /* Information on a file. */
 	FILE *fp = NULL;             /* Pointer to open file.  */
-	char filename[120];
+	char filename[sizeof(FS_filename)];
 	int operandFile=0;
 	long operandFileLong;
 	long optionLong;

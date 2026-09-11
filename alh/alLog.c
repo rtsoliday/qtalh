@@ -309,14 +309,14 @@ void alLogAlarmMessage(time_t *ptimeofdayAlarm,int messageCode,CLINK* clink,cons
 void alLogOpModMessage(int messageCode,GCLINK* gclink,const char* fmt,...)
 {
     va_list vargs;
-    static char text[1024];  /* DANGER: Fixed buffer size */
+    char text[1024] = "";
     struct gcData *gcdata=NULL;
     size_t len;
 
     if (gclink) gcdata = gclink->pgcData;
 
     va_start(vargs,fmt);
-    vsprintf(text,fmt,vargs);
+    vsnprintf(text,sizeof(text),fmt,vargs);
     va_end(vargs);
 
     if(text[0] == '\0') sprintf(text," ");
@@ -340,15 +340,16 @@ void alLogOpModMessage(int messageCode,GCLINK* gclink,const char* fmt,...)
         len = strlen(text);
         if (text[len-1] == '\n' ) text[len-1]=' ';
 
-	if (!alhArea || !alhArea->blinkString){
-		sprintf(buff,"%s",text);
-	} else {
-		if (!gcdata){
-			sprintf(buff,"%s: : %s",alhArea->blinkString,text);
-		} else {
-			sprintf(buff,"%s: %s:  %s",alhArea->blinkString,gcdata->name,text);
-		}
+	/* Keep the record within the legacy log buffer, including its prefix. */
+	buff[0] = '\0';
+	if (alhArea && alhArea->blinkString) {
+		if (!gcdata)
+			snprintf(buff,sizeof(buff),"%s: : ",alhArea->blinkString);
+		else
+			snprintf(buff,sizeof(buff),"%s: %s:  ",alhArea->blinkString,gcdata->name);
 	}
+	len = strlen(buff);
+	snprintf(buff+len,sizeof(buff)-len,"%.*s",(int)(sizeof(buff)-len-1),text);
 
 	filePrintf(OPMOD_FILE,buff,NULL,messageCode);
 }

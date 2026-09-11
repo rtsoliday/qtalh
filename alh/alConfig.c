@@ -313,7 +313,7 @@ int caConnect,struct mainGroup *pmainGroup)
 {
 	CLINK 		*clink;
 	int  		rtn;
-	char 		name[TOKEN_MAXSIZE+2];
+	char 		name[2*TOKEN_MAXSIZE+2];
 	char 		*parent;
 	char 		*mask;
 	struct chanData 	*cdata;
