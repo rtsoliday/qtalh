@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Refresh VitePress reference pages and downloads from repository documentation."""
 from pathlib import Path
+import argparse
 import re
 from html import escape
 import shutil
@@ -8,6 +9,23 @@ import shutil
 ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / 'docs/site'
 PUBLIC = SITE / 'public'
+# Keep these exact paths in docs/site/.gitignore; authored pages must survive cleanup.
+GENERATED_PAGES = (
+    'get-started/install.md',
+    'get-started/first-run.md',
+    'reference/command-line.md',
+    'reference/configuration.md',
+    'configure/logging.md',
+    'reference/helpers.md',
+    'operate/troubleshooting.md',
+    'understand/compatibility.md',
+    'history/performance.md',
+    'history/logging.md',
+    'history/appearance.md',
+    'develop/testing.md',
+    'project/authors.md',
+    'project/license.md',
+)
 ROUTES = {
     'README.md': '/get-started/install',
     'docs/qtalh-user-guide.md': '/get-started/first-run',
@@ -78,7 +96,10 @@ def rewrite(text, origin):
 
 
 def write(route, title, content, origin):
-    path = SITE / (route.lstrip('/') + '.md')
+    relative = route.lstrip('/') + '.md'
+    if relative not in GENERATED_PAGES:
+        raise ValueError(f'Register generated page for cleanup and gitignore: {relative}')
+    path = SITE / relative
     path.parent.mkdir(parents=True, exist_ok=True)
     # VitePress's automatic next-page control drops sidebar link targets.
     # The final modern history page must not route into the standalone archive.
@@ -87,7 +108,29 @@ def write(route, title, content, origin):
                     + '# ' + title + '\n\n' + rewrite(content.strip(), origin) + '\n')
 
 
+def clean(distclean=False):
+    paths = [SITE / name for name in GENERATED_PAGES]
+    paths += [PUBLIC / 'downloads', PUBLIC / 'legacy', SITE / '.vitepress/cache',
+              SITE / 'dist', ROOT / 'docs/html']
+    if distclean:
+        paths.append(SITE / 'node_modules')
+    for path in paths:
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        elif path.is_dir():
+            shutil.rmtree(path)
+    print('Removed generated documentation' + (' and dependencies.' if distclean else '.'))
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--clean', action='store_true', help='Remove generated documentation; preserve sources and dependencies')
+    modes.add_argument('--distclean', action='store_true', help='Also remove installed documentation dependencies')
+    args = parser.parse_args()
+    if args.clean or args.distclean:
+        clean(distclean=args.distclean)
+        return
     guide = read('docs/qtalh-user-guide.md')
     readme = read('README.md')
     install = section(readme, 'Build and run')

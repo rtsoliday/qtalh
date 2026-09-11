@@ -74,6 +74,8 @@ qtalh:
 	$(MAKE) -C qtalh
 test-qtalh: $(if $(HAVE_MOTIF),alh)
 	$(MAKE) -C qtalh test
+clean: docs-clean
+distclean: docs-distclean
 clean distclean:
 ifneq ($(OS),Windows)
 	$(MAKE) -C alh $@
@@ -84,3 +86,10 @@ endif
 .PHONY: docs
 docs:
 	python3 scripts/build-docs.py
+
+# Remove generated docs while preserving authored pages and original archives.
+.PHONY: docs-clean docs-distclean
+docs-clean:
+	python3 scripts/sync-docs.py --clean
+docs-distclean:
+	python3 scripts/sync-docs.py --distclean
