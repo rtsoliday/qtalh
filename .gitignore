@@ -1,0 +1,11 @@
+O.*/
+/bin/
+.loglogin
+*.alhAlarm
+*.qtalh-position
+*.alhOpmod
+*.LOCK
+*.MESS
+*.MESSLOCK
+
+/alh/bin/

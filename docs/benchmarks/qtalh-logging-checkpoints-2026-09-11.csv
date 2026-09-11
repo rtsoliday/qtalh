@@ -1,0 +1,7 @@
+mode,trial,version,channels,wall_seconds,cpu_seconds,cpu_percent
+logged-updates,0,qtalh-before,1000,10.009771,3.160000,31.5692
+logged-updates,0,qtalh-persistent,1000,10.005627,0.390000,3.8978
+logged-updates,1,qtalh-persistent,1000,10.010249,0.470000,4.6952
+logged-updates,1,qtalh-before,1000,10.009814,3.150000,31.4691
+logged-updates,2,qtalh-before,1000,10.010257,3.000000,29.9693
+logged-updates,2,qtalh-persistent,1000,10.010264,0.390000,3.8960

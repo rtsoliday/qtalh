@@ -1,0 +1,84 @@
+{
+  "alh": {
+    "calls": {
+      "stat": 12000,
+      "lseek": 12003,
+      "write": 6000,
+      "writev": 268,
+      "openat": 3,
+      "fstat": 6,
+      "close": 3
+    },
+    "alarm_calls": {
+      "lseek": 12003,
+      "write": 6000,
+      "openat": 3,
+      "fstat": 6,
+      "close": 3
+    },
+    "metadata_calls": {},
+    "writes": {
+      "alarm": {
+        "count": 6000,
+        "bytes": 738000,
+        "sizes": {
+          "123": 6000
+        }
+      }
+    }
+  },
+  "qtalh": {
+    "calls": {
+      "openat": 4242,
+      "fchmod": 4242,
+      "write": 8510,
+      "linkat": 4242,
+      "rename": 4242,
+      "lseek": 8484,
+      "close": 4242,
+      "unlink": 4242,
+      "stat": 12735,
+      "writev": 34
+    },
+    "alarm_calls": {
+      "lseek": 4242,
+      "write": 4241
+    },
+    "metadata_calls": {
+      "openat": 4242,
+      "fchmod": 4242,
+      "write": 4242,
+      "linkat": 4242,
+      "rename": 4242,
+      "lseek": 4242,
+      "close": 4242,
+      "unlink": 4242
+    },
+    "writes": {
+      "metadata": {
+        "count": 4242,
+        "bytes": 532272,
+        "sizes": {
+          "126": 2242,
+          "123": 20,
+          "124": 180,
+          "125": 1800
+        }
+      },
+      "alarm": {
+        "count": 4241,
+        "bytes": 521643,
+        "sizes": {
+          "123": 4241
+        }
+      },
+      "other": {
+        "count": 27,
+        "bytes": 216,
+        "sizes": {
+          "8": 27
+        }
+      }
+    }
+  }
+}

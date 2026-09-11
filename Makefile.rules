@@ -1,0 +1,49 @@
+# Standalone Linux build settings; override paths on the make command line.
+OS := $(shell uname -s)
+ARCH := $(shell uname -m)
+OBJ_DIR = O.$(OS)-$(ARCH)
+BIN_DIR = ../bin/$(OS)-$(ARCH)
+
+CFLAGS ?= -O2 -g -Wall -std=gnu99
+ALH_HELP_URL ?= https://epics.anl.gov/EpicsDocumentation/ExtensionsManuals/AlarmHandler/current/ALHUserGuide.html
+
+# Cleaning does not require installed dependencies.
+ifneq ($(filter-out clean distclean,$(or $(MAKECMDGOALS),all)),)
+ifneq ($(OS),Linux)
+  $(error The standalone build currently supports Linux; use Makefile.epics on other platforms)
+endif
+EPICS_SEARCH_PATHS = /usr/local/oag/base ../epics-base ../../epics-base ../../../../base $(HOME)/epics/base $(HOME)/epics/base-7.0
+EPICS_BASE ?= $(firstword $(foreach base,$(EPICS_SEARCH_PATHS),$(if $(wildcard $(base)/include/cadef.h),$(base))))
+ifeq ($(strip $(EPICS_BASE)),)
+  $(error EPICS Base not found; set EPICS_BASE=/path/to/built/base)
+endif
+EPICS_BASE := $(abspath $(EPICS_BASE))
+EPICS_HOST_ARCH ?= $(shell perl $(EPICS_BASE)/startup/EpicsHostArch.pl)
+EPICS_LIB_DIR ?= $(EPICS_BASE)/lib/$(EPICS_HOST_ARCH)
+# Prefer static EPICS libraries, as MEDM does; shared-only Base also works.
+EPICS_LIBS = $(foreach lib,ca Com,$(firstword $(wildcard $(EPICS_LIB_DIR)/lib$(lib).a $(EPICS_LIB_DIR)/lib$(lib).so)))
+ifneq ($(words $(EPICS_LIBS)),2)
+  $(error EPICS libraries not found in $(EPICS_LIB_DIR); build Base or set EPICS_HOST_ARCH)
+endif
+EPICS_LDFLAGS = -Wl,-rpath,$(EPICS_LIB_DIR)
+EPICS_SYS_LIBS = -lpthread -ldl -lrt -lm
+ifneq ($(shell nm -u $(EPICS_LIB_DIR)/libCom.a 2>/dev/null | sed -n '/ U readline$$/p'),)
+  EPICS_SYS_LIBS += -lreadline
+endif
+
+MOTIF_INC ?= /usr/include
+X11_INC ?= /usr/include
+X_LIBS ?= -lXm -lXmu -lXt -lX11
+ifneq ($(MOTIF_LIB),)
+  X_LIBS += -L$(MOTIF_LIB) -Wl,-rpath,$(MOTIF_LIB)
+endif
+ifneq ($(X11_LIB),)
+  X_LIBS += -L$(X11_LIB) -Wl,-rpath,$(X11_LIB)
+endif
+PKG_CONFIG ?= pkg-config
+RPC_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags libtirpc 2>/dev/null)
+RPC_LIBS ?= $(shell $(PKG_CONFIG) --libs libtirpc 2>/dev/null)
+
+ALH_CPPFLAGS = -D_DEFAULT_SOURCE -I. -Ios/$(OS) -Ios/default -I$(EPICS_BASE)/include -I$(EPICS_BASE)/include/compiler/gcc -I$(EPICS_BASE)/include/os/$(OS) -I$(MOTIF_INC) -I$(X11_INC) $(RPC_CFLAGS)
+vpath %.c os/$(OS) os/default
+endif

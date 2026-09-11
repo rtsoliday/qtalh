@@ -1,0 +1,17 @@
+ASG(DEFAULT) {
+  RULE(1,READ)
+  RULE(1,WRITE)
+}
+ASG(readonly) {
+  RULE(1,READ)
+}
+ASG(dynamic) {
+  INPA("$(P)permit")
+  RULE(1,READ)
+  RULE(1,WRITE) { CALC("A=1") }
+}
+ASG(dynamicRead) {
+  INPA("$(P)readPermit")
+  RULE(1,READ) { CALC("A=1") }
+  RULE(1,WRITE) { CALC("A=1") }
+}

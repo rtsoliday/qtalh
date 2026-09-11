@@ -1,0 +1,30 @@
+# Local-only integration database; P is assigned by the test process.
+record(ai, "$(P)alarm") {
+  field(DESC, "QtALH integration alarm")
+  field(VAL, "0")
+  field(HIGH, "5")
+  field(HSV, "MINOR")
+  field(HIHI, "10")
+  field(HHSV, "MAJOR")
+  field(ACKT, "YES")
+}
+record(ao, "$(P)ack") { field(VAL, "0") }
+record(ao, "$(P)severity") { field(VAL, "0") }
+record(ao, "$(P)heartbeat") { field(VAL, "0") }
+record(ao, "$(P)force") { field(VAL, "0") }
+record(ai, "$(P)readonly") {
+  field(DESC, "Read-only alarm description")
+  field(ASG, "readonly")
+  field(VAL, "0")
+}
+record(ao, "$(P)permit") { field(VAL, "1") }
+record(ai, "$(P)protected") {
+  field(DESC, "Protected alarm description")
+  field(ASG, "dynamic")
+  field(VAL, "0")
+}
+record(ao, "$(P)readPermit") { field(VAL, "1") }
+record(ao, "$(P)readprotected") {
+  field(ASG, "dynamicRead")
+  field(VAL, "0")
+}
