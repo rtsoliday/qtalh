@@ -276,6 +276,12 @@ Linux retains TI-RPC's `netpath` transport selection.
 Qt senders reject messages exceeding the legacy receive-buffer capacity
 (242 text bytes on 64-bit Linux), reporting the failure rather than overflowing.
 
+## Authors and acknowledgements
+
+**Robert Soliday** develops and maintains the QtALH port. QtALH builds on the
+work of the original ALH authors and the SNS and PSI contributors. See
+[AUTHORS.md](AUTHORS.md) for the complete credits and contribution roles.
+
 The original license is in [LICENSE](LICENSE). The Qt files are modified works
 based on the original ALH parsing, alarm algorithms, workflows and protocols;
 source comments and the inventory identify their provenance.

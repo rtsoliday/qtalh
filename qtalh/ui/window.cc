@@ -4,7 +4,7 @@
 #include <QAudioOutput>
 #endif
 // Qt Widgets port of ALH awAlh/awAct/axRunW/axSubW and dialog workflows.
-// Original ALH authors and license are recorded in ../../LICENSE.
+// Author credits are recorded in ../../AUTHORS.md; see ../../LICENSE for the license.
 #include "alarm_view.h"
 #include "dialogs.h"
 #include "window.h"
@@ -957,12 +957,15 @@ void Window::menus() {
         QUrl::fromLocalFile(QDir(QCoreApplication::applicationDirPath())
                                 .absoluteFilePath("../../alh/documentation/ALH.html")));
   });
-  action(help, "About ALH", [this] {
+  action(help, "About QtALH", [this] {
     QMessageBox::about(this, "About QtALH",
                        "QtALH — Qt port of ALH 1.2.35\nEPICS Alarm Handler and Alarm Configuration "
-                       "Tool\nDeveloped at Argonne National Laboratory\nOriginal authors: Ben-Chin "
-                       "Cha, Janet Anderson, Mark Anderson,\nMarty Kraimer, Albert Kagarmanov; SNS "
-                       "and PSI contributors.\nQt " +
+                       "Tool\nDeveloped at Argonne National Laboratory\n\n"
+                       "Qt port development and maintenance:\nRobert Soliday\n\n"
+                       "Original ALH authors:\nBen-Chin Cha, Janet Anderson, Mark Anderson,\n"
+                       "Marty Kraimer, and Albert Kagarmanov\n\n"
+                       "Additional ALH contributors:\nJohn Sinclair and Kay Kasemir (SNS)\n"
+                       "Andreas Luedeke (PSI)\n\nQt " +
                            QString(qVersion()));
   });
 }

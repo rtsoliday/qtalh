@@ -80,7 +80,7 @@ private slots:
         captureModal("Group...", "qt-insert-group");
         captureModal("Channel...", "qt-insert-channel");
       } else {
-        captureModal("About ALH", "qt-about");
+        captureModal("About QtALH", "qt-about");
         captureModal("Print...", "qt-print");
       }
       if (!editor) {
