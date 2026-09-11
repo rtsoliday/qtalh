@@ -9,7 +9,9 @@
 #include <alarm.h>
 #include <cstring>
 #include <limits>
+#ifndef Q_OS_WIN
 #include <sys/msg.h>
+#endif
 using namespace alh;
 struct FakePv : PvService {
   struct Write {
@@ -1083,11 +1085,19 @@ $GUIDANCE https://example.invalid/guide
     long type = 0;
     memcpy(&type, record.constData(), sizeof(long));
     QVERIFY(type > 0);
+#ifdef Q_OS_WIN
+    QString error;
+    QVERIFY(!sendQueue(123, record, &error));
+    QVERIFY(error.contains("unavailable on Windows"));
+    QVERIFY_EXCEPTION_THROWN(parseOptions({"qtalh", "-P", "123"}), ParseError);
+    QVERIFY_EXCEPTION_THROWN(parseOptions({"qtalh", "-O", "123"}), ParseError);
+#else
     int id = msgget(IPC_PRIVATE, 0600 | IPC_CREAT);
     QVERIFY(id >= 0);
     QCOMPARE(msgsnd(id, bytes.constData(), record.size(), 0), 0);
     QCOMPARE(receiveQueue(id), record);
     QCOMPARE(msgctl(id, IPC_RMID, nullptr), 0);
+#endif
     QVERIFY_EXCEPTION_THROWN(encodeQueue(QByteArray(260, 'a')), std::runtime_error);
   }
   void printerCodec() {

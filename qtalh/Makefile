@@ -1,5 +1,8 @@
 .DEFAULT_GOAL := all
 include ../Makefile.rules
+ifeq ($(OS),Windows)
+include Makefile.windows
+else
 QT_VERSION ?= $(shell $(PKG_CONFIG) --exists Qt6Widgets Qt6Network Qt6PrintSupport Qt6Multimedia && echo 6 || echo 5)
 OBJ_DIR = O.$(OS)-$(ARCH)-qt$(QT_VERSION)
 BIN_DIR = ../bin/$(OS)-$(ARCH)
@@ -119,3 +122,4 @@ benchmark-cpu: $(OBJ_DIR)/benchmark_cpu
 	QT_QPA_PLATFORM=offscreen $(OBJ_DIR)/benchmark_cpu 10000 updates 10
 	QT_QPA_PLATFORM=offscreen $(OBJ_DIR)/benchmark_cpu 10000 filtered 10
 	QT_QPA_PLATFORM=offscreen $(OBJ_DIR)/benchmark_cpu 10000 runtime 10
+endif

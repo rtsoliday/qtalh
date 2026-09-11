@@ -29,6 +29,18 @@ private slots:
   void initTestCase() {
     initializeAppearance();
   }
+#ifdef Q_OS_WIN
+  void windowsShellCommand() {
+    QTemporaryDir dir;
+    const auto path = dir.filePath("command output.txt");
+    auto w = std::make_unique<Window>(sample(), options(false), false);
+    w->alarmEngine().command("echo qtalh-command>\"" + QDir::toNativeSeparators(path) + "\"");
+    QTRY_VERIFY(QFileInfo::exists(path));
+    QFile output(path);
+    QVERIFY(output.open(QIODevice::ReadOnly));
+    QCOMPARE(output.readAll().trimmed(), QByteArray("qtalh-command"));
+  }
+#endif
   void reloadPreservesSilence_data() {
     QTest::addColumn<bool>("startupSilent");
     QTest::newRow("operator-enabled-sound") << true;

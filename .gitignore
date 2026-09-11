@@ -9,3 +9,5 @@ O.*/
 *.MESSLOCK
 
 /alh/bin/
+/.windows-deps/
+/windows-*.log

@@ -369,7 +369,14 @@ void Window::setupEngine() {
       if (logging && !logging->isMaster())
         return;
     }
+#ifdef Q_OS_WIN
+    QProcess process;
+    process.setProgram(qEnvironmentVariable("COMSPEC", "cmd.exe"));
+    process.setNativeArguments("/d /s /c \"" + command + "\"");
+    if (!process.startDetached())
+#else
     if (!QProcess::startDetached("/bin/sh", {"-c", command}))
+#endif
       error("Cannot start command: " + command);
   };
   selection = selectedGroup = doc.root.get();

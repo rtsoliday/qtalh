@@ -8,6 +8,61 @@ are preserved.
 
 ## Build and run
 
+### Windows
+
+QtALH builds as a native x64 Windows application using MSVC, following the
+QtEDM build setup. Install Visual Studio 2022 with the x64 C++ tools, GNU Make
+(Strawberry Perl or Cygwin), Cygwin shell utilities, Qt for MSVC including
+**Multimedia**, and a built EPICS Base for `windows-x64`.
+
+From PowerShell or Command Prompt:
+
+```powershell
+.\build-windows.bat build 4
+.\build-windows.bat test 4
+.\build-windows.bat rebuild 4
+```
+
+The launcher discovers Visual Studio and defaults to Qt
+`C:\Qt\6.11.2\msvc2022_64`, Cygwin `C:\cygwin64`, and the sibling
+`..\epics-base` checkout. Override `QT_DIR`, `QT_VERSION` (5 or 6), `EPICS_BASE`,
+`EPICS_HOST_ARCH`, `QTALH_CYGWIN_ROOT`, or `QTALH_MAKE_EXE` through environment
+variables. Qt 5 requires 5.15 or newer. `QT_MULTIMEDIA_DIR` can point to a
+separate matching Qt Multimedia SDK (same Qt version, MSVC kit and architecture).
+For an already configured MSVC/Cygwin shell, use
+`make -j4 OS=Windows ARCH=x86_64 QT_DIR=C:/Qt/6.11.2/msvc2022_64`.
+Use dependency paths without spaces for EPICS Base and the repository.
+
+The output is `bin/Windows-x86_64/qtalh.exe`. To run it, add the Qt, Multimedia
+and EPICS `bin` directories to `PATH`; add the Qt and Multimedia `plugins`
+directories to `QT_PLUGIN_PATH` when using a split SDK. The launcher sets these
+for its test processes. For distribution, use Qt's `windeployqt` and include the
+EPICS `ca.dll` and `Com.dll` runtime libraries.
+
+Windows supports the main Qt application, Channel Access, alarm audio, file
+logging, master/slave locks and file broadcasts. Configured shell commands use
+`cmd.exe /d /s /c` and must use Windows syntax and paths. The Motif programs and
+the System V/Sun RPC helpers `qtalh_printer` and `qtalh_DB` remain Linux/macOS
+only; `-P` and `-O` report an explicit unsupported-option error on Windows.
+Windows file locks coordinate native QtALH processes; they do not provide
+POSIX lock interoperability with legacy ALH.
+
+Verified with MSVC 2022, Qt 6.11.2 (including its installed Multimedia module)
+and EPICS Base 7.0.10.1-DEV on Windows x64. The Windows flags explicitly enable
+`/Zc:lambda` so older MSVC 2022 versions can compile Qt 6.11's generated moc
+code in C++17 mode.
+
+The Windows test target runs the core, offscreen UI/audio, loopback IOC and
+portable helper tests, including logging rotation/recovery, broadcasts and
+native lock lifetime. Unix-only queue/RPC, POSIX locking, symlink and resource
+limit cases are excluded. Motif/X11 visual comparisons require Linux/macOS.
+Test reports are saved under `qtalh/O.Windows-x86_64-qt6/test-artifacts/`
+(or the corresponding Qt 5 directory) and printed after each suite.
+`build-windows.bat clean` removes Windows objects without requiring Qt, EPICS
+or Visual Studio.
+
+### Linux and macOS
+
 ```sh
 make -j4                         # build available Motif and Qt variants
 make alh                        # explicitly build the three legacy programs
@@ -82,7 +137,7 @@ Run `make clean` when changing dependency locations or compiler flags.
 installed EPICS or Qt development packages.
 
 The original extensions makefile is preserved as `alh/Makefile.epics`.
-CDEV, CMLOG, and platforms other than Linux/macOS are outside the Qt port's scope.
+CDEV and CMLOG are outside the Qt port's scope.
 
 ## Validation
 

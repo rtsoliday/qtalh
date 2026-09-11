@@ -1,6 +1,9 @@
-# Standalone Linux and macOS builds; override paths on the make command line.
+# Standalone Linux, macOS and Windows builds; override paths on the command line.
 OS := $(shell uname -s)
 ARCH := $(shell uname -m)
+ifneq ($(filter CYGWIN% MINGW% MSYS% Windows_NT,$(OS)),)
+  OS := Windows
+endif
 RULES_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 OBJ_DIR = O.$(OS)-$(ARCH)
 BIN_DIR = ../bin/$(OS)-$(ARCH)
@@ -11,8 +14,8 @@ ALH_HELP_URL ?= https://epics.anl.gov/EpicsDocumentation/ExtensionsManuals/Alarm
 
 # Cleaning does not require installed dependencies.
 ifneq ($(filter-out clean distclean,$(or $(MAKECMDGOALS),all)),)
-ifeq ($(filter $(OS),Linux Darwin),)
-  $(error The standalone build supports Linux and macOS; use Makefile.epics on other platforms)
+ifeq ($(filter $(OS),Linux Darwin Windows),)
+  $(error The standalone build supports Linux, macOS and Windows)
 endif
 EPICS_SEARCH_PATHS = /usr/local/oag/base $(RULES_DIR)epics-base $(RULES_DIR)../epics-base $(RULES_DIR)../../../base $(HOME)/epics/base $(HOME)/epics/base-7.0
 EPICS_BASE ?= $(firstword $(foreach base,$(EPICS_SEARCH_PATHS),$(if $(wildcard $(base)/include/cadef.h),$(base))))
@@ -20,6 +23,17 @@ ifeq ($(strip $(EPICS_BASE)),)
   $(error EPICS Base not found; set EPICS_BASE=/path/to/built/base)
 endif
 EPICS_BASE := $(abspath $(EPICS_BASE))
+ifeq ($(OS),Windows)
+EPICS_HOST_ARCH ?= windows-x64
+EPICS_COMPILER ?= msvc
+EPICS_LIB_DIR ?= $(EPICS_BASE)/lib/$(EPICS_HOST_ARCH)
+EPICS_LIBS = $(EPICS_LIB_DIR)/ca.lib $(EPICS_LIB_DIR)/Com.lib
+ifeq ($(words $(wildcard $(EPICS_LIBS))),2)
+else
+  $(error EPICS import libraries not found in $(EPICS_LIB_DIR))
+endif
+EPICS_SYS_LIBS = ws2_32.lib
+else
 EPICS_HOST_ARCH ?= $(shell perl $(EPICS_BASE)/startup/EpicsHostArch.pl)
 EPICS_LIB_DIR ?= $(EPICS_BASE)/lib/$(EPICS_HOST_ARCH)
 EPICS_COMPILER ?= $(if $(filter Darwin,$(OS)),clang,gcc)
@@ -61,4 +75,5 @@ endif
 
 ALH_CPPFLAGS = -D_DEFAULT_SOURCE -I. -Ios/$(OS) -Ios/default -I$(EPICS_BASE)/include -I$(EPICS_BASE)/include/compiler/$(EPICS_COMPILER) -I$(EPICS_BASE)/include/os/$(OS) $(addprefix -I,$(MOTIF_INC) $(X11_INC)) $(RPC_CFLAGS)
 vpath %.c os/$(OS) os/default
+endif
 endif

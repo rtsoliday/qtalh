@@ -3,6 +3,7 @@
 #include "logging.h"
 #include "ipc.h"
 #include <QCryptographicHash>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QFileInfo>
 #include <QHostInfo>
@@ -18,7 +19,12 @@
 #include <fcntl.h>
 #include <limits>
 #include <sys/stat.h>
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#include <io.h>
+#else
 #include <unistd.h>
+#endif
 namespace alh {
 // All windows writing the same file share both the descriptor and ring position.
 // CA and logging callbacks run on the GUI thread, so writes are serialized.
@@ -30,14 +36,20 @@ struct AlarmLogFile {
   bool master = false;
   QString positionError;
   QByteArray digest = QByteArray(32, 0);
+#ifdef Q_OS_WIN
+  QFile positionFile;
+#else
   int positionFd = -1;
+#endif
   quint64 positionSequence = 0;
   // Two 96-byte slots: magic/version, sequence, count, next, ring fingerprint,
   // then SHA-256 of the preceding 64 bytes. Integers are big endian.
   static constexpr int PositionSlotSize = 96;
   ~AlarmLogFile() {
+#ifndef Q_OS_WIN
     if (positionFd >= 0)
       ::close(positionFd);
+#endif
   }
 
   void includeRecord(int index, const QByteArray& record) {
@@ -107,15 +119,29 @@ struct AlarmLogFile {
   }
   bool positionFailure(const QString& reason) {
     positionError = "Cannot save alarm log position: " + reason;
+#ifdef Q_OS_WIN
+    positionFile.close();
+#else
     if (positionFd >= 0) {
       ::close(positionFd);
       positionFd = -1;
     }
+#endif
     return false;
   }
   bool savePosition() {
     if (positionSequence == std::numeric_limits<quint64>::max())
       return positionFailure("checkpoint sequence exhausted");
+#ifdef Q_OS_WIN
+    if (!positionFile.isOpen()) {
+      positionFile.setFileName(positionPath());
+      const QFileInfo info(positionPath());
+      if (info.isSymLink() || (info.exists() && !info.isFile()))
+        return positionFailure("metadata is not a regular file");
+      if (!positionFile.open(QIODevice::ReadWrite) || !positionFile.resize(2 * PositionSlotSize))
+        return positionFailure(positionFile.errorString());
+    }
+#else
     if (positionFd < 0) {
       struct stat info{};
       if (::fstat(file.handle(), &info) != 0)
@@ -135,6 +161,7 @@ struct AlarmLogFile {
           ::ftruncate(positionFd, 2 * PositionSlotSize) != 0)
         return positionFailure(QString::fromLocal8Bit(strerror(errno)));
     }
+#endif
     const auto sequence = positionSequence + 1;
     QByteArray slot(PositionSlotSize, 0);
     std::memcpy(slot.data(), "ALHPOS01", 8);
@@ -147,7 +174,12 @@ struct AlarmLogFile {
     // The alarm record is already flushed. Keep one previous checkpoint intact
     // and reject torn/stale slots on recovery. Match the log's flush-only
     // durability: pwrite reaches the kernel without adding an fsync per event.
-    const off_t offset = (sequence % 2) * PositionSlotSize;
+    const qint64 offset = (sequence % 2) * PositionSlotSize;
+#ifdef Q_OS_WIN
+    if (!positionFile.seek(offset) || positionFile.write(slot) != slot.size() ||
+        !positionFile.flush())
+      return positionFailure(positionFile.errorString());
+#else
     qint64 written = 0;
     while (written < slot.size()) {
       const auto count = ::pwrite(positionFd, slot.constData() + written,
@@ -159,6 +191,7 @@ struct AlarmLogFile {
                                          : QString::fromLocal8Bit(strerror(errno)));
       written += count;
     }
+#endif
     positionSequence = sequence;
     return true;
   }
@@ -266,13 +299,45 @@ std::shared_ptr<AlarmLogFile> acquireAlarmFile(const QString& name, bool truncat
 }
 
 struct SharedLock {
+#ifdef Q_OS_WIN
+  DWORD device;
+  quint64 inode;
+  bool locked = false;
+#else
   dev_t device;
   ino_t inode;
+#endif
   int users = 1;
   const Logging* broadcaster = nullptr;
 };
 QHash<int, SharedLock> sharedLocks;
 int acquireLock(const QString& name) {
+#ifdef Q_OS_WIN
+  HANDLE handle = CreateFileW(reinterpret_cast<LPCWSTR>(name.utf16()),
+                              GENERIC_READ | GENERIC_WRITE,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                              nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (handle == INVALID_HANDLE_VALUE)
+    return -1;
+  BY_HANDLE_FILE_INFORMATION info{};
+  if (!GetFileInformationByHandle(handle, &info)) {
+    CloseHandle(handle);
+    return -1;
+  }
+  const quint64 inode = (quint64(info.nFileIndexHigh) << 32) | info.nFileIndexLow;
+  for (auto it = sharedLocks.begin(); it != sharedLocks.end(); ++it)
+    if (it->device == info.dwVolumeSerialNumber && it->inode == inode) {
+      CloseHandle(handle);
+      ++it->users;
+      return it.key();
+    }
+  int fd = _open_osfhandle(reinterpret_cast<intptr_t>(handle), _O_RDWR | _O_BINARY);
+  if (fd < 0) {
+    CloseHandle(handle);
+    return -1;
+  }
+  sharedLocks.insert(fd, {info.dwVolumeSerialNumber, inode});
+#else
   auto path = QFile::encodeName(name);
   struct stat info{};
   // Closing ANY descriptor for an inode releases this process's POSIX locks.
@@ -292,14 +357,39 @@ int acquireLock(const QString& name) {
     return -1;
   }
   sharedLocks.insert(fd, {info.st_dev, info.st_ino});
+#endif
   return fd;
+}
+bool setLock(int fd, bool acquire) {
+#ifdef Q_OS_WIN
+  auto it = sharedLocks.find(fd);
+  if (it == sharedLocks.end())
+    return false;
+  if (it->locked == acquire)
+    return true;
+  OVERLAPPED offset{};
+  auto handle = reinterpret_cast<HANDLE>(_get_osfhandle(fd));
+  const bool ok = acquire
+      ? LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+                   0, MAXDWORD, MAXDWORD, &offset) != 0
+      : UnlockFileEx(handle, 0, MAXDWORD, MAXDWORD, &offset) != 0;
+  if (ok)
+    it->locked = acquire;
+  return ok;
+#else
+  return lockf(fd, acquire ? F_TLOCK : F_ULOCK, 0) == 0;
+#endif
 }
 void releaseLock(int fd) {
   auto it = sharedLocks.find(fd);
   if (it == sharedLocks.end())
     return;
   if (!--it->users) {
+#ifdef Q_OS_WIN
+    _close(fd);
+#else
     ::close(fd);
+#endif
     sharedLocks.erase(it);
   }
 }
@@ -481,7 +571,7 @@ void Logging::tick() {
     lastLockCheck = now;
     if (lockFd >= 0) {
       bool wasMaster = master;
-      master = lockf(lockFd, F_TLOCK, 0) == 0;
+      master = setLock(lockFd, true);
       if (wasMaster != master)
         debugLog(options.debug, "logging", master ? "became master" : "became slave");
       if (alarmFile) {
@@ -538,7 +628,7 @@ void Logging::finishBroadcast() {
     file.close();
   it->broadcaster = nullptr;
   if (broadcastFd >= 0)
-    lockf(broadcastFd, F_ULOCK, 0);
+    setLock(broadcastFd, false);
 }
 bool Logging::sendBroadcast(const QString& text, int minutes, bool reloadFacility) {
   debugLog(options.debug, "broadcast", QString("send reload=%1 suppressMinutes=%2")
@@ -548,7 +638,7 @@ bool Logging::sendBroadcast(const QString& text, int minutes, bool reloadFacilit
   auto& shared = sharedLocks[broadcastFd];
   // POSIX locks are process-wide: another window (or this same sender) can
   // acquire our lock again. Keep a local owner until the delivery window ends.
-  if (shared.broadcaster || lockf(broadcastFd, F_TLOCK, 0) < 0) {
+  if (shared.broadcaster || !setLock(broadcastFd, true)) {
     if (error)
       error("Message broadcast is busy");
     return false;
@@ -560,13 +650,13 @@ bool Logging::sendBroadcast(const QString& text, int minutes, bool reloadFacilit
                 : text;
   QFile f(options.config + ".MESS");
   if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-    lockf(broadcastFd, F_ULOCK, 0);
+    setLock(broadcastFd, false);
     return false;
   }
   // Legacy readers treat the first line as an opaque ID in a 30-byte buffer.
   static qint64 lastMessageTime = 0;
   lastMessageTime = qMax(time, lastMessageTime + 1);
-  QString id = QString::number(lastMessageTime) + '-' + QString::number(getpid());
+  QString id = QString::number(lastMessageTime) + '-' + QString::number(QCoreApplication::applicationPid());
   QString data = id + '\n' + body + "\nDate is " +
                  QLocale::c().toString(QDateTime::currentDateTime(), "ddd MMM d HH:mm:ss yyyy") +
                  "\nFROM: User=" + qEnvironmentVariable("USER") +
@@ -576,7 +666,7 @@ bool Logging::sendBroadcast(const QString& text, int minutes, bool reloadFacilit
   bool ok = f.write(bytes) == bytes.size() && f.flush();
   f.close();
   if (!ok) {
-    lockf(broadcastFd, F_ULOCK, 0);
+    setLock(broadcastFd, false);
     return false;
   }
   shared.broadcaster = this;

@@ -10,6 +10,7 @@
 #include <QTimer>
 #include <QtTest>
 #include <algorithm>
+#ifndef Q_OS_WIN
 #include <netinet/in.h>
 #include <rpc/rpc.h>
 #include <rpc/pmap_clnt.h>
@@ -19,6 +20,7 @@
 #include <sys/stat.h>
 #include <csignal>
 #include <unistd.h>
+#endif
 using namespace alh;
 namespace {
 #ifdef Q_OS_MACOS
@@ -35,6 +37,7 @@ struct Child : QProcess {
     }
   }
 };
+#ifndef Q_OS_WIN
 struct Queue {
   int id = -1, key = 0;
   Queue() {
@@ -145,10 +148,38 @@ struct RpcServer {
     }
   }
 };
+#endif
 } // namespace
 class HelperTests : public QObject {
   Q_OBJECT
 private slots:
+#ifdef Q_OS_WIN
+  void windowsLockLifetime() {
+    QTemporaryDir dir;
+    Options o;
+    o.noLog = true;
+    o.lock = true;
+    o.lockFile = dir.filePath("shared");
+    auto probe = [&] {
+      Child child;
+      child.start(QCoreApplication::applicationFilePath(), {"--lock-probe", o.lockFile});
+      if (!child.waitForFinished())
+        return -1;
+      return child.exitCode();
+    };
+    auto first = std::make_unique<Logging>(o, "root");
+    QVERIFY(first->isMaster());
+    QCOMPARE(probe(), 1);
+    {
+      Logging second(o, "root");
+      QVERIFY(second.isMaster());
+    }
+    QCOMPARE(probe(), 1); // Closing another window must retain the shared lock.
+    first.reset();
+    QCOMPARE(probe(), 0); // The last owner releases the lock for another process.
+  }
+#endif
+#ifndef Q_OS_WIN
   void printer_data() {
     QTest::addColumn<QString>("binary");
     QTest::addColumn<QString>("color");
@@ -269,6 +300,7 @@ private slots:
     QVERIFY(msgsnd(q.id, buffer.data(), text.size(), 0) == 0);
     QCOMPARE(receiveQueue(q.id), text);
   }
+#endif
   void logging() {
     QTemporaryDir dir;
     Options o;
@@ -350,6 +382,7 @@ private slots:
       QVERIFY(file.readAll().contains("after-success"));
     }
   }
+#ifndef Q_OS_WIN
   void groupAcknowledgementAudit() {
     Queue q;
     QVERIFY(q.id >= 0);
@@ -375,6 +408,7 @@ private slots:
     QVERIFY(receiveQueue(q.id).isEmpty());
     QCOMPARE(e.state(d.root.get()).unack, 0);
   }
+#endif
   void datedAndXml() {
     QTemporaryDir dir;
     Options o;
@@ -394,6 +428,7 @@ private slots:
     QVERIFY(text.contains("<entry>"));
     QVERIFY(text.contains("a&lt;b"));
   }
+#ifndef Q_OS_WIN
   void lockHandoff() {
     QTemporaryDir dir;
     Options o;
@@ -497,6 +532,7 @@ private slots:
     QVERIFY(competitor.waitForFinished());
     QCOMPARE(competitor.exitCode(), explicitLock ? 0 : 1);
   }
+#endif
   void logRotation() {
     QTemporaryDir dir;
     Options o;
@@ -525,6 +561,11 @@ private slots:
     QTest::addColumn<QString>("alias");
     for (bool locked : {false, true})
       for (const auto& alias : {"direct", "directory", "canonical", "file"}) {
+#ifdef Q_OS_WIN
+        // QFile::link creates shortcuts on Windows, not filesystem symlinks.
+        if (QByteArray(alias) != "direct")
+          continue;
+#endif
         auto row = QByteArray(locked ? "locked-" : "default-") + alias;
         QTest::newRow(row.constData()) << locked << QString(alias);
       }
@@ -849,6 +890,7 @@ private slots:
     QVERIFY(result.contains(restorePrevious ? "record-3" : "record-5"));
     QVERIFY(!result.contains("record-2"));
   }
+#ifndef Q_OS_WIN
   void positionFileReused() {
     QTemporaryDir dir;
     Options o;
@@ -928,6 +970,7 @@ private slots:
     const auto repaired = metadata.readAll();
     QCOMPARE(QCryptographicHash::hash(repaired.mid(96, 64), QCryptographicHash::Sha256), repaired.mid(160, 32));
   }
+#endif
   void logTimestampCache() {
     QTemporaryDir dir;
     Options o;
@@ -971,7 +1014,9 @@ private slots:
   void broadcastOwnership_data() {
     QTest::addColumn<bool>("aliased");
     QTest::newRow("same-path") << false;
+#ifndef Q_OS_WIN
     QTest::newRow("directory-symlink") << true;
+#endif
   }
   void broadcastOwnership() {
     QFETCH(bool, aliased);
@@ -1039,5 +1084,21 @@ private slots:
     QTRY_VERIFY(!log.commandsAllowed());
   }
 };
+#ifdef Q_OS_WIN
+int main(int argc, char** argv) {
+  QCoreApplication app(argc, argv);
+  if (app.arguments().size() == 3 && app.arguments()[1] == "--lock-probe") {
+    Options o;
+    o.noLog = true;
+    o.lock = true;
+    o.lockFile = app.arguments()[2];
+    Logging log(o, "probe");
+    return log.isMaster() ? 0 : 1;
+  }
+  HelperTests tests;
+  return QTest::qExec(&tests, argc, argv);
+}
+#else
 QTEST_GUILESS_MAIN(HelperTests)
+#endif
 #include "test_helpers.moc"

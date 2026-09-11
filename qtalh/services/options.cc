@@ -111,6 +111,10 @@ Options parseOptions(const QStringList& args) {
     }
   }
   o.engine.debug = o.debug;
+#ifdef Q_OS_WIN
+  if (o.printerKey || o.databaseKey)
+    throw ParseError("-P and -O require System V queues and are unavailable on Windows");
+#endif
   if (!explicitLogDir)
     o.logDir = o.configDir;
   if (o.config.isEmpty() && !o.editor)
@@ -134,14 +138,14 @@ QString usage() {
   -T -xml            Dated logs / XML-ish log format
   -L -Lfile file     Master/slave logging lock / alternate lock basename
   -B                 Message broadcast using configuration .MESS files
-  -P key -O key      Printer / database System V queue keys
+  -P key -O key      Printer / database System V queue keys (Linux/macOS only)
   -s -p sound        Silent / WAV sound file
   -filter no|active|unack
   -mainwindow -maskcolor -noerrorpopup -desc_field -debug
   -display display -geometry geometry -fn font
   -help -version     Show help / version without opening a display
   --validate        Validate the configuration without CA connections or GUI
-QtALH supports ALH configuration files and Qt 5.15/6 on Linux.
+QtALH supports ALH configuration files and Qt 5.15/6 on Linux, macOS and Windows.
 )";
 }
 } // namespace alh

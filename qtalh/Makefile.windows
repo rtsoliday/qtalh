@@ -1,0 +1,88 @@
+# Native MSVC/Qt build driven by GNU Make and a POSIX shell, as in QtEDM.
+QT_VERSION ?= 6
+QT_DIR ?= C:/Qt/6.11.2/msvc2022_64
+QT_DIR := $(subst \,/,$(QT_DIR))
+QT_MULTIMEDIA_DIR ?= $(QT_DIR)
+QT_MULTIMEDIA_DIR := $(subst \,/,$(QT_MULTIMEDIA_DIR))
+# The offscreen plugin does not discover the native Windows font directory.
+QT_QPA_FONTDIR ?= $(subst \,/,$(SystemRoot))/Fonts
+OBJ_DIR = O.$(OS)-$(ARCH)-qt$(QT_VERSION)
+EXEEXT = .exe
+CXX = cl
+# Qt 6.11 moc helpers need MSVC's conforming lambda implementation in C++17.
+CXXFLAGS ?= /nologo /O2 /W3 /MD /EHsc /permissive- /Zc:lambda /Zc:__cplusplus /utf-8 /std:c++17
+CPPFLAGS += -DNOMINMAX -D_CRT_SECURE_NO_WARNINGS
+LINKEXE = link /nologo
+QT_MODULES = Core Gui Widgets Network PrintSupport
+QT_CFLAGS = -DQT_NO_DEBUG -DQT_CORE_LIB -DQT_GUI_LIB -DQT_WIDGETS_LIB -DQT_NETWORK_LIB -DQT_PRINTSUPPORT_LIB -DQT_MULTIMEDIA_LIB -I"$(QT_DIR)/include" $(foreach mod,$(QT_MODULES),-I"$(QT_DIR)/include/Qt$(mod)") -I"$(QT_MULTIMEDIA_DIR)/include" -I"$(QT_MULTIMEDIA_DIR)/include/QtMultimedia"
+QT_LIBS = $(foreach mod,$(QT_MODULES),"$(QT_DIR)/lib/Qt$(QT_VERSION)$(mod).lib") "$(QT_MULTIMEDIA_DIR)/lib/Qt$(QT_VERSION)Multimedia.lib"
+QT_TEST_CFLAGS = -I"$(QT_DIR)/include/QtTest"
+QT_TEST_LIBS = "$(QT_DIR)/lib/Qt$(QT_VERSION)Test.lib"
+MOC = "$(QT_DIR)/bin/moc.exe"
+RCC = "$(QT_DIR)/bin/rcc.exe"
+INCLUDES = -I. -I$(OBJ_DIR) -I$(EPICS_BASE)/include -I$(EPICS_BASE)/include/compiler/$(EPICS_COMPILER) -I$(EPICS_BASE)/include/os/WIN32
+
+ifneq ($(filter-out clean distclean,$(or $(MAKECMDGOALS),all)),)
+ifeq ($(filter $(QT_VERSION),5 6),)
+$(error QT_VERSION must be 5 or 6)
+endif
+ifeq ($(wildcard $(QT_MULTIMEDIA_DIR)/lib/Qt$(QT_VERSION)Multimedia.lib),)
+$(error Qt Multimedia is required; install the module matching QT_DIR or set QT_MULTIMEDIA_DIR)
+endif
+endif
+
+CORE = core/model.cc core/config.cc core/engine.cc
+SERVICES = services/log_browser.cc services/channel_access.cc services/options.cc services/logging.cc services/ipc.cc
+GUI = ui/workflows.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc
+OBJECTS = $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.obj) $(SERVICES:.cc=.obj) $(GUI:.cc=.obj)) $(OBJ_DIR)/resources.obj
+# MSVC does not emit GCC-style .d files. Rebuild on project header changes.
+HEADERS = $(wildcard core/*.h services/*.h ui/*.h)
+BUILD_FILES = Makefile Makefile.windows ../Makefile.rules
+LIBS = $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(LDLIBS)
+
+.PHONY: all clean distclean test test-core test-ui test-ioc test-helpers test-visual benchmark-cpu FORCE
+all: $(BIN_DIR)/qtalh.exe
+$(OBJ_DIR)/qtalh.exe: $(OBJECTS) $(OBJ_DIR)/main.obj
+	$(LINKEXE) $(LDFLAGS) /OUT:$@ $^ $(LIBS)
+$(BIN_DIR)/qtalh.exe: $(OBJ_DIR)/qtalh.exe FORCE
+	@mkdir -p $(BIN_DIR)
+	cp -f $< $@
+$(OBJ_DIR)/%.obj: %.cc $(HEADERS) $(BUILD_FILES)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CPPFLAGS) $(INCLUDES) $(QT_CFLAGS) $(CXXFLAGS) /c $< /Fo$@
+$(OBJ_DIR)/tests/%.obj: tests/%.cc $(HEADERS) $(BUILD_FILES)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CPPFLAGS) $(INCLUDES) $(QT_CFLAGS) $(QT_TEST_CFLAGS) $(CXXFLAGS) /c $< /Fo$@
+$(OBJ_DIR)/resources.cc: resources/qtalh.qrc resources/alh.xbm
+	@mkdir -p $(OBJ_DIR)
+	$(RCC) $< -o $@
+$(OBJ_DIR)/resources.obj: $(OBJ_DIR)/resources.cc $(BUILD_FILES)
+	$(CXX) $(CPPFLAGS) $(INCLUDES) $(QT_CFLAGS) $(CXXFLAGS) /c $< /Fo$@
+$(OBJ_DIR)/test_%.moc: tests/test_%.cc $(HEADERS) $(BUILD_FILES)
+	@mkdir -p $(OBJ_DIR)
+	$(MOC) -D_WIN32 $(CPPFLAGS) $(INCLUDES) $(QT_CFLAGS) $< -o $@
+
+TESTS = core ui ioc helpers
+define test_rules
+$(OBJ_DIR)/tests/test_$(1).obj: $(OBJ_DIR)/test_$(1).moc
+$(OBJ_DIR)/test_$(1).exe: $(OBJECTS) $(OBJ_DIR)/tests/test_$(1).obj
+	$$(LINKEXE) $$(LDFLAGS) /OUT:$$@ $$^ $$(LIBS) $$(QT_TEST_LIBS)
+test-$(1): $(OBJ_DIR)/test_$(1).exe
+	@mkdir -p $(OBJ_DIR)/test-artifacts
+	@QT_QPA_PLATFORM=offscreen QT_QPA_FONTDIR="$(QT_QPA_FONTDIR)" $(OBJ_DIR)/test_$(1).exe -o $(OBJ_DIR)/test-artifacts/$(1).txt,txt; result=$$$$?; cat $(OBJ_DIR)/test-artifacts/$(1).txt; exit $$$$result
+endef
+$(foreach test,$(TESTS),$(eval $(call test_rules,$(test))))
+$(addprefix $(OBJ_DIR)/tests/test_,$(addsuffix .obj,$(TESTS))): CPPFLAGS += -DTEST_OUTPUT='"$(abspath $(OBJ_DIR)/test-artifacts)"' -DEPICS_TEST_BIN='"$(EPICS_BASE)/bin/$(EPICS_HOST_ARCH)"' -DTEST_BIN_DIR='"$(abspath $(BIN_DIR))"'
+test: all $(addprefix test-,$(TESTS))
+test-visual:
+	@echo "Visual comparisons require Motif ALH and X11 on Linux/macOS."
+	@exit 1
+$(OBJ_DIR)/benchmark_cpu.exe: $(OBJECTS) $(OBJ_DIR)/tests/benchmark_cpu.obj
+	$(LINKEXE) $(LDFLAGS) /OUT:$@ $^ $(LIBS)
+benchmark-cpu: $(OBJ_DIR)/benchmark_cpu.exe
+	QT_QPA_PLATFORM=offscreen $< 10000 idle 10
+clean:
+	rm -rf O.$(OS)-$(ARCH)-qt5 O.$(OS)-$(ARCH)-qt6
+distclean: clean
+	rm -f $(BIN_DIR)/qtalh.exe
+FORCE:

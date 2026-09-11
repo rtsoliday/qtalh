@@ -8,6 +8,7 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 
 namespace alh {
 constexpr int SeverityCount = 5;

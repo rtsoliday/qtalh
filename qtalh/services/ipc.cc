@@ -2,7 +2,9 @@
 #include <cerrno>
 #include <cstring>
 #include <stdexcept>
+#ifndef Q_OS_WIN
 #include <sys/msg.h>
+#endif
 namespace alh {
 QByteArray encodeQueue(const QByteArray& record) {
   // Legacy ALH passes text as msgp: its first sizeof(long) bytes ARE mtype.
@@ -27,6 +29,13 @@ QByteArray decodeQueue(const QByteArray& bytes, int payloadSize) {
   return result;
 }
 bool sendQueue(int key, const QByteArray& record, QString* error) {
+#ifdef Q_OS_WIN
+  Q_UNUSED(key);
+  Q_UNUSED(record);
+  if (error)
+    *error = "System V printer/database queues are unavailable on Windows";
+  return false;
+#else
   try {
     auto bytes = encodeQueue(record);
     int id = msgget(key, 0600 | IPC_CREAT);
@@ -41,8 +50,15 @@ bool sendQueue(int key, const QByteArray& record, QString* error) {
       *error = e.what();
     return false;
   }
+#endif
 }
 QByteArray receiveQueue(int id, QString* error) {
+#ifdef Q_OS_WIN
+  Q_UNUSED(id);
+  if (error)
+    *error = "System V printer/database queues are unavailable on Windows";
+  return {};
+#else
   QByteArray bytes(8193 + sizeof(long), 0);
   int n = msgrcv(id, bytes.data(), 8193, 0, IPC_NOWAIT | MSG_NOERROR);
   if (n < 0) {
@@ -56,6 +72,7 @@ QByteArray receiveQueue(int id, QString* error) {
     return {};
   }
   return decodeQueue(bytes, n);
+#endif
 }
 QByteArray printerRecord(const QByteArray& record, const QString& color) {
   // printer.c receives "1 <type> <timestamp> ..." and skips the first two bytes.
