@@ -655,7 +655,7 @@ void Engine::tick() {
 int Engine::heartbeatDelay() const {
   if (!heartbeatDue || !options.global || options.passive)
     return -1;
-  return int(qBound<qint64>(0, heartbeatDue - now(), std::numeric_limits<int>::max()));
+  return int(qBound(qint64(0), heartbeatDue - now(), qint64(std::numeric_limits<int>::max())));
 }
 void Engine::tickHeartbeat() {
   auto t = now();

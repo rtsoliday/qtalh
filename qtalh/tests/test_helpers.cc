@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <netinet/in.h>
 #include <rpc/rpc.h>
+#include <rpc/pmap_clnt.h>
 #include <sys/msg.h>
 #include <sys/socket.h>
 #include <sys/resource.h>
@@ -20,6 +21,12 @@
 #include <unistd.h>
 using namespace alh;
 namespace {
+#ifdef Q_OS_MACOS
+// macOS defaults to 40 queued messages system-wide and 2048 bytes per queue.
+constexpr int BurstRecordCount = 32;
+#else
+constexpr int BurstRecordCount = 100;
+#endif
 struct Child : QProcess {
   ~Child() {
     if (state() != NotRunning) {
@@ -48,6 +55,24 @@ bool_t stringXdr(XDR* x, char** p) {
 bool_t voidXdr(XDR*, void*) {
   return TRUE;
 }
+bool_t rpcArgs(SVCXPRT* transport, xdrproc_t codec, caddr_t data, bool release = false) {
+#ifdef __APPLE__
+  // Apple's C++ xp_ops declarations use (...), whose calling convention on
+  // arm64 differs from the fixed arguments used by the C RPC implementation.
+  using Operation = bool_t (*)(SVCXPRT*, xdrproc_t, caddr_t);
+  auto operation = release ? transport->xp_ops->xp_freeargs : transport->xp_ops->xp_getargs;
+  return reinterpret_cast<Operation>(operation)(transport, codec, data);
+#else
+  return release ? svc_freeargs(transport, codec, data) : svc_getargs(transport, codec, data);
+#endif
+}
+void destroyRpcTransport(SVCXPRT* transport) {
+#ifdef __APPLE__
+  reinterpret_cast<void (*)(SVCXPRT*)>(transport->xp_ops->xp_destroy)(transport);
+#else
+  svc_destroy(transport);
+#endif
+}
 void rpcDispatch(svc_req* request, SVCXPRT* transport) {
   if (request->rq_proc == 0) {
     svc_sendreply(transport, reinterpret_cast<xdrproc_t>(voidXdr), nullptr);
@@ -58,7 +83,7 @@ void rpcDispatch(svc_req* request, SVCXPRT* transport) {
     return;
   }
   char* text = nullptr;
-  if (!svc_getargs(transport, reinterpret_cast<xdrproc_t>(stringXdr),
+  if (!rpcArgs(transport, reinterpret_cast<xdrproc_t>(stringXdr),
                    reinterpret_cast<caddr_t>(&text))) {
     svcerr_decode(transport);
     return;
@@ -66,7 +91,7 @@ void rpcDispatch(svc_req* request, SVCXPRT* transport) {
   receivedRpc = text ? QByteArray(text) : QByteArray();
   receivedRpcRecords.append(receivedRpc);
   svc_sendreply(transport, reinterpret_cast<xdrproc_t>(voidXdr), nullptr);
-  svc_freeargs(transport, reinterpret_cast<xdrproc_t>(stringXdr), reinterpret_cast<caddr_t>(&text));
+  rpcArgs(transport, reinterpret_cast<xdrproc_t>(stringXdr), reinterpret_cast<caddr_t>(&text), true);
 }
 struct RpcServer {
   SVCXPRT* transport = nullptr;
@@ -92,8 +117,14 @@ struct RpcServer {
       ::close(socket);
       return;
     }
-    if (!svc_register(transport, program, 1, rpcDispatch, IPPROTO_TCP)) {
-      svc_destroy(transport);
+#ifdef __APPLE__
+    // Apple's RPC header declares the dispatch callback without arguments.
+    auto dispatch = reinterpret_cast<void (*)()>(rpcDispatch);
+#else
+    auto dispatch = rpcDispatch;
+#endif
+    if (!svc_register(transport, program, 1, dispatch, IPPROTO_TCP)) {
+      destroyRpcTransport(transport);
       transport = nullptr;
       return;
     }
@@ -110,7 +141,7 @@ struct RpcServer {
     poll.stop();
     if (transport) {
       svc_unregister(program, 1);
-      svc_destroy(transport);
+      destroyRpcTransport(transport);
     }
   }
 };
@@ -143,7 +174,7 @@ private slots:
     });
     Child process;
     process.start(
-        "../bin/Linux-" + QSysInfo::currentCpuArchitecture() + "/" + binary,
+        QString(TEST_BIN_DIR) + "/" + binary,
         {"127.0.0.1", QString::number(server.serverPort()), QString::number(q.key), color});
     QVERIFY(process.waitForStarted());
     QByteArray message = "1 2 10-Sep-2026 12:00:00 helper integration test";
@@ -164,7 +195,7 @@ private slots:
     QVERIFY(q.id >= 0);
     receivedRpc.clear();
     Child process;
-    process.start("../bin/Linux-" + QSysInfo::currentCpuArchitecture() + "/" + binary,
+    process.start(QString(TEST_BIN_DIR) + "/" + binary,
                   {"127.0.0.1", QString::number(server.program), QString::number(q.key)});
     QVERIFY(process.waitForStarted());
     QByteArray message =
@@ -195,18 +226,18 @@ private slots:
         connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
       }
     });
-    for (int i = 0; i < 100; ++i) {
+    for (int i = 0; i < BurstRecordCount; ++i) {
       auto message = QByteArray("1 2 10-Sep-2026 12:00:00 burst ") + QByteArray::number(i);
       QVERIFY(sendQueue(q.key, message));
       expected += printerRecord(message, "bw");
     }
     Child process;
     process.start(
-        "../bin/Linux-" + QSysInfo::currentCpuArchitecture() + "/qtalh_printer",
+        QString(TEST_BIN_DIR) + "/qtalh_printer",
         {"127.0.0.1", QString::number(server.serverPort()), QString::number(q.key), "bw"});
     QVERIFY(process.waitForStarted());
-    // A 50 ms delay per record takes at least five seconds on a healthy sink.
-    QTRY_COMPARE_WITH_TIMEOUT(received, expected, 3000);
+    // The deadline still rejects a 50 ms delay per record on a healthy sink.
+    QTRY_COMPARE_WITH_TIMEOUT(received, expected, BurstRecordCount * 30);
   }
   void rpcBurst() {
     RpcServer server;
@@ -215,16 +246,16 @@ private slots:
     QVERIFY(q.id >= 0);
     QVector<QByteArray> expected;
     receivedRpcRecords.clear();
-    for (int i = 0; i < 100; ++i) {
+    for (int i = 0; i < BurstRecordCount; ++i) {
       auto message = QByteArray("1 1 test burst ") + QByteArray::number(i);
       QVERIFY(sendQueue(q.key, message));
       expected.append(message);
     }
     Child process;
-    process.start("../bin/Linux-" + QSysInfo::currentCpuArchitecture() + "/qtalh_DB",
+    process.start(QString(TEST_BIN_DIR) + "/qtalh_DB",
                   {"127.0.0.1", QString::number(server.program), QString::number(q.key)});
     QVERIFY(process.waitForStarted());
-    QTRY_COMPARE_WITH_TIMEOUT(receivedRpcRecords.size(), expected.size(), 3000);
+    QTRY_COMPARE_WITH_TIMEOUT(receivedRpcRecords.size(), expected.size(), BurstRecordCount * 30);
     QCOMPARE(receivedRpcRecords, expected);
   }
   void legacySender() {

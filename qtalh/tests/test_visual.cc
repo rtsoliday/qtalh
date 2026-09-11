@@ -140,7 +140,7 @@ private slots:
     auto path = tmp.filePath("visual.alhConfig");
     saveConfig(d, path);
     Child legacy;
-    legacy.start("../bin/Linux-" + QSysInfo::currentCpuArchitecture() + "/alh",
+    legacy.start(QString(TEST_BIN_DIR) + "/alh",
                  {"-S", "-s", "-mainwindow", "-noerrorpopup", "-a", tmp.filePath("legacy.alhAlarm"),
                   "-o", tmp.filePath("legacy.alhOpmod"), path});
     QVERIFY(legacy.waitForStarted());

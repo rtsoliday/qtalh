@@ -1,18 +1,20 @@
-# Standalone Linux build settings; override paths on the make command line.
+# Standalone Linux and macOS builds; override paths on the make command line.
 OS := $(shell uname -s)
 ARCH := $(shell uname -m)
+RULES_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 OBJ_DIR = O.$(OS)-$(ARCH)
 BIN_DIR = ../bin/$(OS)-$(ARCH)
+PKG_CONFIG ?= pkg-config
 
 CFLAGS ?= -O2 -g -Wall -std=gnu99
 ALH_HELP_URL ?= https://epics.anl.gov/EpicsDocumentation/ExtensionsManuals/AlarmHandler/current/ALHUserGuide.html
 
 # Cleaning does not require installed dependencies.
 ifneq ($(filter-out clean distclean,$(or $(MAKECMDGOALS),all)),)
-ifneq ($(OS),Linux)
-  $(error The standalone build currently supports Linux; use Makefile.epics on other platforms)
+ifeq ($(filter $(OS),Linux Darwin),)
+  $(error The standalone build supports Linux and macOS; use Makefile.epics on other platforms)
 endif
-EPICS_SEARCH_PATHS = /usr/local/oag/base ../epics-base ../../epics-base ../../../../base $(HOME)/epics/base $(HOME)/epics/base-7.0
+EPICS_SEARCH_PATHS = /usr/local/oag/base $(RULES_DIR)epics-base $(RULES_DIR)../epics-base $(RULES_DIR)../../../base $(HOME)/epics/base $(HOME)/epics/base-7.0
 EPICS_BASE ?= $(firstword $(foreach base,$(EPICS_SEARCH_PATHS),$(if $(wildcard $(base)/include/cadef.h),$(base))))
 ifeq ($(strip $(EPICS_BASE)),)
   $(error EPICS Base not found; set EPICS_BASE=/path/to/built/base)
@@ -20,30 +22,43 @@ endif
 EPICS_BASE := $(abspath $(EPICS_BASE))
 EPICS_HOST_ARCH ?= $(shell perl $(EPICS_BASE)/startup/EpicsHostArch.pl)
 EPICS_LIB_DIR ?= $(EPICS_BASE)/lib/$(EPICS_HOST_ARCH)
+EPICS_COMPILER ?= $(if $(filter Darwin,$(OS)),clang,gcc)
 # Prefer static EPICS libraries, as MEDM does; shared-only Base also works.
-EPICS_LIBS = $(foreach lib,ca Com,$(firstword $(wildcard $(EPICS_LIB_DIR)/lib$(lib).a $(EPICS_LIB_DIR)/lib$(lib).so)))
+EPICS_SHARED_EXT = $(if $(filter Darwin,$(OS)),dylib,so)
+EPICS_LIBS = $(foreach lib,ca Com,$(firstword $(wildcard $(EPICS_LIB_DIR)/lib$(lib).a $(EPICS_LIB_DIR)/lib$(lib).$(EPICS_SHARED_EXT))))
 ifneq ($(words $(EPICS_LIBS)),2)
   $(error EPICS libraries not found in $(EPICS_LIB_DIR); build Base or set EPICS_HOST_ARCH)
 endif
 EPICS_LDFLAGS = -Wl,-rpath,$(EPICS_LIB_DIR)
 EPICS_SYS_LIBS = -lpthread -ldl -lrt -lm
-ifneq ($(shell nm -u $(EPICS_LIB_DIR)/libCom.a 2>/dev/null | sed -n '/ U readline$$/p'),)
+ifeq ($(OS),Darwin)
+  EPICS_SYS_LIBS = -lpthread -lm
+endif
+ifneq ($(shell nm -u $(EPICS_LIB_DIR)/libCom.a 2>/dev/null | sed -n '/ U _\{0,1\}readline$$/p'),)
   EPICS_SYS_LIBS += -lreadline
 endif
 
-MOTIF_INC ?= /usr/include
-X11_INC ?= /usr/include
-X_LIBS ?= -lXm -lXmu -lXt -lX11
-ifneq ($(MOTIF_LIB),)
-  X_LIBS += -L$(MOTIF_LIB) -Wl,-rpath,$(MOTIF_LIB)
+X_INCLUDE_DIRS = /usr/include /usr/local/include /opt/local/include /opt/X11/include /usr/X11/include /opt/homebrew/include
+MOTIF_INC ?= $(firstword $(foreach dir,$(X_INCLUDE_DIRS),$(if $(wildcard $(dir)/Xm/Xm.h),$(dir))))
+X11_INC ?= $(firstword $(foreach dir,$(X_INCLUDE_DIRS),$(if $(wildcard $(dir)/X11/Xlib.h),$(dir))))
+X_LIBRARY_DIRS = $(MOTIF_LIB) $(X11_LIB) $(patsubst %/include,%/lib,$(MOTIF_INC) $(X11_INC)) /usr/lib64 /usr/lib/$(ARCH)-linux-gnu /usr/lib /usr/local/lib /opt/local/lib /opt/X11/lib /usr/X11/lib /opt/homebrew/lib
+find_x_library = $(firstword $(foreach dir,$(X_LIBRARY_DIRS),$(wildcard $(dir)/lib$(1).$(EPICS_SHARED_EXT) $(dir)/lib$(1).a)))
+XM_LIB = $(call find_x_library,Xm)
+# Static Motif does not record its X11 dependencies (notably on MacPorts).
+MOTIF_STATIC_DEP_LIBS =
+ifneq ($(filter %.a,$(XM_LIB)),)
+  MOTIF_STATIC_DEP_LIBS = $(foreach lib,Xrandr Xrender Xcursor Xpm Xext Xft fontconfig jpeg png iconv,$(call find_x_library,$(lib))) -lz
 endif
-ifneq ($(X11_LIB),)
-  X_LIBS += -L$(X11_LIB) -Wl,-rpath,$(X11_LIB)
-endif
-PKG_CONFIG ?= pkg-config
+X_LIBS ?= $(foreach dir,$(MOTIF_LIB) $(X11_LIB),-L$(dir) -Wl,-rpath,$(dir)) $(foreach lib,Xm Xmu Xt X11,$(or $(call find_x_library,$(lib)),-l$(lib))) $(MOTIF_STATIC_DEP_LIBS)
+ifeq ($(OS),Darwin)
+# macOS supplies Sun RPC in the SDK and libSystem; TI-RPC is used on Linux.
+RPC_CFLAGS ?=
+RPC_LIBS ?=
+else
 RPC_CFLAGS ?= $(shell $(PKG_CONFIG) --cflags libtirpc 2>/dev/null)
 RPC_LIBS ?= $(shell $(PKG_CONFIG) --libs libtirpc 2>/dev/null)
+endif
 
-ALH_CPPFLAGS = -D_DEFAULT_SOURCE -I. -Ios/$(OS) -Ios/default -I$(EPICS_BASE)/include -I$(EPICS_BASE)/include/compiler/gcc -I$(EPICS_BASE)/include/os/$(OS) -I$(MOTIF_INC) -I$(X11_INC) $(RPC_CFLAGS)
+ALH_CPPFLAGS = -D_DEFAULT_SOURCE -I. -Ios/$(OS) -Ios/default -I$(EPICS_BASE)/include -I$(EPICS_BASE)/include/compiler/$(EPICS_COMPILER) -I$(EPICS_BASE)/include/os/$(OS) $(addprefix -I,$(MOTIF_INC) $(X11_INC)) $(RPC_CFLAGS)
 vpath %.c os/$(OS) os/default
 endif

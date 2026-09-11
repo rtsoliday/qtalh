@@ -48,9 +48,10 @@ transitions for automated testing remain confined to the test IOC.
 Remaining appearance differences include platform font rasterization and window-manager decorations. The subsequent auxiliary-window pass is described below. Printing still uses the Qt system print dialog.
 
 Alarm files now use QMediaPlayer instead of QSoundEffect, allowing the supplied
-Ogg/Vorbis `bell.oga` to decode. Qt 5 uses its installed GStreamer media backend;
-Qt 6 uses QMediaPlayer with QAudioOutput. The UI test decodes and plays the system
-bell twice with output muted (skipped if the freedesktop sound theme is absent).
+Ogg/Vorbis `bell.oga` to decode. Qt 5 uses its platform media backend;
+Qt 6 uses QMediaPlayer with QAudioOutput. The UI test decodes and plays a bundled
+Ogg/Vorbis fixture twice with output muted. On macOS it runs this case in a
+native Cocoa child process so media callbacks receive the correct event loop.
 The radiation-monitor launch produces no sound-decoding error. Audible output
 through the operator's speakers still needs a listening check. See the
 [Qt audio overview](https://doc.qt.io/qt-6.10/audiooverview.html) for media-format

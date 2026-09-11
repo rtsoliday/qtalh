@@ -142,7 +142,12 @@ int put2RPC(char *host ,int port,char *msg,int len)
 	DBSend  dbsend_1_arg;
 	dbsend_1_arg.msg=msg;
 
+#ifdef __APPLE__
+	/* macOS Sun RPC does not support TI-RPC's netpath transport selector. */
+	clnt = clnt_create(host, port, DB_VERS, "tcp");
+#else
 	clnt = clnt_create(host, port, DB_VERS, "netpath");
+#endif
 	if (clnt == (CLIENT *) NULL) {
 		clnt_pcreateerror(host);
 		return(-1);

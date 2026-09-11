@@ -229,9 +229,29 @@ private slots:
     QVERIFY(!w->isVisible());
   }
   void oggAlarmSound() {
-    const QString file = "/usr/share/sounds/freedesktop/stereo/bell.oga";
-    if (!QFileInfo::exists(file))
-      QSKIP("Install the freedesktop sound theme to test Ogg alarm playback");
+#ifdef Q_OS_MACOS
+    // Native media backends need the Cocoa event loop; the offscreen plugin
+    // cannot drive playback reliably. Run just this case in a native child.
+    if (QGuiApplication::platformName() != "cocoa") {
+      QProcess child;
+      auto environment = QProcessEnvironment::systemEnvironment();
+      environment.insert("QT_QPA_PLATFORM", "cocoa");
+      child.setProcessEnvironment(environment);
+      child.start(QCoreApplication::applicationFilePath(), {"oggAlarmSound"});
+      QVERIFY(child.waitForStarted());
+      if (!child.waitForFinished(45000)) {
+        child.kill();
+        child.waitForFinished();
+        QFAIL("Native macOS alarm playback test timed out");
+      }
+      const auto output = child.readAllStandardOutput() + child.readAllStandardError();
+      QVERIFY2(child.exitStatus() == QProcess::NormalExit && child.exitCode() == 0,
+               output.constData());
+      return;
+    }
+#endif
+    const QString file = QFINDTESTDATA("alarm.ogg");
+    QVERIFY2(!file.isEmpty(), "The bundled Ogg alarm fixture must be available");
     auto o = options(false);
     o.sound = file;
     auto w = std::make_unique<Window>(sample(), o, false);

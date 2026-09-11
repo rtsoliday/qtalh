@@ -1,7 +1,8 @@
 # ALH and QtALH standalone builds.
 .DEFAULT_GOAL := all
-HAVE_MOTIF := $(shell test -f $(or $(MOTIF_INC),/usr/include)/Xm/Xm.h && echo 1)
-HAVE_QT := $(shell pkg-config --exists Qt6Widgets Qt6Network Qt6PrintSupport Qt6Multimedia 2>/dev/null && echo 1 || (pkg-config --exists Qt5Widgets Qt5Network Qt5PrintSupport Qt5Multimedia 2>/dev/null && echo 1))
+include Makefile.rules
+HAVE_MOTIF := $(if $(wildcard $(MOTIF_INC)/Xm/Xm.h),1)
+HAVE_QT := $(shell $(PKG_CONFIG) --exists Qt6Widgets Qt6Network Qt6PrintSupport Qt6Multimedia 2>/dev/null && echo 1 || ($(PKG_CONFIG) --exists Qt5Widgets Qt5Network Qt5PrintSupport Qt5Multimedia 2>/dev/null && echo 1))
 .PHONY: all alh qtalh test-qtalh clean distclean
 all: $(if $(HAVE_MOTIF),alh) $(if $(HAVE_QT),qtalh)
 	@$(if $(HAVE_MOTIF),:,echo "Motif unavailable: legacy ALH omitted.")

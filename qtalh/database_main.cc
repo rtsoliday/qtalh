@@ -53,9 +53,17 @@ int main(int argc, char** argv) {
     }
     // Yield between records, but only wait when the queue is empty.
     timer.start(0);
-    CLIENT* client = clnt_create(a[1].toLocal8Bit().constData(), program, 1, "netpath");
+    auto host = a[1].toLocal8Bit();
+#ifdef __APPLE__
+    // The macOS Sun RPC implementation accepts tcp/udp, not TI-RPC's netpath.
+    char protocol[] = "tcp";
+#else
+    char protocol[] = "netpath";
+#endif
+    char diagnostic[] = "qtalh_DB";
+    CLIENT* client = clnt_create(host.data(), program, 1, protocol);
     if (!client) {
-      clnt_pcreateerror("qtalh_DB");
+      clnt_pcreateerror(diagnostic);
       return;
     }
     char* text = record.data();
@@ -63,7 +71,7 @@ int main(int argc, char** argv) {
     char result = 0;
     if (clnt_call(client, 1, reinterpret_cast<xdrproc_t>(encode), reinterpret_cast<caddr_t>(&text),
                   reinterpret_cast<xdrproc_t>(voidResult), &result, timeout) != RPC_SUCCESS)
-      clnt_perror(client, "qtalh_DB");
+      clnt_perror(client, diagnostic);
     clnt_destroy(client);
   });
   timer.start();
