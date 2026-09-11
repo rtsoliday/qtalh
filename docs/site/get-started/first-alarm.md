@@ -75,7 +75,7 @@ The active severity returns to **NO_ALARM**. With the default mask, the highest 
 
 Select **Vacuum pressure**, then use **Action → Acknowledge Alarm** or **Ctrl+A**. The outstanding acknowledgement clears. Acknowledgement records that an operator has seen an alarm; it does not change the pressure PV or correct the underlying condition.
 
-Open guidance for the selected channel using **Ctrl+G**. The instructions are stored in the configuration's `$GUIDANCE` block.
+Hover over the channel's **G** button to preview its guidance without opening a dialog. Open the guidance using **G** or **Ctrl+G**. The instructions are stored in the configuration's `$GUIDANCE` block.
 
 ## 6. Finish the exercise
 

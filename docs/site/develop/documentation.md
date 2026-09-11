@@ -53,6 +53,25 @@ To check that build again, pass the same prefix with `--check-only`.
 
 `scripts/sync-docs.py` refreshes imported pages and downloads. Generated pages contain a comment naming that script; edit their source documents rather than the generated copy. The sync step also carries the original manual and linked benchmark evidence into the website.
 
+## Application screenshots
+
+Keep actual QtALH captures in `docs/site/public/images/`, and record the fixture,
+Qt/platform version, and regeneration steps in that directory's `README.md`.
+Use the repository's synthetic UI/gallery fixtures rather than a production
+facility. The current main-window and dialog captures can be refreshed with:
+
+```sh
+make -C qtalh QT_VERSION=5 test-ui test-ui-fusion test-gallery
+```
+
+Copy the selected images from the build's `test-artifacts/` directory using the
+mapping in `docs/site/public/images/README.md`.
+Embed them with descriptive alt text, for example
+`![Fusion channel Properties](/images/fusion-properties.png)`, and explain the
+relevant controls beside the image. This Markdown image syntax also respects
+`DOCS_BASE` for sites hosted in a subdirectory. Rebuild with `make docs` and check
+that the generated pages reference image files present under `docs/html/images/`.
+
 ## Version control and cleanup
 
 Commit authored Markdown pages, site configuration and theme, `package.json`,

@@ -69,6 +69,11 @@ private slots:
         bool found = false;
         for (auto dialog : window->findChildren<QDialog*>())
           if (dialog->isVisible()) {
+            // Show every history column in screenshots used by the user guide.
+            if (!legacyAppearance() && dialog->objectName() == "historyDialog") {
+              dialog->resize(1000, 300);
+              QTest::qWait(30);
+            }
             QVERIFY(dialog->grab().save(output + '/' + file + ".png"));
             if (auto tabs = dialog->findChild<QTabWidget*>("propertyTabs")) {
               for (int tab = 1; tab < tabs->count(); ++tab) {

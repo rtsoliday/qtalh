@@ -10,6 +10,8 @@ From the repository root:
 bin/Linux-x86_64/qtalh -c examples/minimal.alhConfig
 ```
 
+Add `-style fusion` to use the tabbed Properties layout shown below.
+
 Use **Save As** to save your own file. To start an empty document instead, run `qtalh -c`.
 
 ## Add and name the hierarchy
@@ -23,9 +25,21 @@ There must be one root. Group names must not repeat an ancestor or use the reser
 
 ## Edit properties and guidance
 
-Select a node and open Properties. **Apply** validates and applies the fields while leaving the dialog open. **Cancel** restores the currently applied values; **Dismiss** closes the window. Selection dialogs follow your selected node.
+Select a node and open Properties. **Apply** validates and applies the fields while leaving the dialog open. **Cancel** restores the currently applied values; **Close** (styled mode) or **Dismiss** (Motif mode) closes the window. Selection dialogs follow your selected node.
+
+In styled mode, Properties organizes the fields into **General**, **Force PV**,
+**Commands**, and **Guidance** tabs. General contains identity, masks, count
+filtering, beep severity, PV settings, and alias. Apply, Cancel, and Close stay
+below the tabs. When the selected node changes, the dialog preserves the selected
+tab and scroll position; unfinished edits are protected from background refreshes.
+
+![Fusion channel Properties with the General tab selected](/images/fusion-properties.png)
+
+This screenshot uses the synthetic channel from the repository gallery.
 
 Add operator guidance explaining what to check when the alarm occurs. Inline `$GUIDANCE` text appears inside QtALH; a configured URL or file opens externally. Related `$COMMAND` actions should use commands and paths appropriate to the runtime host.
+
+Operators can hover over **G** to read guidance and **P** to preview related commands in either appearance.
 
 Undo uses **Alt+Backspace**, and redo uses **Ctrl+Y**. The editor also supports cut/copy/paste and copying between editor windows.
 

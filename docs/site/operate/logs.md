@@ -21,6 +21,15 @@ The browser searches the selected current log and its `.yyyy-MM-dd` siblings. It
 | Current alarm history | The ten most recent in-memory history entries, separate from the files. |
 | Live log-file viewer | Viewing the current file separately from a historical search. |
 
+## Read current history
+
+Choose **View → Current Alarm History** for the most recent in-memory entries.
+The reading area is resizable and uses a fixed-width font to align the columns.
+In a non-Motif style, the [font-size shortcuts](/operate/appearance#adjust-the-font-while-running)
+also work while this dialog has focus.
+
+![Fusion current alarm history showing a synthetic HIHI/MAJOR transition](/images/fusion-history.png)
+
 ## Understand circular files
 
 The default alarm file holds 2000 records. After wrapping, physical line order is not chronological. The historical browser sorts recognized timestamps; events sharing one-second timestamps may still have ambiguous relative order.

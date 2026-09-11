@@ -28,6 +28,7 @@ export default defineConfig({
       ]},
       { text: 'OPERATE', collapsed: false, items: [
         { text: 'Monitor & acknowledge', link: '/operate/alarms' },
+        { text: 'Appearance & font size', link: '/operate/appearance' },
         { text: 'Silence & display filters', link: '/operate/silence-filters' },
         { text: 'Read alarm logs', link: '/operate/logs' },
         { text: 'Troubleshooting', link: '/operate/troubleshooting' }

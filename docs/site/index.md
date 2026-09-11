@@ -31,6 +31,14 @@ The example contains two placeholder PVs. [Open your first configuration](./get-
 <strong>Choosing a mode?</strong> Local mode keeps acknowledgements in your runtime. Global mode uses IOC acknowledgement fields. Passive mode prevents CA writes. <a href="./understand/alarm-lifecycle.html">Compare the modes →</a>
 </div>
 
+## Choose your appearance
+
+Keep the default Motif appearance, or start with `-style fusion` for modern
+controls. [Appearance & font size](./operate/appearance) shows both looks and
+explains the font-size shortcuts.
+
+![QtALH main window with Fusion styling](/images/fusion-main.png)
+
 ## Working on QtALH
 
 Read the [architecture](./develop/architecture), run the [test suites](./develop/testing), or inspect the [compatibility inventory](./understand/compatibility). Historical measurements and implementation investigations live in [Engineering history](./history/).

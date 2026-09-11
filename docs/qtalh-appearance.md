@@ -14,6 +14,10 @@ buttons, disclosure indicators, focus/selection feedback, a standard splitter
 and width slider, and separate Status and Alarm sound sections. Alarm legend
 starts collapsed. Alarm colors and severity letters remain visible on both light
 and dark palettes; normal surfaces use the selected style and system palette.
+The Alarm sound captions and status lines share the same right-aligned text edge
+in every style. G tooltips preview guidance text or its configured external
+reference; P tooltips preview the effective command or menu of commands. These
+previews also work in Motif mode.
 Fonts and row hit targets scale together. No widgets are allocated per alarm row.
 
 Styled fonts default to one point smaller than the system font sizes (with a

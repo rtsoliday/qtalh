@@ -28,6 +28,15 @@ $FORCEPV example:maintenance -D--- 1 0
 
 When `example:maintenance` becomes 1, Disable is applied. When it becomes 0, the configured channel mask is restored. A group Force PV acts on descendant channels. Use `NE` as the reset value to restore the mask when the force value is left.
 
+Open **Force Process Variable** (**Ctrl+V**) for the selected node. With a modern
+style, its grouped form scrolls while Close, Cancel, and Apply remain visible.
+Scroll down to reach the CALC expression and inputs.
+
+![Fusion Force PV dialog showing the enable setting, mask, and force/reset values](/images/fusion-force-pv.png)
+
+The screenshot shows the repository's synthetic CALC example with Disable selected
+and an `NE` reset, rather than the literal-PV example above.
+
 ## Use an expression
 
 A calculated Force PV requires an expression. Inputs A–F can be constants or PV names:

@@ -16,6 +16,8 @@ bin/Linux-x86_64/qtalh -mainwindow /path/to/facility.alhConfig
 
 The compact facility window remains available. Its indication summarizes the facility; clicking the facility button opens the main window. Closing the main window hides it while monitoring continues. Close the compact window or choose File Exit/Close and confirm to stop the runtime.
 
+For modern controls, add `-style fusion`. See [Appearance & font size](/operate/appearance) for screenshots and font shortcuts.
+
 ## Navigate the hierarchy
 
 1. Select a group in the left tree to show its contents in the right pane.
@@ -53,10 +55,19 @@ Passive mode prevents acknowledgement. In global mode, the IOC must allow the wr
 
 ## Open guidance or a related process
 
-- **Ctrl+G** opens configured guidance: inline text, a local file, or a URL.
-- **Ctrl+P** runs the configured related process or opens its command menu.
+- Hover over **G** to read the configured guidance text without opening a dialog.
+  If guidance is a URL or file, the tooltip shows that configured reference;
+  it does not fetch the external content. Click **G** or use **Ctrl+G** to open it.
+- Hover over **P** to preview the command that will run. If several actions are
+  configured, the tooltip lists their labels and commands, including any
+  `MASTER_ONLY` restriction. Click **P** or use **Ctrl+P** to run the command or
+  open its action menu. Hovering never launches a process.
 - Properties and action dialogs follow the selected group/channel. Selecting another node changes their target; background updates preserve unfinished edits where supported.
 
-Related processes run actual configured commands on your host. Their syntax depends on the operating system.
+These previews work in both Motif and styled presentations. Related processes
+run configured commands on your host; their syntax depends on the operating
+system. A leading `medm` executable is replaced with `qtedm` from `PATH`, keeping
+its arguments. The P tooltip shows this effective command, while the saved
+configuration retains the original text.
 
 Continue with [silence and filters](/operate/silence-filters) or [historical logs](/operate/logs).

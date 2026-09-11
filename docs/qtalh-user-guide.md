@@ -43,6 +43,16 @@ to open the main tree and group contents. Closing the main runtime window hides
 it while monitoring continues. Closing the compact window or using File
 Exit/Close asks for confirmation before stopping that runtime.
 
+### Preview guidance and commands
+
+Hover over a **G** button to read the configured guidance text. A configured URL
+or filename is also shown, without fetching its content. Click G or use Ctrl+G
+to open the guidance. Hover over **P** to preview the command that clicking it
+will launch; menus list each action and command, with `MASTER_ONLY` restrictions
+identified. Previews show the effective `qtedm` command when a leading `medm`
+executable is substituted. Hovering never opens guidance or executes commands.
+These tooltips work with both Motif and modern styles.
+
 ## Command-line reference
 
 Syntax: `qtalh [OPTIONS] [configfile]`. One configuration is supported per

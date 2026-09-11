@@ -6,6 +6,10 @@ Change what you hear or see without changing which channels QtALH monitors.
 
 Use **Setup** to choose a silence interval or **Silence Forever**. The available intervals are 5, 10, 15, 30, and 60 minutes; the default interval is 30 minutes. Starting with `-s` enables Silence Forever, which can be changed in the running application.
 
+In styled mode, the **Alarm sound** box groups the timed-silence and current-alarm
+checkboxes with **Silence Forever** status and **ALH Beep Severity**. All four
+lines align to the right, as they do in Motif. See the [main-window screenshots](/operate/appearance).
+
 Silence does not acknowledge an alarm, stop monitoring, or disable logging. Use acknowledgement separately after reviewing the alarm.
 
 ## Choose which severities can sound
