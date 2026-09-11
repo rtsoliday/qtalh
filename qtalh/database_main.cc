@@ -4,6 +4,7 @@
 #include <QTextStream>
 #include <QTimer>
 #include <csignal>
+#include <cstdarg>
 #include <rpc/rpc.h>
 #include <sys/msg.h>
 namespace {
@@ -14,14 +15,19 @@ void stop(int) {
 #ifdef __APPLE__
 bool_t voidResult(XDR*, void*, unsigned int) {
 #else
-bool_t voidResult(XDR*, void*, ...) {
+bool_t voidResult(XDR*, ...) {
 #endif
   return TRUE;
 }
 #ifdef __APPLE__
 bool_t encode(XDR* x, void* data, unsigned int) {
 #else
-bool_t encode(XDR* x, void* data, ...) {
+bool_t encode(XDR* x, ...) {
+  // TI-RPC passes the data pointer as the first variadic argument.
+  va_list args;
+  va_start(args, x);
+  void* data = va_arg(args, void*);
+  va_end(args);
 #endif
   auto s = static_cast<char**>(data);
   return xdr_string(x, s, 8192);

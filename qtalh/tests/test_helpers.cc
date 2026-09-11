@@ -19,6 +19,7 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <csignal>
+#include <cstdarg>
 #include <unistd.h>
 #endif
 using namespace alh;
@@ -55,7 +56,12 @@ QVector<QByteArray> receivedRpcRecords;
 #ifdef __APPLE__
 bool_t stringXdr(XDR* x, void* data, unsigned int) {
 #else
-bool_t stringXdr(XDR* x, void* data, ...) {
+bool_t stringXdr(XDR* x, ...) {
+  // TI-RPC passes the data pointer as the first variadic argument.
+  va_list args;
+  va_start(args, x);
+  void* data = va_arg(args, void*);
+  va_end(args);
 #endif
   auto p = static_cast<char**>(data);
   return xdr_string(x, p, 8192);
@@ -63,7 +69,7 @@ bool_t stringXdr(XDR* x, void* data, ...) {
 #ifdef __APPLE__
 bool_t voidXdr(XDR*, void*, unsigned int) {
 #else
-bool_t voidXdr(XDR*, void*, ...) {
+bool_t voidXdr(XDR*, ...) {
 #endif
   return TRUE;
 }
