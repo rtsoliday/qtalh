@@ -1,5 +1,6 @@
 #pragma once
 #include "core/engine.h"
+#include "appearance.h"
 #include "services/channel_access.h"
 #include "services/logging.h"
 #include "services/options.h"
@@ -15,7 +16,6 @@
 #include <QPushButton>
 #include <QTreeView>
 namespace alh {
-void initializeAppearance();
 class AlarmModel : public QAbstractItemModel {
 public:
   AlarmModel(Document*, Engine*, bool tree, QObject* parent = nullptr);

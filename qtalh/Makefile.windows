@@ -33,7 +33,7 @@ endif
 
 CORE = core/model.cc core/config.cc core/engine.cc
 SERVICES = services/log_browser.cc services/channel_access.cc services/options.cc services/logging.cc services/ipc.cc
-GUI = ui/workflows.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc
+GUI = ui/appearance.cc ui/workflows.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc
 OBJECTS = $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.obj) $(SERVICES:.cc=.obj) $(GUI:.cc=.obj)) $(OBJ_DIR)/resources.obj
 # MSVC does not emit GCC-style .d files. Rebuild on project header changes.
 HEADERS = $(wildcard core/*.h services/*.h ui/*.h)
@@ -86,3 +86,15 @@ clean:
 distclean: clean
 	rm -f $(BIN_DIR)/qtalh.exe
 FORCE:
+
+$(OBJ_DIR)/tests/test_visual.obj: $(OBJ_DIR)/test_visual.moc
+$(OBJ_DIR)/tests/test_visual.obj: CPPFLAGS += -DTEST_OUTPUT='"$(abspath $(OBJ_DIR)/test-artifacts)"'
+$(OBJ_DIR)/test_visual.exe: $(OBJECTS) $(OBJ_DIR)/tests/test_visual.obj
+	$(LINKEXE) $(LDFLAGS) /OUT:$@ $^ $(LIBS) $(QT_TEST_LIBS)
+.PHONY: test-gallery test-ui-fusion
+test-gallery: $(OBJ_DIR)/test_visual.exe
+	QT_QPA_PLATFORM=offscreen QT_QPA_FONTDIR="$(QT_QPA_FONTDIR)" $< dialogGallery
+	QT_QPA_PLATFORM=offscreen QT_QPA_FONTDIR="$(QT_QPA_FONTDIR)" QTALH_TEST_STYLE=fusion $< dialogGallery
+test-ui test-ui-fusion: $(OBJ_DIR)/qtalh.exe
+test-ui-fusion: $(OBJ_DIR)/test_ui.exe
+	QT_QPA_PLATFORM=offscreen QT_QPA_FONTDIR="$(QT_QPA_FONTDIR)" QTALH_TEST_STYLE=fusion $(OBJ_DIR)/test_ui.exe

@@ -94,8 +94,13 @@ Options parseOptions(const QStringList& args) {
         o.filter = 2;
       else
         throw ParseError("Filter must be no, active, or unack");
-    } else if (a == "-platform" || a == "-style")
-      need(i); // Consumed later by QApplication.
+    } else if (a.compare("-style", Qt::CaseInsensitive) == 0 ||
+               a.startsWith("-style=", Qt::CaseInsensitive)) {
+      o.style = a.contains('=') ? a.mid(a.indexOf('=') + 1) : need(i);
+      if (o.style.trimmed().isEmpty() || o.style.startsWith('-'))
+        throw ParseError("Missing or empty value for -style");
+    } else if (a == "-platform")
+      o.platform = need(i);
     else if (a == "--") {
       if (++i < args.size())
         o.config = args[i];
@@ -142,6 +147,7 @@ QString usage() {
   -s -p sound        Silent / audio file (formats depend on Qt media backend)
   -filter no|active|unack
   -mainwindow -maskcolor -noerrorpopup -desc_field -debug
+  -style name        Widget appearance: motif (default), fusion, or an installed Qt style
   -display display -geometry geometry -fn font
   -help -version     Show help / version without opening a display
   --validate        Validate the configuration without CA connections or GUI

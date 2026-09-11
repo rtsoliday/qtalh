@@ -1,7 +1,7 @@
 #pragma once
-#include <QtWidgets>
+#include "appearance.h"
 namespace alh {
-// Shared Motif presentation for auxiliary windows; no alarm state lives here.
+// Shared appearance-aware presentation for auxiliary windows; no alarm state lives here.
 QVBoxLayout* dialogColumn(QWidget*);
 QVBoxLayout* dialogFrame(QVBoxLayout*, const QString& title = {});
 QHBoxLayout* dialogRow(QVBoxLayout*);

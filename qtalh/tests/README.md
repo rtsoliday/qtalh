@@ -23,6 +23,8 @@ Individual targets allow testing the Qt core/UI/CA without Motif:
 | --- | --- |
 | `test-core` | Parser, options, alarm state, masks, fake clocks/PV callbacks, and queue encoding. No live IOC or display required. |
 | `test-ui` | Models, editor, dialogs, lifecycle, and muted audio playback. Uses `QT_QPA_PLATFORM=offscreen`; needs a functioning Qt media backend. On macOS the audio case starts a native Cocoa child. |
+| `test-ui-fusion` | Shared UI workflow suite in a fresh Fusion process, including style startup errors, font-size shortcuts across windows/dialogs, large-font geometry, and dark-palette indicators. Builds the GUI executable. |
+| `test-gallery` | Separate legacy and Fusion galleries, including every Properties tab and the Force PV scroll area; no Motif, IOC, or X11 dependency. Also available with the Windows Makefile. |
 | `test-ioc` | Real CA events, acknowledgements, outputs, reconnection, and access rights. Requires the built Base's `bin/<EPICS_HOST_ARCH>/softIoc`. |
 | `test-helpers` | Log rotation/recovery, broadcasts, locks, and Unix queue/TCP/RPC compatibility. On Linux/macOS, requires `alh_printer`, `alh_DB`, and local rpcbind in addition to the Qt helpers built by this target. |
 | `test-visual` | Motif/Qt screenshots, dialog gallery, and an ordered alarm-log comparison. Requires a built `alh`, `softIoc`, an X11 display, and `xwininfo`. Does not build the legacy application. |
@@ -93,6 +95,52 @@ Performance tools are described in [CPU benchmarks](../../docs/qtalh-performance
 `benchmark-cpu` exercises the in-process engine/UI; `benchmark_ioc.py` measures
 complete applications on Linux using `/proc` and a private IOC. They are separate
 from the default regression target.
+
+## Appearance validation
+
+Run `make -C qtalh QT_VERSION=5 test-core test-ui test-ui-fusion test-gallery`.
+Use `QT_VERSION=6` with a matching installed Qt SDK to repeat the checks.
+The Fusion gallery is in `test-artifacts/dialogs-fusion/`; legacy captures remain
+in `test-artifacts/dialogs/`. `QTALH_TEST_STYLE` is a test/benchmark harness
+setting, not an application preference. Actual GUI launches use `-style`.
+
+For display scaling, run the focused checks in separate processes:
+
+```sh
+cd qtalh
+QT_QPA_PLATFORM=offscreen QTALH_TEST_STYLE=fusion QT_SCALE_FACTOR=1.5 \
+  O.Linux-x86_64-qt5/test_ui motifLayoutAndHitTargets styledRowGeometryAndPalette dialogs
+QT_QPA_PLATFORM=offscreen QTALH_TEST_STYLE=fusion QT_SCALE_FACTOR=2 \
+  O.Linux-x86_64-qt5/test_ui motifLayoutAndHitTargets styledRowGeometryAndPalette dialogs
+```
+
+The geometry/interaction case exercises both appearances despite its historical
+name. The dedicated styled contract is skipped in legacy runs. Screenshots are
+review artifacts, not portable pixel-equivalence assertions. Compare legacy
+captures against the original revision with the same Qt library, display backend,
+fonts, and scale. The existing CPU benchmark also accepts `QTALH_TEST_STYLE=fusion`.
+
+## Styling verification (2026-09-11)
+
+On Linux with Qt 5.15.3, the implementation passed 101 core checks, 49 legacy
+UI checks (one styled-only check skipped), and 50 Fusion UI checks. Both dialog
+galleries passed. Focused geometry/dialog checks passed at 150% and 200% scale
+and with the X11 backend. The final scaled checks also cover fixed-width text
+and preserving the Properties tab and scroll position across selection changes.
+Styled file tests exercise opening, saving, cancellation, and both overwrite
+prompt responses without modifying the selected file.
+
+A temporary build of the original revision produced pixel-identical legacy
+captures for the main window, runtime/channel/editor Properties, Force PV,
+Modify Mask, Force Mask, Beep Severity, Guidance, About, and message entry.
+Editor/history differences were confined to temporary filenames and timestamps.
+The 10,000-channel smoke benchmarks completed 6,000 events in three seconds in
+both modes; measured idle CPU remained below 0.03% in both runs. These are local
+smoke-test observations, not performance guarantees.
+
+The documentation build validated 29 HTML pages and their local links/assets.
+Qt 6 development modules and native macOS/Windows environments were unavailable
+on this host; builds and native smoke checks there remain to be performed.
 
 ## Recorded verification
 

@@ -81,11 +81,50 @@ a file chooser. The headless validator instead reports the missing file.
 | `-geometry geometry` | Initial geometry such as `1000x600+20+20`. |
 | `-fn font`, `-font font` | Runtime button font; defaults to `ALHMAINFONT` when set. XLFD fonts are approximated. |
 | `-platform platform` | Qt platform selection, for example `offscreen` or `xcb`. |
-| `-style style` | Qt widget style override. |
+| `-style name`, `-style=name` | Appearance: `motif` (default), `fusion`, or an installed Qt Widgets style. Names are case-insensitive; the last occurrence wins. |
 | `-help`, `--help`, `-h` | Print help without opening a display. |
 | `-version`, `--version`, `-v` | Print ALH, Qt, and EPICS version information without opening a display. |
 | `--validate` | Parse the configuration and includes, report group/channel counts, then exit. |
 | `--` | End options before the configuration filename. |
+
+### Choosing an appearance
+
+Launch with `qtalh -style fusion -mainwindow facility.alhConfig` for a modern
+interface, or `qtalh -c -style fusion facility.alhConfig` for the styled editor.
+Omit `-style`, or use `-style motif`, to retain the original Motif-influenced
+appearance. Selection applies to this process, including runtime windows opened
+from the editor; it is not saved in the alarm configuration or user preferences.
+
+Fusion uses the system palette and fonts, standard controls, two alarm panes,
+grouped status/sound controls, and an expandable alarm legend. Properties uses
+General, Force PV, Commands, and Guidance tabs. Styled file choosers use Qt's
+standard dialog and match the chosen style. Alarm colors, acknowledgement,
+blinking, masks, and action behavior retain their meanings. Apply, Cancel, and
+Reset retain their existing behavior; modeless dismiss buttons are labeled Close.
+
+Other styles depend on the Qt installation and operating system. Unknown names
+produce an error listing available styles before any PV connections are made.
+Help, version, and configuration validation do not require a display and do not
+check style availability. `QT_STYLE_OVERRIDE` alone does not enable the modern
+interface. `-fn`/`-font` and `ALHMAINFONT` continue to affect only the compact
+runtime button. There is no separate light/dark switch; available system palette
+integration depends on the Qt version and desktop.
+
+Styled fonts default to one point smaller than the system font sizes (with a
+minimum of 6 points). An explicitly configured runtime-button font keeps its
+requested size. With any explicit style other than Motif, **Ctrl+-** decreases the font size,
+**Ctrl++** (or **Ctrl+=**) increases it, and **Ctrl+0** restores the startup size.
+Use **Command** instead of Ctrl on macOS. Each press changes the size by one
+point, with a UI range of 6–72 points. Changes apply throughout the process,
+including open dialogs and newly opened windows; monospace text and custom
+runtime-button fonts retain their families. Font sizes are not saved between
+launches. Bare `+` and `-` continue to expand and collapse the alarm tree.
+These font shortcuts are disabled in Motif mode.
+
+![Fusion runtime window](site/public/images/fusion-main.png)
+
+See [appearance details and screenshots](qtalh-appearance.md) for the dialog
+layouts and legacy comparison.
 
 Local mode keeps acknowledgements in this runtime. Global active mode can write
 ACKS/ACKT and configured acknowledgement, severity, and heartbeat PVs. Passive

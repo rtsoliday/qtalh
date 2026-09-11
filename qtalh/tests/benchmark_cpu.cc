@@ -16,7 +16,7 @@ static double cpuSeconds() {
 
 int main(int argc, char** argv) {
   QApplication app(argc, argv);
-  initializeAppearance();
+  initializeAppearance(qEnvironmentVariable("QTALH_TEST_STYLE"));
   const auto args = app.arguments();
   const int count = args.value(1, "10000").toInt();
   const QString mode = args.value(2, "idle");

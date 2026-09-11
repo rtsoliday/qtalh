@@ -1093,6 +1093,24 @@ $GUIDANCE https://example.invalid/guide
     e.event(n, {0, 0, 2, 1, "0"});
     QVERIFY(commands.contains("clear"));
   }
+  void styleOptions() {
+    QVERIFY(parseOptions({"qtalh"}).style.isEmpty());
+    QCOMPARE(parseOptions({"qtalh", "-style", "motif"}).style, QString("motif"));
+    QCOMPARE(parseOptions({"qtalh", "-STYLE", "FuSiOn"}).style, QString("FuSiOn"));
+    QCOMPARE(parseOptions({"qtalh", "-style=Fusion"}).style, QString("Fusion"));
+    QCOMPARE(parseOptions({"qtalh", "-style", "Windows", "-style=fusion"}).style, QString("fusion"));
+    auto terminated = parseOptions({"qtalh", "--", "-style=fusion"});
+    QVERIFY(terminated.style.isEmpty());
+    QVERIFY(terminated.config.endsWith("-style=fusion"));
+    QVERIFY_THROWS_EXCEPTION(ParseError, parseOptions({"qtalh", "-style"}));
+    QVERIFY_THROWS_EXCEPTION(ParseError, parseOptions({"qtalh", "-style="}));
+    QVERIFY_THROWS_EXCEPTION(ParseError, parseOptions({"qtalh", "-style", ""}));
+    QVERIFY_THROWS_EXCEPTION(ParseError, parseOptions({"qtalh", "-style", "-c"}));
+    // Availability belongs to GUI startup, not headless option parsing.
+    QVERIFY(parseOptions({"qtalh", "--help", "-style=unknown"}).help);
+    QVERIFY(parseOptions({"qtalh", "--version", "-style=unknown"}).version);
+    QVERIFY(parseOptions({"qtalh", "--validate", "-style=unknown"}).validate);
+  }
   void options() {
     auto o = parseOptions({"qtalh", "-D", "-S", "-global", "-c", "-filter", "unack", "-m", "0"});
     QVERIFY(o.noLog);

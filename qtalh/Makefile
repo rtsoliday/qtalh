@@ -22,7 +22,7 @@ endif
 INCLUDES = -I. -I$(OBJ_DIR) -I$(EPICS_BASE)/include -I$(EPICS_BASE)/include/compiler/$(EPICS_COMPILER) -I$(EPICS_BASE)/include/os/$(OS)
 CORE = core/model.cc core/config.cc core/engine.cc
 SERVICES = services/log_browser.cc services/channel_access.cc services/options.cc services/logging.cc services/ipc.cc
-GUI = ui/workflows.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc main.cc
+GUI = ui/appearance.cc ui/workflows.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc main.cc
 OBJECTS = $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o) $(SERVICES:.cc=.o) $(GUI:.cc=.o)) $(OBJ_DIR)/resources.o
 PROGRAMS = qtalh qtalh_printer qtalh_DB
 .PHONY: all test test-core test-ui test-ioc test-helpers clean distclean
@@ -63,7 +63,7 @@ $(OBJ_DIR)/tests/test_ui.o: $(OBJ_DIR)/test_ui.moc
 $(OBJ_DIR)/tests/test_ui.o: CPPFLAGS += -DTEST_OUTPUT='"$(abspath $(OBJ_DIR)/test-artifacts)"'
 $(OBJ_DIR)/test_ui: $(filter-out $(OBJ_DIR)/main.o,$(OBJECTS)) $(OBJ_DIR)/tests/test_ui.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(call qt_libs,Test)
-test-ui: $(OBJ_DIR)/test_ui
+test-ui: $(OBJ_DIR)/qtalh $(OBJ_DIR)/test_ui
 	QT_QPA_PLATFORM=offscreen $(OBJ_DIR)/test_ui
 $(OBJ_DIR)/test_ioc.moc: tests/test_ioc.cc
 	@mkdir -p $(OBJ_DIR)
@@ -99,7 +99,12 @@ $(OBJ_DIR)/tests/test_visual.o: $(OBJ_DIR)/test_visual.moc
 $(OBJ_DIR)/tests/test_visual.o: CPPFLAGS += -DTEST_BIN_DIR='"$(abspath $(BIN_DIR))"' -DEPICS_TEST_BIN='"$(EPICS_BASE)/bin/$(EPICS_HOST_ARCH)"' -DTEST_OUTPUT='"$(abspath $(OBJ_DIR)/test-artifacts)"'
 $(OBJ_DIR)/test_visual: $(filter-out $(OBJ_DIR)/main.o,$(OBJECTS)) $(OBJ_DIR)/tests/test_visual.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(call qt_libs,Test)
-.PHONY: test-visual
+.PHONY: test-visual test-gallery test-ui-fusion
+test-gallery: $(OBJ_DIR)/test_visual
+	QT_QPA_PLATFORM=offscreen $(OBJ_DIR)/test_visual dialogGallery
+	QT_QPA_PLATFORM=offscreen QTALH_TEST_STYLE=fusion $(OBJ_DIR)/test_visual dialogGallery
+test-ui-fusion: $(OBJ_DIR)/qtalh $(OBJ_DIR)/test_ui
+	QT_QPA_PLATFORM=offscreen QTALH_TEST_STYLE=fusion $(OBJ_DIR)/test_ui
 test-visual: $(OBJ_DIR)/test_visual
 	$(OBJ_DIR)/test_visual
 

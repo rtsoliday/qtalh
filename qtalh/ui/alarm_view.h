@@ -1,5 +1,6 @@
 // Content-sized ALH rows, following awAlh.c and line.c. See ../../LICENSE.
 #pragma once
+#include "appearance.h"
 #include <QCheckBox>
 #include <QPushButton>
 #include <QTreeView>
@@ -30,10 +31,14 @@ public:
   QModelIndex indexAt(const QPoint&) const override;
 
 protected:
+  bool event(QEvent*) override;
+  bool viewportEvent(QEvent*) override;
+  void drawStyledRow(QPainter*, const QStyleOptionViewItem&, const QModelIndex&) const;
   void drawRow(QPainter*, const QStyleOptionViewItem&, const QModelIndex&) const override;
   void drawBranches(QPainter*, const QRect&, const QModelIndex&) const override {}
 
 private:
+  QPersistentModelIndex hovered, pressed;
   bool tree;
   bool extentPending = false;
   std::array<QRect, 9> cells(const QModelIndex&, const QRect&) const;

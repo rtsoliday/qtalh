@@ -4,6 +4,11 @@ The repository contains the original Motif programs in `alh/` and a C++17 Qt
 port in `qtalh/`. Both use GNU Make and shared EPICS discovery in
 `Makefile.rules`; neither requires an EPICS extensions tree or MEDM checkout.
 
+The default QtALH appearance retains the familiar Motif look. Add `-style fusion`
+to opt into modern controls and layouts, for example
+`qtalh -style fusion -mainwindow facility.alhConfig`. See the
+[appearance guide](docs/qtalh-appearance.md) for screenshots and details.
+
 ## Documentation
 
 The [modern documentation site](https://qtalh-documentation.rtsoliday123.chatgpt.site)

@@ -19,9 +19,9 @@ class VisualTests : public QObject {
   Q_OBJECT
 private slots:
   void dialogGallery() {
-    initializeAppearance();
+    initializeAppearance(qEnvironmentVariable("QTALH_TEST_STYLE"));
     QTemporaryDir temp;
-    QString output = QString(TEST_OUTPUT) + "/dialogs";
+    QString output = QString(TEST_OUTPUT) + (legacyAppearance() ? "/dialogs" : "/dialogs-fusion");
     QVERIFY(QDir().mkpath(output));
     for (bool editor : {false, true}) {
       auto d = parseConfig("GROUP NULL QTALH_REFERENCE\n$GUIDANCE\nOperator guidance for the reference facility.\n"
@@ -70,6 +70,17 @@ private slots:
         for (auto dialog : window->findChildren<QDialog*>())
           if (dialog->isVisible()) {
             QVERIFY(dialog->grab().save(output + '/' + file + ".png"));
+            if (auto tabs = dialog->findChild<QTabWidget*>("propertyTabs")) {
+              for (int tab = 1; tab < tabs->count(); ++tab) {
+                tabs->setCurrentIndex(tab); QTest::qWait(30);
+                QVERIFY(dialog->grab().save(output + '/' + file + "-tab" + QString::number(tab) + ".png"));
+              }
+            }
+            if (auto scroll = dialog->findChild<QScrollArea*>("forcePvScroll")) {
+              scroll->verticalScrollBar()->setValue(scroll->verticalScrollBar()->maximum());
+              QTest::qWait(30);
+              QVERIFY(dialog->grab().save(output + '/' + file + "-calc.png"));
+            }
             dialog->close(); found = true;
           }
         QVERIFY(found);
@@ -118,6 +129,9 @@ private slots:
     }
   }
   void reference() {
+#ifdef Q_OS_WIN
+    QSKIP("The Motif reference comparison requires X11");
+#else
     initializeAppearance();
     const QString output = QString(TEST_OUTPUT);
     QDir().mkpath(output);
@@ -214,6 +228,7 @@ private slots:
     QVERIFY(trace.open(QIODevice::WriteOnly));
     trace.write("Fixture: tests/ioc.db; loopback CA only\nInputs: 0, 6, 20, 0\nLegacy:\n" +
                 legacyTrace.join('\n').toUtf8() + "\nQt:\n" + qtTrace.join('\n').toUtf8() + "\n");
+#endif
   }
 };
 QTEST_MAIN(VisualTests)

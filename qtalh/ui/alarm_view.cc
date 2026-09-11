@@ -21,11 +21,20 @@ void bevel(QPainter* painter, const QRect& rect, const QColor& color, bool down 
     painter->drawLine(r.topRight(), r.bottomRight());
   }
 }
+int controlHeight(const QWidget* widget) {
+  QStyleOptionButton option;
+  option.initFrom(widget);
+  return widget->style()->sizeFromContents(QStyle::CT_PushButton, &option,
+      QSize(0, widget->fontMetrics().height()), widget).height();
+}
+int alarmRowHeight(const QWidget* widget) {
+  return legacyAppearance() ? 24 : qMax(controlHeight(widget), widget->fontMetrics().height() + 8) + 6;
+}
 class RowHeight : public QStyledItemDelegate {
 public:
   using QStyledItemDelegate::QStyledItemDelegate;
-  QSize sizeHint(const QStyleOptionViewItem&, const QModelIndex&) const override {
-    return {100, 24};
+  QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex&) const override {
+    return {100, alarmRowHeight(option.widget)};
   }
 };
 QVariant field(const QModelIndex& row, int column, int role = Qt::DisplayRole) {
@@ -33,9 +42,23 @@ QVariant field(const QModelIndex& row, int column, int role = Qt::DisplayRole) {
 }
 } // namespace
 QSize MotifButton::sizeHint() const {
+  if (!legacyAppearance()) return QPushButton::sizeHint();
   return QFontMetrics(font()).size(Qt::TextSingleLine, text()) + QSize(14, 10);
 }
-void MotifButton::paintEvent(QPaintEvent*) {
+void MotifButton::paintEvent(QPaintEvent* event) {
+  if (!legacyAppearance()) {
+    QPushButton::paintEvent(event);
+    if (background.isValid()) {
+      QPainter painter(this);
+      QStyleOptionButton option;
+      initStyleOption(&option);
+      auto area = style()->subElementRect(QStyle::SE_PushButtonContents, &option, this).adjusted(2, 2, -2, -2);
+      painter.fillRect(area, background);
+      painter.setPen(contrastingText(background));
+      painter.drawText(area, Qt::AlignCenter, text());
+    }
+    return;
+  }
   QPainter painter(this);
   bevel(&painter, rect(), background, isDown());
   painter.setPen(Qt::black);
@@ -45,10 +68,39 @@ void MotifButton::paintEvent(QPaintEvent*) {
   painter.drawText(rect().adjusted(4, 2, -4, -2).translated(0, 2), Qt::AlignCenter, text());
 }
 QSize MotifCheckBox::sizeHint() const {
+  if (!legacyAppearance()) return QCheckBox::sizeHint();
   auto metrics = QFontMetrics(font());
   return {metrics.horizontalAdvance(text()) + 16, qMax(18, metrics.height())};
 }
-void MotifCheckBox::paintEvent(QPaintEvent*) {
+void MotifCheckBox::paintEvent(QPaintEvent* event) {
+  if (!legacyAppearance()) {
+    Q_UNUSED(event);
+    QPainter painter(this);
+    QStyleOptionButton option;
+    initStyleOption(&option);
+    auto labelRect = style()->subElementRect(QStyle::SE_CheckBoxContents, &option, this);
+    labelRect.setRight(rect().right());
+    auto indicator = option;
+    indicator.text.clear();
+    indicator.state &= ~QStyle::State_HasFocus;
+    style()->drawControl(QStyle::CE_CheckBox, &indicator, &painter, this);
+    int flags = Qt::AlignRight | Qt::AlignVCenter | Qt::TextShowMnemonic;
+    if (!style()->styleHint(QStyle::SH_UnderlineShortcut, &option, this))
+      flags |= Qt::TextHideMnemonic;
+    // Align the caption with the status labels, without the style's trailing
+    // checkbox padding. Keep native indicator, hover, and focus rendering.
+    style()->drawItemText(&painter, labelRect, flags, option.palette,
+                          isEnabled(), text(), QPalette::WindowText);
+    if (option.state & QStyle::State_HasFocus) {
+      QStyleOptionFocusRect focus;
+      focus.initFrom(this);
+      focus.rect = style()->subElementRect(QStyle::SE_CheckBoxFocusRect, &option, this);
+      focus.rect.setRight(rect().right());
+      focus.backgroundColor = palette().color(QPalette::Window);
+      style()->drawPrimitive(QStyle::PE_FrameFocusRect, &focus, &painter, this);
+    }
+    return;
+  }
   QPainter painter(this);
   QRect box(0, (height() - 9) / 2, 9, 9);
   bevel(&painter, box, base, isChecked(), 1);
@@ -70,9 +122,14 @@ AlarmView::AlarmView(bool isTree, QWidget* parent) : QTreeView(parent), tree(isT
   setExpandsOnDoubleClick(false);
   setDragEnabled(true);
   setFrameShape(QFrame::NoFrame);
-  auto p = palette();
-  p.setColor(QPalette::Base, base);
-  setPalette(p);
+  if (legacyAppearance()) {
+    auto p = palette();
+    p.setColor(QPalette::Base, base);
+    setPalette(p);
+  } else {
+    setMouseTracking(true);
+    viewport()->setAttribute(Qt::WA_Hover);
+  }
   header()->setMinimumSectionSize(0);
   header()->setStretchLastSection(false);
   connect(this, &QTreeView::expanded, this, [this] { scheduleExtent(); });
@@ -107,6 +164,31 @@ std::array<QRect, 9> AlarmView::cells(const QModelIndex& row, const QRect& bound
   if (tree)
     for (auto parent = row.parent(); parent.isValid(); parent = parent.parent())
       ++depth;
+  if (!legacyAppearance()) {
+    const int height = alarmRowHeight(this) - 6;
+    int x = bounds.left() + 6 + (tree ? depth * (height / 2 + 4) : 0);
+    const int y = bounds.top() + 3;
+    auto add = [&](int column, int width) {
+      result[column] = QRect(x, y, width, height);
+      x += width + 4;
+    };
+    auto textWidth = [&](int column, bool button) {
+      auto font = field(row, column, Qt::FontRole).value<QFont>();
+      QFontMetrics metrics(font);
+      QSize contents(metrics.horizontalAdvance(field(row, column).toString()), metrics.height());
+      QStyleOptionButton option;
+      option.initFrom(this);
+      option.fontMetrics = metrics;
+      return button ? style()->sizeFromContents(QStyle::CT_PushButton, &option, contents, this).width()
+                    : contents.width() + 6;
+    };
+    add(0, height); add(1, height);
+    add(2, qMax(height, textWidth(2, true)));
+    for (int column : {3, 4, 5})
+      if (!field(row, column).toString().isEmpty()) add(column, qMax(height, textWidth(column, true)));
+    add(6, textWidth(6, false)); add(7, 10); add(8, textWidth(8, false));
+    return result;
+  }
   int x = bounds.left() + (tree ? 20 + depth * 12 : 14);
   const int y = bounds.top() + 5;
   auto add = [&](int column, int width, int height = 18) {
@@ -147,6 +229,7 @@ QModelIndex AlarmView::indexAt(const QPoint& point) const {
 }
 void AlarmView::drawRow(QPainter* painter, const QStyleOptionViewItem& option,
                         const QModelIndex& row) const {
+  if (!legacyAppearance()) { drawStyledRow(painter, option, row); return; }
   painter->save();
   painter->fillRect(option.rect, base);
   auto rectangles = cells(row, option.rect);
@@ -213,6 +296,91 @@ void AlarmView::drawRow(QPainter* painter, const QStyleOptionViewItem& option,
   }
   painter->restore();
 }
+bool AlarmView::event(QEvent* event) {
+  bool result = QTreeView::event(event);
+  if (!legacyAppearance() && (event->type() == QEvent::FontChange ||
+      event->type() == QEvent::ApplicationFontChange || event->type() == QEvent::StyleChange ||
+      event->type() == QEvent::ScreenChangeInternal)) {
+    doItemsLayout();
+    scheduleExtent();
+  }
+  return result;
+}
+bool AlarmView::viewportEvent(QEvent* event) {
+  if (!legacyAppearance() && event->type() == QEvent::Resize) scheduleExtent();
+  if (!legacyAppearance() && (event->type() == QEvent::MouseMove ||
+      event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonRelease ||
+      event->type() == QEvent::Leave)) {
+    auto old = hovered;
+    if (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonPress ||
+        event->type() == QEvent::MouseButtonRelease) {
+      hovered = indexAt(static_cast<QMouseEvent*>(event)->pos());
+      if (event->type() == QEvent::MouseButtonPress) pressed = hovered;
+      if (event->type() == QEvent::MouseButtonRelease) pressed = QModelIndex();
+    } else if (event->type() == QEvent::Leave) {
+      hovered = QModelIndex(); pressed = QModelIndex();
+    }
+    if (old.isValid() && event->type() != QEvent::Paint) viewport()->update(QTreeView::visualRect(old.sibling(old.row(), 0)));
+    if (hovered.isValid() && event->type() != QEvent::Paint)
+      viewport()->update(QTreeView::visualRect(hovered.sibling(hovered.row(), 0)));
+  }
+  return QTreeView::viewportEvent(event);
+}
+void AlarmView::drawStyledRow(QPainter* painter, const QStyleOptionViewItem& option,
+                             const QModelIndex& row) const {
+  painter->save();
+  auto panel = option;
+  panel.state.setFlag(QStyle::State_Selected, selectionModel() &&
+      selectionModel()->isRowSelected(row.row(), row.parent()));
+  painter->fillRect(option.rect, palette().base());
+  style()->drawPrimitive(QStyle::PE_PanelItemViewItem, &panel, painter, this);
+  const auto rectangles = cells(row, option.rect);
+  for (int column = 0; column < 9; ++column) {
+    auto rect = rectangles[column];
+    if (rect.isEmpty()) continue;
+    auto index = row.sibling(row.row(), column);
+    auto text = field(row, column).toString();
+    auto color = field(row, column, Qt::BackgroundRole).value<QColor>();
+    painter->setFont(field(row, column, Qt::FontRole).value<QFont>());
+    auto foreground = panel.state & QStyle::State_Selected ? palette().highlightedText() : palette().text();
+    if (column == 3) {
+      QStyleOption branch;
+      branch.initFrom(this); branch.rect = rect;
+      branch.state |= QStyle::State_Children;
+      branch.state.setFlag(QStyle::State_Open, tree && isExpanded(row));
+      if (hovered == index) branch.state |= QStyle::State_MouseOver;
+      style()->drawPrimitive(QStyle::PE_IndicatorBranch, &branch, painter, this);
+    } else if (column == 0 || column == 2 || column == 4 || column == 5) {
+      QStyleOptionButton button;
+      button.initFrom(this); button.rect = rect; button.text = text;
+      button.fontMetrics = QFontMetrics(painter->font());
+      button.state.setFlag(QStyle::State_MouseOver, hovered == index);
+      button.state.setFlag(QStyle::State_Sunken, pressed == index);
+      button.state.setFlag(QStyle::State_HasFocus, hasFocus() && currentIndex() == index);
+      style()->drawControl(QStyle::CE_PushButton, &button, painter, this);
+      if (column == 0 && color.isValid()) {
+        auto badge = rect.adjusted(4, 4, -4, -4);
+        painter->fillRect(badge, color); painter->setPen(contrastingText(color));
+        painter->drawRect(badge.adjusted(0, 0, -1, -1));
+        painter->drawText(badge, Qt::AlignCenter, text);
+      }
+    } else {
+      painter->setPen(foreground.color());
+      if (color.isValid() && !text.trimmed().isEmpty()) {
+        painter->fillRect(rect, color); painter->setPen(contrastingText(color));
+        painter->drawRect(rect.adjusted(0, 0, -1, -1));
+      }
+      painter->drawText(rect.adjusted(2, 0, -2, 0),
+          (column == 1 ? Qt::AlignCenter : Qt::AlignLeft | Qt::AlignVCenter), text);
+    }
+  }
+  if (hasFocus() && currentIndex().row() == row.row() && currentIndex().parent() == row.parent()) {
+    QStyleOptionFocusRect focus;
+    focus.initFrom(this); focus.rect = option.rect.adjusted(1, 1, -1, -1);
+    style()->drawPrimitive(QStyle::PE_FrameFocusRect, &focus, painter, this);
+  }
+  painter->restore();
+}
 void AlarmView::scheduleExtent() {
   if (extentPending)
     return;
@@ -229,7 +397,7 @@ void AlarmView::updateExtent() {
   std::function<void(QModelIndex)> visit = [&](QModelIndex parent) {
     for (int row = 0; row < model()->rowCount(parent); ++row) {
       auto index = model()->index(row, 0, parent);
-      width = qMax(width, cells(index, QRect(0, 0, 1, 24))[8].right() + 10);
+      width = qMax(width, cells(index, QRect(0, 0, 1, alarmRowHeight(this)))[8].right() + 10);
       if (tree && isExpanded(index))
         visit(index);
     }

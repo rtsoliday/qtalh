@@ -66,13 +66,18 @@ def download(path):
 
 def rewrite(text, origin, page_route):
     def link(match):
-        label, target = match.groups()
+        image, label, target = match.groups()
         if re.match(r'^[a-zA-Z]+:', target) or target.startswith(('#', '/')):
             return match.group(0)
         name, sep, anchor = target.partition('#')
         source = (ROOT / origin).parent / name
         source = source.resolve()
         key = source.relative_to(ROOT).as_posix()
+        if image:
+            if not source.is_file():
+                raise FileNotFoundError(f'{origin}: {target}')
+            route = '/' + source.relative_to(PUBLIC).as_posix() if source.is_relative_to(PUBLIC) else download(source)
+            return f'![{label}]({route})'
         if key == 'README.md' and anchor in ('validation', 'architecture-and-compatibility', 'authors-and-acknowledgements'):
             route = {'validation': '/develop/testing', 'architecture-and-compatibility': '/develop/architecture',
                      'authors-and-acknowledgements': '/project/authors'}[anchor]
@@ -94,7 +99,7 @@ def rewrite(text, origin, page_route):
             href = posixpath.relpath(route, posixpath.dirname(page_route))
             return f'<a href="{escape(href, quote=True)}" download>{escape(label)}</a>'
         return f'[{label}]({route}' + ('#' + anchor if anchor else '') + ')'
-    return re.sub(r'\[([^\]]*)\]\(([^)]+)\)', link, text)
+    return re.sub(r'(!?)\[([^\]]*)\]\(([^)]+)\)', link, text)
 
 
 def write(route, title, content, origin):

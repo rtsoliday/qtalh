@@ -33,103 +33,23 @@ protected:
     }
   }
 };
-class MotifStyle : public QProxyStyle {
-public:
-  MotifStyle() : QProxyStyle(QStyleFactory::create("Windows")) {}
-  int styleHint(StyleHint hint, const QStyleOption* option = nullptr,
-                const QWidget* widget = nullptr, QStyleHintReturn* data = nullptr) const override {
-    if (hint == SH_DialogButtonLayout) return QDialogButtonBox::WinLayout;
-    return QProxyStyle::styleHint(hint, option, widget, data);
-  }
-  QSize sizeFromContents(ContentsType type, const QStyleOption* option, const QSize& contents,
-                         const QWidget* widget = nullptr) const override {
-    auto size = QProxyStyle::sizeFromContents(type, option, contents, widget);
-    if (widget && qobject_cast<const QDialog*>(widget->window())) {
-      if (type == CT_LineEdit) size.setHeight(option->fontMetrics.height() + 2);
-      if (type == CT_PushButton)
-        size = QSize(qMax(52, contents.width() + 12), option->fontMetrics.height() + 6);
-    }
-    return size;
-  }
-  int pixelMetric(PixelMetric metric, const QStyleOption* option = nullptr,
-                  const QWidget* widget = nullptr) const override {
-    switch (metric) {
-    case PM_LayoutLeftMargin: case PM_LayoutRightMargin:
-    case PM_LayoutTopMargin: case PM_LayoutBottomMargin:
-    case PM_LayoutHorizontalSpacing: case PM_LayoutVerticalSpacing: return 3;
-    case PM_ScrollBarExtent: return 17;
-    case PM_IndicatorWidth: case PM_IndicatorHeight:
-    case PM_ExclusiveIndicatorWidth: case PM_ExclusiveIndicatorHeight: return 10;
-    case PM_ButtonMargin: return 4;
-    default: return QProxyStyle::pixelMetric(metric, option, widget);
-    }
-  }
-  void drawPrimitive(PrimitiveElement element, const QStyleOption* option, QPainter* painter,
-                     const QWidget* widget = nullptr) const override {
-    if (element != PE_IndicatorRadioButton && element != PE_IndicatorCheckBox) {
-      QProxyStyle::drawPrimitive(element, option, painter, widget);
-      return;
-    }
-    painter->save();
-    const auto r = option->rect.adjusted(1, 1, -1, -1);
-    bool on = option->state & State_On;
-    auto light = option->palette.light().color(), dark = option->palette.dark().color();
-    painter->setBrush(on ? option->palette.mid() : option->palette.button());
-    if (element == PE_IndicatorRadioButton) {
-      QPolygon points;
-      points << QPoint(r.center().x(), r.top()) << QPoint(r.left(), r.center().y())
-             << QPoint(r.center().x(), r.bottom()) << QPoint(r.right(), r.center().y());
-      painter->setPen(on ? dark : light);
-      painter->drawPolygon(points);
-      painter->setPen(on ? light : dark);
-      painter->drawPolyline(points.constData() + 1, 3);
-    } else {
-      painter->fillRect(r, on ? option->palette.mid() : option->palette.button());
-      painter->setPen(on ? dark : light);
-      painter->drawLine(r.topLeft(), r.topRight());
-      painter->drawLine(r.topLeft(), r.bottomLeft());
-      painter->setPen(on ? light : dark);
-      painter->drawLine(r.bottomLeft(), r.bottomRight());
-      painter->drawLine(r.topRight(), r.bottomRight());
-    }
-    painter->restore();
-  }
-};
-}
-void initializeAppearance() {
-  QApplication::setStyle(new MotifStyle);
-  QFont font("monospace");
-  font.setPixelSize(12);
-  font.setStretch(85);
-  QApplication::setFont(font);
-  QPalette palette;
-  palette.setColor(QPalette::Window, QColor("#b0c3ca"));
-  palette.setColor(QPalette::Button, QColor("#b0c3ca"));
-  palette.setColor(QPalette::Light, QColor("#dde6e9"));
-  palette.setColor(QPalette::Dark, QColor("#5f696d"));
-  palette.setColor(QPalette::Mid, QColor("#82979f"));
-  palette.setColor(QPalette::Shadow, QColor("#5f696d"));
-  palette.setColor(QPalette::WindowText, Qt::black);
-  palette.setColor(QPalette::ButtonText, Qt::black);
-  palette.setColor(QPalette::Text, Qt::black);
-  palette.setColor(QPalette::Base, Qt::white);
-  palette.setColor(QPalette::Highlight, QColor("#82979f"));
-  palette.setColor(QPalette::HighlightedText, Qt::black);
-  QApplication::setPalette(palette);
-  // A stylesheet also overrides class fonts supplied by desktop themes.
-  qApp->setStyleSheet(
-      "QDialog, QDialog QWidget, QLabel {font-family:monospace; font-size:12px;}"
-      "QLineEdit[readOnly=\"true\"], QPlainTextEdit[readOnly=\"true\"] {background:#b0c3ca;}"
-      "QToolTip {background:#ffffd0; color:black; border:1px solid #5f696d;}");
 }
 QVBoxLayout* dialogColumn(QWidget* widget) {
-  widget->setFont(QApplication::font());
+  if (legacyAppearance()) widget->setFont(QApplication::font());
   auto layout = new QVBoxLayout(widget);
-  layout->setContentsMargins(4, 4, 4, 4);
-  layout->setSpacing(3);
+  if (legacyAppearance()) {
+    layout->setContentsMargins(4, 4, 4, 4);
+    layout->setSpacing(3);
+  }
   return layout;
 }
 QVBoxLayout* dialogFrame(QVBoxLayout* parent, const QString& title) {
+  if (!legacyAppearance()) {
+    auto frame = new QGroupBox(title);
+    auto layout = dialogColumn(frame);
+    parent->addWidget(frame);
+    return layout;
+  }
   auto frame = new QFrame;
   frame->setFrameStyle(QFrame::Panel | QFrame::Sunken);
   auto layout = dialogColumn(frame);
@@ -140,7 +60,7 @@ QVBoxLayout* dialogFrame(QVBoxLayout* parent, const QString& title) {
 }
 QHBoxLayout* dialogRow(QVBoxLayout* parent) {
   auto row = new QHBoxLayout;
-  row->setSpacing(5);
+  if (legacyAppearance()) row->setSpacing(5);
   parent->addLayout(row);
   return row;
 }
@@ -152,12 +72,14 @@ QDialogButtonBox* dialogActions(QVBoxLayout* parent, QDialog* dialog,
   parent->addWidget(separator);
   if (!help.isEmpty())
     buttons |= QDialogButtonBox::Help;
-  auto box = new MotifButtonBox(buttons);
-  box->setCenterButtons(true);
+  QDialogButtonBox* box = legacyAppearance() ? new MotifButtonBox(buttons) : new QDialogButtonBox(buttons);
+  box->setCenterButtons(legacyAppearance());
   for (auto button : box->buttons()) {
-    button->setMinimumWidth(52);
-    button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    if (box->standardButton(button) == QDialogButtonBox::Close)
+    if (legacyAppearance()) {
+      button->setMinimumWidth(52);
+      button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    }
+    if (legacyAppearance() && box->standardButton(button) == QDialogButtonBox::Close)
       button->setText("Dismiss");
   }
   QObject::connect(box, &QDialogButtonBox::rejected, dialog, &QDialog::close);
@@ -169,7 +91,9 @@ QDialogButtonBox* dialogActions(QVBoxLayout* parent, QDialog* dialog,
 void dialogHeading(QVBoxLayout* parent, const QString& kind, const QString& name) {
   auto row = dialogRow(parent);
   row->addWidget(new QLabel(kind));
-  row->addWidget(new QLabel(name), 1);
+  auto label = new QLabel(name);
+  if (!legacyAppearance()) label->setWordWrap(true);
+  row->addWidget(label, 1);
 }
 QVector<QCheckBox*> maskChoices(QVBoxLayout* parent, const QString& mask, bool passive) {
   auto frame = dialogFrame(parent);
@@ -194,6 +118,19 @@ QString selectedMask(const QVector<QCheckBox*>& boxes) {
 }
 QString chooseFile(QWidget* parent, const QString& title, const QString& initial,
                    const QString& filters, bool save) {
+  if (!legacyAppearance()) {
+    QFileDialog dialog(parent, title);
+    dialog.setObjectName("fileSelectionDialog");
+    dialog.setOption(QFileDialog::DontUseNativeDialog);
+    dialog.setAcceptMode(save ? QFileDialog::AcceptSave : QFileDialog::AcceptOpen);
+    dialog.setFileMode(save ? QFileDialog::AnyFile : QFileDialog::ExistingFile);
+    dialog.setNameFilter(filters);
+    const QFileInfo info(initial);
+    dialog.setDirectory(info.isDir() ? info.absoluteFilePath() : info.absolutePath());
+    if (!info.isDir()) dialog.selectFile(info.fileName());
+    if (dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty()) return {};
+    return QFileInfo(dialog.selectedFiles().front()).absoluteFilePath();
+  }
   QDialog dialog(parent);
   dialog.setObjectName("fileSelectionDialog");
   dialog.setWindowTitle(title);

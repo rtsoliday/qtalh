@@ -194,7 +194,9 @@ Supported legacy switches: `-c`, `-global`, `-S`, `-D`, `-s`, `-B`, `-L`,
 `-noerrorpopup`, `-maskcolor`, `-a`, `-o`, `-f`, `-l`, `-p`, `-P`, `-O`,
 `-m`, `-filter`, `-display`, `--display`, `-geometry`, `-fn`, `-font`, `-help`, `-h`,
 `-v`, `-version`. Help/version work without a GUI connection. Qt-specific
-`-platform` and `-style` are accepted. `--help`, `--version`, `--validate`, and
+`-platform` and `-style` are accepted. `-style fusion` opts into modern layouts
+and styling across the GUI; omission or `-style motif` preserves the existing
+appearance. `-style=name` is also accepted. `--help`, `--version`, `--validate`, and
 `--` are additional conveniences. Unknown switches, including arbitrary Xt
 resource overrides, fail with a diagnostic.
 

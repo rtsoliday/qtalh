@@ -1,6 +1,61 @@
-# Motif appearance comparison
+# QtALH appearance
 
-This page records historical comparisons and remaining appearance differences.
+## Optional modern styling
+
+The default remains the Motif-influenced appearance described below. Use
+`qtalh -style fusion -mainwindow facility.alhConfig` for modern styling, or add
+`-c` for the configuration editor. `-style motif` explicitly restores the default.
+Both `-style name` and `-style=name` are accepted; names are case-insensitive and
+the last occurrence wins. Installed Qt Widgets styles are supported; Fusion is
+the portable recommendation for Qt 5.15 and Qt 6 on Linux, macOS, and Windows.
+
+Styled mode retains the two alarm panes and content-sized rows. It uses styled
+buttons, disclosure indicators, focus/selection feedback, a standard splitter
+and width slider, and separate Status and Alarm sound sections. Alarm legend
+starts collapsed. Alarm colors and severity letters remain visible on both light
+and dark palettes; normal surfaces use the selected style and system palette.
+Fonts and row hit targets scale together. No widgets are allocated per alarm row.
+
+Styled fonts default to one point smaller than the system font sizes (with a
+minimum of 6 points). An explicitly configured runtime-button font keeps its
+requested size. With any explicit style other than Motif, **Ctrl+-** decreases the font size,
+**Ctrl++** (or **Ctrl+=**) increases it, and **Ctrl+0** restores the startup size.
+Use **Command** instead of Ctrl on macOS. Each press changes the size by one
+point, with a UI range of 6–72 points. Changes apply throughout the process,
+including open dialogs and newly opened windows; monospace text and custom
+runtime-button fonts retain their families. Font sizes are not saved between
+launches. Bare `+` and `-` continue to expand and collapse the alarm tree.
+These font shortcuts are disabled in Motif mode.
+
+![Fusion main window](site/public/images/fusion-main.png)
+
+Properties groups all existing fields into General, Force PV, Commands, and
+Guidance tabs. Apply/Cancel/Close remain available below the tabs. The selected
+tab and scroll positions survive selection-driven rebuilding. Force PV has a
+scrollable grouped form with its action row always outside the scrolling area.
+Mask dialogs retain their existing immediate-action and Apply/Reset behavior.
+History and log text keep fixed-width fonts; prose uses the system UI font.
+
+![Fusion editor Properties](site/public/images/fusion-properties.png)
+
+Open/Save/report/log selection uses the standard Qt file dialog with native
+file dialogs disabled, so it follows the selected style. Other dialogs, prompts,
+menus, and tooltips use the same appearance. Printing continues to use Qt's
+platform-specific print dialog, and external browser/process windows retain
+their own appearance.
+
+Style selection is per launch, including windows created by the editor. Nothing
+is stored in the configuration. There is no explicit light/dark switch or extra
+theme dependency. `QT_STYLE_OVERRIDE` alone does not opt into modern layouts;
+`-fn`, `-font`, and `ALHMAINFONT` retain their runtime-button-only scope.
+
+Run `make -C qtalh QT_VERSION=5 test-ui-fusion test-gallery` for Fusion workflows
+and separate legacy/Fusion dialog galleries. The Qt-only gallery supports
+Windows without Motif/X11. See the [test guide](../qtalh/tests/README.md).
+
+## Historical Motif comparison
+
+This section records historical comparisons and remaining appearance differences.
 The initial Qt/Motif comparison used a site-local Radiation Monitors
 configuration (`Rad_Mon.alhConfig`) and an installed `bell.oga` sound. Those
 site files and the original log directories are not part of this repository.

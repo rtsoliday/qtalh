@@ -27,7 +27,7 @@ class UiTests : public QObject {
   }
 private slots:
   void initTestCase() {
-    initializeAppearance();
+    initializeAppearance(qEnvironmentVariable("QTALH_TEST_STYLE"));
   }
 #ifdef Q_OS_WIN
   void windowsShellCommand() {
@@ -196,12 +196,59 @@ private slots:
     QCOMPARE(tree->model()->index(0, 1).data().toString(), QString("R"));
     QCOMPARE(tree->model()->index(0, 8).data().toString(), QString("(0,0,1,0,2)"));
     QDir().mkpath(QString(TEST_OUTPUT));
-    QVERIFY(w->grab().save(QString(TEST_OUTPUT) + "/qtalh-main.png"));
+    QVERIFY(w->grab().save(QString(TEST_OUTPUT) + (legacyAppearance() ? "/qtalh-main.png" : "/fusion-main.png")));
     auto index = tree->model()->index(0, 0);
     tree->setCurrentIndex(index);
     QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier,
                       tree->visualRect(index).center());
     QCOMPARE(w->alarmEngine().state(w->document().root.get()).unack, 0);
+  }
+  void actionTooltips_data() {
+    QTest::addColumn<QString>("directives");
+    QTest::addColumn<int>("column");
+    QTest::addColumn<QString>("expected");
+    QTest::newRow("guidance-text")
+        << "$GUIDANCE\nCheck <pressure> & temperature.\nKeep  two spaces.\n$END\n" << 4
+        << "Check <pressure> & temperature.\nKeep  two spaces.";
+    QTest::newRow("guidance-url") << "$GUIDANCE https://example.invalid/operator-help\n" << 4
+        << "https://example.invalid/operator-help";
+    QTest::newRow("guidance-both")
+        << "$GUIDANCE https://example.invalid/help\n$GUIDANCE\nCheck the source.\n$END\n" << 4
+        << "Check the source.\nhttps://example.invalid/help";
+    QTest::newRow("command-literal") << "$COMMAND echo '<b>alarm</b>' > output.txt\n" << 5
+        << "echo '<b>alarm</b>' > output.txt";
+    QTest::newRow("command-display")
+        << "$COMMAND '/legacy tools/medm' -x -macro \"P=ring\" panel.adl\n" << 5
+        << "qtedm -x -macro \"P=ring\" panel.adl";
+    QTest::newRow("command-menu")
+        << "$COMMAND !First!echo one!Second!MASTER_ONLY medm second.adl!\n" << 5
+        << "First:\necho one\nSecond:\nMaster only:\nqtedm second.adl";
+  }
+  void actionTooltips() {
+    QFETCH(QString, directives);
+    QFETCH(int, column);
+    QFETCH(QString, expected);
+    auto d = parseConfig("GROUP NULL root\n" + directives + "CHANNEL root pv\n" + directives);
+    auto w = std::make_unique<Window>(std::move(d), options(false), false);
+    QStringList commands;
+    w->alarmEngine().command = [&](const QString& command) { commands << command; };
+    w->show();
+    QCoreApplication::processEvents();
+    for (const auto& name : {"alarmTree", "groupContents"}) {
+      auto view = w->findChild<QTreeView*>(name);
+      auto index = view->model()->index(0, column);
+      auto position = view->visualRect(index).center();
+      QCOMPARE(view->indexAt(position), index);
+      QHelpEvent event(QEvent::ToolTip, position, view->viewport()->mapToGlobal(position));
+      QApplication::sendEvent(view->viewport(), &event);
+      QTextDocument tooltip;
+      tooltip.setHtml(QToolTip::text());
+      // Plain-text extraction represents paragraph spacing with one newline.
+      QCOMPARE(tooltip.toPlainText(), expected);
+      QVERIFY(commands.isEmpty());
+      QVERIFY(w->findChildren<QDialog*>().isEmpty());
+      QToolTip::hideText();
+    }
   }
   void footerSpacing() {
     auto w = std::make_unique<Window>(sample(), options(false), false);
@@ -212,11 +259,14 @@ private slots:
          {"silenceInterval", "silenceCurrent", "silenceForever", "beepSeverity"}) {
       auto row = w->findChild<QWidget*>(name);
       QVERIFY(row);
-      QCOMPARE(row->height(), 20);
+      if (legacyAppearance()) QCOMPARE(row->height(), 20);
+      else QVERIFY(row->height() >= row->fontMetrics().height());
       centers.append(row->mapTo(w.get(), row->rect().center()).y());
     }
-    QCOMPARE(centers[1] - centers[0], centers[2] - centers[1]);
-    QCOMPARE(centers[2] - centers[1], centers[3] - centers[2]);
+    if (legacyAppearance()) {
+      QCOMPARE(centers[1] - centers[0], centers[2] - centers[1]);
+      QCOMPARE(centers[2] - centers[1], centers[3] - centers[2]);
+    }
     QVERIFY(w->findChild<QLabel*>("silenceForever")->text().startsWith("Silence Forever: "));
     QVERIFY(w->findChild<QLabel*>("beepSeverity")->text().startsWith("ALH Beep Severity: "));
   }
@@ -351,7 +401,7 @@ private slots:
     w->saveTo(dir.filePath("saved.alhConfig"));
     QCOMPARE(w->document().filename, dir.filePath("saved.alhConfig"));
     QCOMPARE(loadConfig(dir.filePath("saved.alhConfig")).channels().size(), count + 1);
-    QVERIFY(w->grab().save(QString(TEST_OUTPUT) + "/qtalh-editor.png"));
+    QVERIFY(w->grab().save(QString(TEST_OUTPUT) + (legacyAppearance() ? "/qtalh-editor.png" : "/fusion-editor.png")));
   }
   void editorBeepSeverityUndoAndSave() {
     auto w = std::make_unique<Window>(sample(), options(true), false);
@@ -455,6 +505,49 @@ private slots:
     }
   }
   void motifFileSelection() {
+    if (!legacyAppearance()) {
+      QTemporaryDir dir;
+      QFile file(dir.filePath("existing.alhConfig"));
+      QVERIFY(file.open(QIODevice::WriteOnly)); file.write("reference"); file.close();
+      QTimer::singleShot(0, [&] {
+        auto dialog = qobject_cast<QFileDialog*>(qApp->activeModalWidget());
+        QVERIFY(dialog);
+        QVERIFY(dialog->testOption(QFileDialog::DontUseNativeDialog));
+        QCOMPARE(dialog->fileMode(), QFileDialog::ExistingFile);
+        QCOMPARE(dialog->nameFilters(), QStringList{"Configurations (*.alhConfig)"});
+        dialog->selectFile(file.fileName());
+        QMetaObject::invokeMethod(dialog, "accept");
+      });
+      QCOMPARE(chooseFile(nullptr, "Open", dir.path(), "Configurations (*.alhConfig)"), file.fileName());
+      QTimer::singleShot(0, [&] {
+        auto dialog = qobject_cast<QFileDialog*>(qApp->activeModalWidget());
+        QVERIFY(dialog); QCOMPARE(dialog->acceptMode(), QFileDialog::AcceptSave);
+        dialog->selectFile(dir.filePath("new.alhConfig"));
+        QMetaObject::invokeMethod(dialog, "accept");
+      });
+      QCOMPARE(chooseFile(nullptr, "Save", dir.path(), "Configurations (*.alhConfig)", true),
+               dir.filePath("new.alhConfig"));
+      QVERIFY(!QFileInfo::exists(dir.filePath("new.alhConfig")));
+      for (bool overwrite : {false, true}) {
+        QTimer::singleShot(0, [&] {
+          auto dialog = qobject_cast<QFileDialog*>(qApp->activeModalWidget());
+          QVERIFY(dialog); dialog->selectFile(file.fileName());
+          QTimer::singleShot(0, [&] {
+            auto confirmation = qobject_cast<QMessageBox*>(qApp->activeModalWidget());
+            QVERIFY(confirmation);
+            confirmation->button(overwrite ? QMessageBox::Yes : QMessageBox::No)->click();
+          });
+          QMetaObject::invokeMethod(dialog, "accept");
+          if (!overwrite) { QVERIFY(dialog->isVisible()); dialog->reject(); }
+        });
+        QCOMPARE(chooseFile(nullptr, "Overwrite", dir.path(), "Configurations (*.alhConfig)", true),
+                 overwrite ? file.fileName() : QString());
+      }
+      QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(), QByteArray("reference")); file.close();
+      QTimer::singleShot(0, [] { qobject_cast<QDialog*>(qApp->activeModalWidget())->reject(); });
+      QVERIFY(chooseFile(nullptr, "Cancel", dir.path(), "All files (*)").isEmpty());
+      return;
+    }
     QTemporaryDir dir;
     QVERIFY(QDir(dir.path()).mkdir("child"));
     QFile file(dir.filePath("child/example.alhConfig"));
@@ -627,9 +720,21 @@ private slots:
     auto masks = w->findChild<QDialog*>("forceMaskDialog");
     auto beep = w->findChild<QDialog*>("beepSeverityDialog");
     QVERIFY(properties && force && masks && beep);
+    int savedScroll = 0;
+    if (auto tabs = properties->findChild<QTabWidget*>("propertyTabs")) {
+      properties->resize(640, 300); tabs->setCurrentIndex(1);
+      QCoreApplication::processEvents();
+      auto scroll = properties->findChild<QScrollArea*>("propertyForceScroll")->verticalScrollBar();
+      savedScroll = qMin(40, scroll->maximum()); QVERIFY(savedScroll > 0);
+      scroll->setValue(savedScroll);
+    }
     view->setCurrentIndex(view->model()->index(1, 2));
     QTRY_COMPARE(properties->findChild<QLineEdit*>("propertyNAME")->text(), QString("second"));
     QCOMPARE(w->findChild<QDialog*>("propertiesDialog"), properties);
+    if (!legacyAppearance()) {
+      QCOMPARE(properties->findChild<QTabWidget*>("propertyTabs")->currentIndex(), 1);
+      QTRY_COMPARE(properties->findChild<QScrollArea*>("propertyForceScroll")->verticalScrollBar()->value(), savedScroll);
+    }
     QCOMPARE(force->findChild<QLineEdit*>("forcePvName")->text(), QString("gate2"));
     QVERIFY(masks->findChild<QCheckBox*>("maskBit4")->isChecked());
     QVERIFY(beep->findChild<QRadioButton*>("beepSeverity3")->isChecked());
@@ -737,6 +842,46 @@ private slots:
         QVERIFY(output.contains("[startup]"));
         QVERIFY(output.contains("[config]"));
       }
+    }
+  }
+  void styleCommandLine() {
+    const auto executable = QDir(QCoreApplication::applicationDirPath()).filePath("qtalh");
+    QTemporaryDir dir;
+    auto config = dir.filePath("style.alhConfig");
+    saveConfig(parseConfig("GROUP NULL root\n"), config);
+    for (const auto& command : {"--help", "--version", "--validate"}) {
+      QProcess process;
+      auto env = QProcessEnvironment::systemEnvironment();
+      env.remove("DISPLAY"); env.insert("QT_QPA_PLATFORM", "not-a-platform");
+      process.setProcessEnvironment(env);
+      process.start(executable, {"-style=unknown", command, config});
+      QVERIFY(process.waitForFinished()); QCOMPARE(process.exitCode(), 0);
+    }
+    {
+      QProcess process;
+      process.start(executable, {"-platform", "offscreen", "-style=unknown", config});
+      QVERIFY(process.waitForFinished()); QCOMPARE(process.exitCode(), 1);
+      auto error = process.readAllStandardError();
+      QVERIFY(error.contains("Unknown widget style")); QVERIFY(error.contains("Fusion"));
+    }
+    for (const auto& style : QStringList{"", "motif", "FuSiOn"}) {
+      QProcess process;
+      auto env = QProcessEnvironment::systemEnvironment();
+      env.insert("QT_STYLE_OVERRIDE", "Fusion");
+      process.setProcessEnvironment(env);
+      process.setReadChannel(QProcess::StandardError);
+      QStringList arguments{"-platform", "offscreen", "-c", "-D", "-s", "-debug", config};
+      if (!style.isEmpty()) arguments.prepend("-style=" + style);
+      process.start(executable, arguments);
+      QVERIFY(process.waitForStarted());
+      QByteArray output;
+      for (int attempt = 0; attempt < 10 && !output.contains("[appearance]"); ++attempt) {
+        process.waitForReadyRead(500); output += process.readAllStandardError();
+      }
+      process.terminate();
+      if (!process.waitForFinished(3000)) { process.kill(); process.waitForFinished(); }
+      QVERIFY2(output.contains(style == "FuSiOn" ? "style=fusion" : "style=motif"), output.constData());
+      QVERIFY(!output.contains("invalid style override"));
     }
   }
   void propertiesEditRoundTrip() {
@@ -867,7 +1012,8 @@ private slots:
       if (widget->objectName() == "runtimeWindow")
         runtime = widget;
     QVERIFY(runtime);
-    QCOMPARE(runtime->size(), QSize(220, 35));
+    if (legacyAppearance()) QCOMPARE(runtime->size(), QSize(220, 35));
+    else { QVERIFY(runtime->width() >= 220); QVERIFY(runtime->height() >= 35); }
     QCOMPARE(runtime->findChildren<QPushButton*>().size(), 1);
     QCOMPARE(runtime->findChild<QPushButton*>("runtimeAlarm")->text(),
              QString("Radiation_Monitors  <-D--->"));
@@ -899,6 +1045,143 @@ private slots:
     QVERIFY(slider);
     slider->setValue(70);
     QVERIFY(tree->width() > group->width());
+  }
+  void fontSizeShortcuts() {
+    const auto startup = QApplication::font();
+    // Always reset the application-wide setting, including after a failed check.
+    struct ResetFont {
+      ~ResetFont() {
+        QWidget target;
+        QTest::keyClick(&target, Qt::Key_0, Qt::ControlModifier);
+      }
+    } reset;
+    auto o = options(false);
+    QFont custom("monospace", 14);
+    o.font = custom.toString();
+    auto w = std::make_unique<Window>(sample(), o, false);
+    w->showInitial();
+    auto view = w->findChild<AlarmView*>("groupContents");
+    QVERIFY(view);
+    QWidget* runtime = nullptr;
+    for (auto widget : QApplication::topLevelWidgets())
+      if (widget->objectName() == "runtimeWindow") runtime = widget;
+    QVERIFY(runtime);
+    auto button = runtime->findChild<QPushButton*>("runtimeAlarm");
+    QVERIFY(button);
+    QCoreApplication::processEvents();
+    auto index = view->model()->index(0, 2);
+    const auto originalRect = view->visualRect(index);
+    const auto originalButtonFont = button->font();
+    for (auto action : w->findChildren<QAction*>())
+      if (action->text() == "Current Alarm History") action->trigger();
+    auto history = w->findChild<QDialog*>("historyDialog");
+    QVERIFY(history);
+    auto reader = history->findChild<QPlainTextEdit*>();
+    QVERIFY(reader);
+    const auto originalReaderFont = reader->font();
+    QTest::keyClick(view, Qt::Key_Equal, Qt::ControlModifier);
+    if (legacyAppearance()) {
+      QTest::keyClick(view, Qt::Key_Plus, Qt::ControlModifier | Qt::ShiftModifier);
+      QTest::keyClick(view, Qt::Key_Minus, Qt::ControlModifier);
+      QTest::keyClick(view, Qt::Key_0, Qt::ControlModifier);
+      QCOMPARE(QApplication::font(), startup);
+      QCOMPARE(view->visualRect(index), originalRect);
+      QCOMPARE(button->font(), originalButtonFont);
+      QCOMPARE(reader->font(), originalReaderFont);
+      return;
+    }
+    auto points = [](const QFont& font) {
+      return font.pointSizeF() > 0 ? font.pointSizeF() : QFontInfo(font).pointSizeF();
+    };
+    const qreal base = points(startup);
+    QCOMPARE(QApplication::font().pointSizeF(), base + 1);
+    // Modal dialogs and text editors use the same global shortcuts.
+    history->setWindowModality(Qt::ApplicationModal);
+    QTest::keyClick(reader, Qt::Key_Plus, Qt::ControlModifier | Qt::ShiftModifier);
+    QCOMPARE(QApplication::font().pointSizeF(), base + 2);
+    QCOMPARE(reader->font().pointSizeF(), points(originalReaderFont) + 2);
+    QCOMPARE(reader->font().family(), originalReaderFont.family());
+    QVERIFY(QFontInfo(reader->font()).fixedPitch());
+    QCOMPARE(button->font().pointSizeF(), points(originalButtonFont) + 2);
+    QCOMPARE(button->font().family(), originalButtonFont.family());
+    QCoreApplication::processEvents();
+    QVERIFY(view->visualRect(index).height() > originalRect.height());
+    QVERIFY(view->visualRect(index).width() > originalRect.width());
+    QCOMPARE(view->indexAt(view->visualRect(index).center()), index);
+    auto second = std::make_unique<Window>(sample(), options(true), false);
+    QCOMPARE(second->font().pointSizeF(), base + 2);
+    for (auto action : second->findChildren<QAction*>())
+      if (action->text() == "Properties Window") action->trigger();
+    auto properties = second->findChild<QDialog*>("propertiesDialog");
+    QVERIFY(properties);
+    auto command = properties->findChild<QPlainTextEdit*>("propertySEVRCOMMAND");
+    QVERIFY(command);
+    QCOMPARE(command->font().pointSizeF(), points(contentFont()) + 2);
+    QTest::keyClick(button, Qt::Key_Minus, Qt::ControlModifier);
+    QCOMPARE(QApplication::font().pointSizeF(), base + 1);
+    QCOMPARE(second->font().pointSizeF(), base + 1);
+    QTest::keyClick(command, Qt::Key_0, Qt::ControlModifier);
+    QCOMPARE(QApplication::font(), startup);
+    QCOMPARE(reader->font(), originalReaderFont);
+    QCOMPARE(button->font(), originalButtonFont);
+    QCoreApplication::processEvents();
+    QCOMPARE(view->visualRect(index), originalRect);
+    // Guard against invalid/negative sizes and excessive growth on auto-repeat.
+    for (int n = 0; n < 100; ++n) QTest::keyClick(view, Qt::Key_Minus, Qt::ControlModifier);
+    QVERIFY(QApplication::font().pointSizeF() >= 6);
+    auto smallest = QApplication::font();
+    QTest::keyClick(view, Qt::Key_Minus, Qt::ControlModifier);
+    QCOMPARE(QApplication::font(), smallest);
+    for (int n = 0; n < 100; ++n) QTest::keyClick(view, Qt::Key_Plus, Qt::ControlModifier);
+    QVERIFY(QApplication::font().pointSizeF() <= 72);
+    auto largest = QApplication::font();
+    QTest::keyClick(view, Qt::Key_Plus, Qt::ControlModifier);
+    QCOMPARE(QApplication::font(), largest);
+  }
+  void styledRowGeometryAndPalette() {
+    if (legacyAppearance()) QSKIP("Styled presentation contract; run with QTALH_TEST_STYLE=fusion");
+    QVERIFY(QFontInfo(contentFont()).fixedPitch());
+    struct Restore {
+      QFont font = QApplication::font();
+      QPalette palette = QApplication::palette();
+      ~Restore() { QApplication::setFont(font); QApplication::setPalette(palette); }
+    } restore;
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root very_long_channel_name_for_geometry\n$GUIDANCE\nGuidance\n$END\n$COMMAND echo test\n");
+    auto w = std::make_unique<Window>(d, options(false), false);
+    w->show();
+    auto view = w->findChild<AlarmView*>("groupContents");
+    QCoreApplication::processEvents();
+    auto index = view->model()->index(0, 2);
+    auto initial = view->visualRect(index);
+    QVERIFY(!index.data(Qt::BackgroundRole).value<QColor>().isValid());
+    auto large = QApplication::font(); large.setPointSize(20); QApplication::setFont(large);
+    QCoreApplication::processEvents();
+    auto enlarged = view->visualRect(index);
+    QVERIFY(enlarged.height() > initial.height());
+    QVERIFY(enlarged.width() > initial.width());
+    for (int column : {0, 1, 2, 4, 5, 6, 7, 8}) {
+      auto cell = index.sibling(0, column);
+      auto rect = view->visualRect(cell);
+      if (!rect.isEmpty()) QCOMPARE(view->indexAt(rect.center()), cell);
+    }
+    auto dark = QApplication::palette();
+    dark.setColor(QPalette::Base, QColor("#202020")); dark.setColor(QPalette::Text, Qt::white);
+    dark.setColor(QPalette::Window, QColor("#303030")); dark.setColor(QPalette::WindowText, Qt::white);
+    dark.setColor(QPalette::Button, QColor("#404040")); dark.setColor(QPalette::ButtonText, Qt::white);
+    QApplication::setPalette(dark);
+    auto channel = w->document().channels()[0];
+    for (int severity = 0; severity <= 4; ++severity) {
+      w->alarmEngine().event(channel, {severity ? 3 : 0, severity, severity, 1, "1"});
+      QTest::qWait(150);
+      auto badge = view->visualRect(view->model()->index(0, 1));
+      auto capture = view->viewport()->grab().toImage();
+      if (severity) {
+        auto expected = view->model()->index(0, 1).data(Qt::BackgroundRole).value<QColor>();
+        QCOMPARE(capture.pixelColor((badge.topLeft() + QPoint(3, 3)) * capture.devicePixelRatio()), expected);
+      }
+    }
+    QVERIFY(w->grab().save(QString(TEST_OUTPUT) + "/fusion-large-dark.png"));
+    QVERIFY(w->findChild<QWidget*>("alarmLegend")->isHidden());
   }
   void relatedCommandDelimiters_data() {
     QTest::addColumn<QString>("command");

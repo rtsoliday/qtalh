@@ -85,6 +85,7 @@ void Window::showLogBrowser(bool alarm) {
   auto text = new QPlainTextEdit;
   text->setObjectName("logResults");
   text->setReadOnly(true);
+  if (!legacyAppearance()) setPresentationFont(text, contentFont());
   text->setLineWrapMode(QPlainTextEdit::NoWrap);
   layout->addWidget(text, 1);
   auto status = new QLabel;

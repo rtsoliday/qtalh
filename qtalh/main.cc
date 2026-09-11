@@ -34,13 +34,19 @@ int main(int argc, char** argv) {
     }
     if (!options.display.isEmpty())
       qputenv("DISPLAY", options.display.toLocal8Bit());
-    QApplication app(argc, argv);
+    // Qt only receives its platform switch. Application options (including the
+    // runtime-only font and the motif alias) have already been parsed above.
+    QByteArray program = args.front().toLocal8Bit(), platformFlag("-platform"),
+               platform = options.platform.toLocal8Bit();
+    int qtArgc = platform.isEmpty() ? 1 : 3;
+    char* qtArgv[] = {program.data(), platformFlag.data(), platform.data(), nullptr};
+    qtArgv[qtArgc] = nullptr;
+    QApplication app(qtArgc, qtArgv);
     QApplication::setApplicationName("qtalh");
     QApplication::setOrganizationName("EPICS");
-    alh::initializeAppearance();
-    int styleIndex = args.indexOf("-style");
-    if (styleIndex >= 0 && styleIndex + 1 < args.size())
-      QApplication::setStyle(args[styleIndex + 1]);
+    alh::initializeAppearance(options.style);
+    alh::debugLog(options.debug, "appearance", alh::legacyAppearance() ? "style=motif" :
+                  "style=" + QApplication::style()->objectName());
     alh::Document doc;
     if (options.editor && options.config.isEmpty())
       doc = alh::parseConfig("GROUP NULL NewGroup\n");

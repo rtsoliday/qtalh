@@ -10,7 +10,7 @@ struct Options {
   // An empty lockFile follows config; -Lfile remains an explicit override.
   QString config, configDir, logDir = ".", alarmFile = "ALH-default.alhAlarm",
                              opmodFile = "ALH-default.alhOpmod", lockFile, sound, font, geometry;
-  QString display;
+  QString display, platform, style;
   int filter = 0, maxRecords = 2000, printerKey = 0, databaseKey = 0;
 };
 Options parseOptions(const QStringList&);
