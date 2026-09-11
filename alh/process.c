@@ -162,7 +162,7 @@ void relatedProcess_callback(void *widget,GCLINK *link,void *cbs)
 	void *area;
 	char buf[1023+1], *tk, *ctx;
 	int i, n;
-	Widget pdm, pb;
+	Widget pb;
         Arg args[10];
 	XmString str;
         Window root, child;
@@ -205,7 +205,7 @@ void relatedProcess_callback(void *widget,GCLINK *link,void *cbs)
             XtSetArg( args[n], XmNpopupEnabled, (XtArgVal) False ); n++;
             g_pum = XmCreatePopupMenu( topLevelShell, "relprocmenu", args, n );
 
-            pdm = XmCreatePulldownMenu( g_pum, "relprocpd", NULL, 0 );
+            XmCreatePulldownMenu( g_pum, "relprocpd", NULL, 0 );
 
 	    strncpy( buf, link->pgcData->command, 1023 );
 	    buf[1023] = 0;

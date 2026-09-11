@@ -291,7 +291,7 @@ static void forcePVCreateDialog(ALINK *area)
 	Widget prev;
 	Widget frame4, form3, forcePVCalcLabel,forcePVCalcExpressionLabel;
 	Widget forcePVCalcExpressionTextW;
-	Widget forcePVCalcPVLabel[NO_OF_CALC_PVS], forcePVCalcPVTextW[NO_OF_CALC_PVS];
+	Widget forcePVCalcPVTextW[NO_OF_CALC_PVS];
 	int i;
 	Pixel textBackground;
 	XmString string;
@@ -582,7 +582,7 @@ static void forcePVCreateDialog(ALINK *area)
 		pvid[0]=letter[i];
 		string = XmStringCreateSimple(pvid);
 
-		forcePVCalcPVLabel[i] = XtVaCreateManagedWidget("forcePVCalcPVLabel",
+		XtVaCreateManagedWidget("forcePVCalcPVLabel",
 		    xmLabelGadgetClass, form3,
 		    XmNlabelString,            string,
 		    XmNtopAttachment,          XmATTACH_WIDGET,
@@ -982,7 +982,6 @@ void alForcePVClearCA(FORCEPV* pforcePV)
 *************************************************************/
 void alForcePVSetNotConnected(FORCEPV* pforcePV,char* name)
 {
-    FORCEPV_CALC* pcalc;
 	int i;
 
 	if (!pforcePV) return;
@@ -990,7 +989,6 @@ void alForcePVSetNotConnected(FORCEPV* pforcePV,char* name)
 			errMsg("Force PV %s for %s Not Connected\n",
 				pforcePV->name, name);
 		}
-    	pcalc=pforcePV->pcalc;
 		if (pforcePV->pcalc) {
 			for (i=0;i<NO_OF_CALC_PVS;i++) {
 				if ( pforcePV->pcalc->chid[i] &&

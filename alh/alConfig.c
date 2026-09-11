@@ -198,7 +198,8 @@ struct mainGroup *pmainGroup)
 	if (gdata->name) free(gdata->name);
 	gdata->name = (char *)calloc(1,strlen(name)+1);
 	strcpy(gdata->name,name);
-	if (_DB_call_flag) if(strlen(applicationName)==0) strncpy(applicationName,name,64);
+	if (_DB_call_flag) if(strlen(applicationName)==0) snprintf(applicationName,sizeof(applicationName),"%.*s",
+		(int)sizeof(applicationName)-1,name);
 
 	/*parent is NULL , i. e. main group*/
 	if(strcmp("NULL",parent)==0)  	{
@@ -356,7 +357,7 @@ int caConnect,struct mainGroup *pmainGroup)
 	clink = alCreateChannel();
 	clink->pmainGroup = pmainGroup;
 	cdata = clink->pchanData;
-	strncpy(cdata->name,name,PVNAME_SIZE);
+	snprintf(cdata->name,PVNAME_SIZE,"%.*s",PVNAME_SIZE-1,name);
 
 	/* must find parent */
 	parent_link = *pglink;
@@ -994,16 +995,16 @@ static void alConfigTreePrint(FILE *fw,GLINK *glink,char *treeSym)
 	gdata = glink->pgroupData;
 
 	length = strlen(treeSym);
-	if (length >= MAX_TREE_DEPTH) return;
+	if (length + symSize > MAX_TREE_DEPTH) return;
 
 
 	/* find next view sibling */
 	pt = sllNext(glink);
 
 	if (length){
-		if (pt) strncpy(&treeSym[length-symSize],symMiddle,symSize);
-		else strncpy(&treeSym[length-symSize],symEnd,symSize);
-		strncpy(&treeSym[length],symNull,symSize);
+		if (pt) memcpy(&treeSym[length-symSize],symMiddle,symSize);
+		else memcpy(&treeSym[length-symSize],symEnd,symSize);
+		memcpy(&treeSym[length],symNull,symSize);
 	}
 
 		fprintf(fw,"%s%-28s\n",
@@ -1011,13 +1012,13 @@ static void alConfigTreePrint(FILE *fw,GLINK *glink,char *treeSym)
 		    gdata->name);
 
 	if (length){
-		if (pt) strncpy(&treeSym[length-symSize],symContinue,symSize);
-		else strncpy(&treeSym[length-symSize],symBlank,symSize);
+		if (pt) memcpy(&treeSym[length-symSize],symContinue,symSize);
+		else memcpy(&treeSym[length-symSize],symBlank,symSize);
 	}
 
 	pt = sllFirst(&(glink->subGroupList));
-	if (pt) strncpy(&treeSym[length],symContinue,symSize);
-	else strncpy(&treeSym[length],symBlank,symSize);
+	if (pt) memcpy(&treeSym[length],symContinue,symSize);
+	else memcpy(&treeSym[length],symBlank,symSize);
 
 	pt = sllFirst(&(glink->chanList));
 	while (pt){
@@ -1032,7 +1033,7 @@ static void alConfigTreePrint(FILE *fw,GLINK *glink,char *treeSym)
 		pt = sllNext(pt);
 	}
 
-	strncpy(&treeSym[length],symBlank,symSize);
+	memcpy(&treeSym[length],symBlank,symSize);
 
 	pt = sllFirst(&(glink->subGroupList));
 	while (pt){
@@ -1040,7 +1041,7 @@ static void alConfigTreePrint(FILE *fw,GLINK *glink,char *treeSym)
 		pt = sllNext(pt);
 	}
 
-	strncpy(&treeSym[length],symNull,symSize);
+	memcpy(&treeSym[length],symNull,symSize);
 	return;
 }
 

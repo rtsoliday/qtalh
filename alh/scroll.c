@@ -270,8 +270,9 @@ void fileViewWindow(Widget w,int option,Widget menuButton)
 	    }
 
 	    /* read the file */
-	    fread(viewFileString[operandFile],
-	     viewFileUsedLength[operandFile],1, fp);
+	    viewFileUsedLength[operandFile] = fread(viewFileString[operandFile],
+	     1, viewFileUsedLength[operandFile], fp);
+	    if (ferror(fp)) errMsg("Error reading file %s\n",filename);
 
 	    clearerr(fp);
 	    if (fclose(fp)) {
@@ -750,8 +751,9 @@ void browser_fileViewWindow(Widget w,int option,Widget menuButton)
 	  return;
 	}
 
-	fread(viewFileString[operandFile], sizeof(char), 
+	viewFileUsedLength[operandFile] = fread(viewFileString[operandFile], sizeof(char),
 	    viewFileUsedLength[operandFile], fp);
+	if (ferror(fp)) errMsg("Error reading log file\n");
 
 	/* close up the file */
 		fclose (fp) ;
@@ -1262,9 +1264,15 @@ XtPointer call_data)
     return;
     }
 
-  dirForAlLog=XtCalloc(1,MAX_NUM_OF_LOG_FILES);
   strcpy( FSnameshort, (const char *)shortfile(FS_filename) );
-  strncpy(dirForAlLog,FS_filename,strlen(FS_filename)-strlen(FSnameshort)-1);
+  {
+    size_t prefixLength = strlen(FS_filename)-strlen(FSnameshort);
+    /* Keep the root slash; use the current directory for a bare filename. */
+    size_t dirLength = prefixLength > 1 ? prefixLength-1 : prefixLength;
+    dirForAlLog = XtCalloc(1,dirLength+2);
+    if (dirLength) memcpy(dirForAlLog,FS_filename,dirLength);
+    else strcpy(dirForAlLog,".");
+  }
 #ifndef WIN32
   if ( (directory=opendir( (char *) dirForAlLog)) == NULL)
        {

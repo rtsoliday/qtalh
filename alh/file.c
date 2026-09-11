@@ -309,7 +309,8 @@ void exit_quit(Widget w, XtPointer clientdata, XtPointer calldata)
 #ifndef CYGWIN32
 #ifndef WIN32
 	if (masterFlag) {
-	  lockf(lockFileDeskriptor,F_ULOCK, 0L);
+	  if (lockf(lockFileDeskriptor, F_ULOCK, 0L) == -1)
+	      perror("Unable to release file lock");
 	  if (lockTimeoutId) {
 	    XtRemoveTimeOut(lockTimeoutId);
 	  }
@@ -323,7 +324,8 @@ void exit_quit(Widget w, XtPointer clientdata, XtPointer calldata)
 	  }
 	  */
 	if(_message_broadcast_flag)  {
-	  lockf(messBroadcastDeskriptor, F_ULOCK, 0L); /* Albert */
+	  if (lockf(messBroadcastDeskriptor, F_ULOCK, 0L) == -1)
+	      perror("Unable to release file lock"); /* Albert */
 	  if (broadcastMessTimeoutId) {
 	    XtRemoveTimeOut(broadcastMessTimeoutId);
 	  }
@@ -476,17 +478,25 @@ int programId,Widget widget)
 	time_t timeofday;
 	struct tm *tms;
 	char buf[16];
+	char datedFilename[NAMEDEFAULT_SIZE];
 
 	/* _______ For Dated AlLog File. Albert______________________________*/
 	timeofday = time(0L);
 	tms = localtime(&timeofday);
-	sprintf(buf,".%.4d-%.2d-%.2d",
-	    1900+tms->tm_year,1+tms->tm_mon,tms->tm_mday);
-	buf[11]=0;
+	if (!strftime(buf,sizeof(buf),".%Y-%m-%d",tms)) {
+		errMsg("Unable to format log file date\n");
+		return;
+	}
 	tm_day_old = tms->tm_mday;
 	if ( ((fileType == FILE_ALARMLOG)||(fileType == FILE_OPMOD))&&(_time_flag)  )
 	{
-		strncat(filename, &buf[0], strlen(buf));
+		if (strlen(filename) + strlen(buf) >= sizeof(datedFilename)) {
+			errMsg("Dated log filename is too long: %s\n",filename);
+			return;
+		}
+		strcpy(datedFilename,filename);
+		strcat(datedFilename,buf);
+		filename = datedFilename;
 	}
 	/* _______ End. Albert______________________________*/
 
@@ -1229,7 +1239,7 @@ char *argv[];
 	if (commandLine.lockFileBase)  /* Andreas Luedeke */
 		strncpy(psetup.lockFileBase,commandLine.lockFileBase,NAMEDEFAULT_SIZE-1);
 	else 
-		strncpy(psetup.lockFileBase,psetup.configFile,NAMEDEFAULT_SIZE-1);
+		snprintf(psetup.lockFileBase,sizeof(psetup.lockFileBase),"%s",psetup.configFile);
 
 	if (DEBUG == 1 ) printf("\nLock File is %s.LOCK \n", psetup.lockFileBase);
 
@@ -1283,16 +1293,15 @@ if ( (fp=fopen(messBroadcastInfoFileName,"r")) == NULL )
     perror("broadcastMessTesting: can't open messBroadcastInfoFileName!!!!");
     return;
   }
-if (fgets(firstLine,32,fp)==NULL) {fclose(fp); return;}
+if (fgets(firstLine,sizeof(firstLine),fp)==NULL) {fclose(fp); return;}
 
 if(strcmp(firstLine,messID) == 0) {fclose(fp); return;}
+if (!fgets(messBuff, sizeof(messBuff), fp) ||
+    !fgets(buff, sizeof(buff), fp)) {fclose(fp); return;}
+strncat(messBuff,buff,sizeof(messBuff)-strlen(messBuff)-1); /* Date */
+if (!fgets(buff, sizeof(buff), fp)) {fclose(fp); return;}
+strncat(messBuff,buff,sizeof(messBuff)-strlen(messBuff)-1); /* From */
 strcpy(messID,firstLine);
-memset(messBuff,0,250);
-fgets (messBuff, 250, fp);  /* Mess */
-fgets(buff,250,fp);
-strcat(messBuff,buff);      /* Date */
-fgets(buff,250,fp);
-strcat(messBuff,buff);      /* From */ 
 fclose(fp);
 
 if(!amIsender) 

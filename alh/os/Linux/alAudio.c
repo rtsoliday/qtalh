@@ -40,7 +40,8 @@ void alBeep(Display *displayBB)
             strcat(cmd," &");
             /*strcat(cmd," > /dev/null 2>&1 &");*/
         }
-        system(cmd);
+        if (system(cmd) != 0)
+            XkbBell(displayBB,None,0,None);
     } else {
         XkbBell(displayBB,None,0,None);
     }

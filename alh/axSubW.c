@@ -393,14 +393,12 @@ void adjustScrollBar(struct subWindow *subWindow)
 void exposeResizeCallback(Widget widget,struct subWindow *subWindow,
 XEvent *cbs)
 {
-	Dimension oldViewHeight;
 
 	/*
 	     if (cbs->reason == XmCR_EXPOSE){
 	          return;
 	     }
 	*/
-	oldViewHeight = subWindow->viewHeight;
 	XtVaGetValues(subWindow->drawing_area,
 	    XmNheight,            &subWindow->viewHeight,
 	    XmNmarginHeight,      &subWindow->marginHeight,

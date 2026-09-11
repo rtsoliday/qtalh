@@ -89,7 +89,7 @@ void awUpdateChanLine(struct anyLine *chanLine)
 	}
 	alGetMaskString(cdata->curMask,buff);
 	if (cdata->noAckTimerId ) buff[2]='H';
-	sprintf(chanLine->mask,"<%s>",buff);
+	snprintf(chanLine->mask,sizeof(chanLine->mask),"<%.5s>",buff);
 
 	strcpy(chanLine->message," ");
 
@@ -125,7 +125,7 @@ void awUpdateGroupLine(struct anyLine *groupLine)
 	gdata = glink->pgroupData;
 	awGetMaskString(gdata->mask,buff);
 	if (gdata->noAckTimerId ) buff[2]='H';
-	sprintf(groupLine->mask,"<%s>",buff);
+	snprintf(groupLine->mask,sizeof(groupLine->mask),"<%.5s>",buff);
 	for (i=0;i<ALH_ALARM_NSEV;i++){
 		groupLine->curSev[i] = gdata->curSev[i];
 	}

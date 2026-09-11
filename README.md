@@ -114,19 +114,43 @@ explicitly. Running legacy ALH requires an X server; QtALH uses native Qt window
 The macOS build selects EPICS's `compiler/clang` and `os/Darwin` headers and
 supports both static EPICS archives and shared `.dylib` libraries.
 
-Qt 6 is preferred when the required pkg-config modules are available; otherwise
-Qt 5 is selected. `QT_VERSION=5` or `6` forces the choice. `MOC` and `RCC` can be
+Qt 6 is preferred when its required modules are available; otherwise
+Qt 5 is selected. Discovery normally uses pkg-config. On Linux, Qt 6 installations
+without `.pc` files (including Ubuntu 22.04's Qt 6.2 packages) are also discovered
+through `qmake6`, using its header, shared-library, and build-tool paths. Set
+`QMAKE6=/path/to/qmake6` for a custom installation. The fallback also supplies
+the build flags for QtALH, its helpers, and its tests; reinstalling the same Qt
+packages or changing `PKG_CONFIG_PATH` is unnecessary when `.pc` files are absent.
+`QT_VERSION=5` or `6` forces the choice. `MOC` and `RCC` can be
 overridden for unusual installations and must match the selected Qt libraries.
 
 EPICS Base discovery prefers `/usr/local/oag/base`, followed by nearby
 `epics-base` checkouts, the old extensions-relative location, and
-`$HOME/epics/base` or `$HOME/epics/base-7.0`. Explicit overrides take precedence:
+`$HOME/epics/base` or `$HOME/epics/base-7.0`. A sibling checkout can be shared
+with MEDM/QtEDM. From the qtalh repository root, clone and build Base once:
+
+```sh
+git clone --recursive -b 7.0 https://github.com/epics-base/epics-base.git ../epics-base
+make -C ../epics-base -j4
+make -j4
+```
+
+Both the root build and `make -C qtalh` automatically use that checkout.
+A missing Base produces the clone instructions; an unbuilt checkout produces
+instructions to build it. Base is not cloned or built automatically.
+The default build prints dependency notices and installation suggestions for
+missing Motif or Qt development files before starting the available variants.
+Motif requires both `Xm/Xm.h` and `libXm`; if neither variant is available,
+the build fails after the notices. Explicit overrides take precedence:
 
 ```sh
 make -j4 EPICS_BASE=/path/to/base EPICS_HOST_ARCH=linux-x86_64
 ```
 
-`EPICS_HOST_ARCH` defaults to Base's `startup/EpicsHostArch.pl`. Static EPICS
+`EPICS_HOST_ARCH` defaults to Base's installed `lib/perl/EpicsHostArch.pl`,
+with fallbacks to `src/tools/EpicsHostArch.pl` in a source checkout and
+`startup/EpicsHostArch.pl` for older layouts. Detection runs once per make
+process; an explicit `EPICS_HOST_ARCH` bypasses it. Static EPICS
 libraries are preferred, following MEDM; shared-only installations use an
 embedded library search path. `CC`, `CXX`, `CPPFLAGS`, `CFLAGS`, `CXXFLAGS`,
 `LDFLAGS`, `LDLIBS`, `PKG_CONFIG`, `EPICS_COMPILER`, `RPC_CFLAGS`, and `RPC_LIBS`

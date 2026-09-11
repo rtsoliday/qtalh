@@ -87,7 +87,7 @@ int callBrowser(char *url)
 #if DEBUG
 	printf("execute(after): cmd=%s status=%d\n",command,status);
 #endif    
-	return 2;
+	return status == 0 ? 2 : 0;
 }
 
 /**************************** execute ************************************/

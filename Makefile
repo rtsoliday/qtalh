@@ -1,18 +1,68 @@
 # ALH and QtALH standalone builds.
 .DEFAULT_GOAL := all
+QTALH_TOP_LEVEL := 1
 include Makefile.rules
 ifeq ($(OS),Windows)
 HAVE_MOTIF :=
 HAVE_QT := 1
 else
-HAVE_MOTIF := $(if $(wildcard $(MOTIF_INC)/Xm/Xm.h),1)
-HAVE_QT := $(shell $(PKG_CONFIG) --exists Qt6Widgets Qt6Network Qt6PrintSupport Qt6Multimedia 2>/dev/null && echo 1 || ($(PKG_CONFIG) --exists Qt5Widgets Qt5Network Qt5PrintSupport Qt5Multimedia 2>/dev/null && echo 1))
+HAVE_MOTIF := $(if $(and $(XM_LIB),$(wildcard $(MOTIF_INC)/Xm/Xm.h)),1)
+include Makefile.qt
 endif
-.PHONY: all alh qtalh test-qtalh clean distclean
-all: $(if $(HAVE_MOTIF),alh) $(if $(HAVE_QT),qtalh)
-	@$(if $(HAVE_MOTIF),:,echo "Motif unavailable: legacy ALH omitted.")
-	@$(if $(HAVE_QT),:,echo "Qt unavailable: QtALH omitted.")
+.PHONY: all alh qtalh test-qtalh clean distclean check-dependencies
+all: check-dependencies $(if $(HAVE_MOTIF),alh) $(if $(HAVE_QT),qtalh)
 	@$(if $(or $(HAVE_MOTIF),$(HAVE_QT)),:,false)
+
+# Complete notices before either recursive build, including with make -j.
+ifneq ($(filter all,$(or $(MAKECMDGOALS),all)),)
+alh qtalh: | check-dependencies
+endif
+
+check-dependencies:
+ifneq ($(OS),Windows)
+ifeq ($(HAVE_MOTIF),)
+	@echo ""
+	@echo "=========================================="
+	@echo "NOTE: Motif development libraries not found."
+ifeq ($(XM_LIB),)
+	@echo "  Missing library: libXm"
+endif
+ifeq ($(wildcard $(MOTIF_INC)/Xm/Xm.h),)
+	@echo "  Missing headers: Xm/Xm.h"
+endif
+	@echo "Skipping build of alh (Motif-based ALH)."
+ifneq ($(HAVE_QT),)
+	@echo "Only building qtalh (Qt-based ALH)."
+endif
+	@echo ""
+	@echo "To build alh, install Motif development packages:"
+	@echo "  Debian/Ubuntu: sudo apt-get install libmotif-dev libxmu-dev"
+	@echo "  RHEL/CentOS:   sudo yum install motif-devel libXmu-devel"
+	@echo "  macOS:         brew install openmotif"
+	@echo "=========================================="
+	@echo ""
+endif
+ifeq ($(HAVE_QT),)
+	@echo ""
+	@echo "=========================================="
+	@echo "NOTE: Qt development libraries not found."
+	@echo "QtALH requires Qt 5.15 or newer, or Qt 6, including"
+	@echo "Widgets, Network, PrintSupport, and Multimedia."
+	@echo "Skipping build of qtalh (Qt-based ALH)."
+	@echo ""
+	@echo "To build qtalh, install Qt development packages:"
+	@echo "  Debian/Ubuntu: sudo apt-get install qtbase5-dev qtmultimedia5-dev"
+	@echo "                 or sudo apt-get install qt6-base-dev qt6-base-dev-tools qt6-multimedia-dev"
+	@echo "  RHEL/CentOS:   sudo yum install qt5-qtbase-devel qt5-qtmultimedia-devel"
+	@echo "  macOS:         brew install qt"
+	@echo "=========================================="
+	@echo ""
+endif
+endif
+ifeq ($(or $(HAVE_MOTIF),$(HAVE_QT)),)
+	@echo "ERROR: No available ALH variant to build. Install Motif or Qt development packages."
+endif
+
 alh:
 ifeq ($(OS),Windows)
 	@echo "Legacy Motif ALH requires Linux or macOS; use make qtalh on Windows."

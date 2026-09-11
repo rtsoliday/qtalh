@@ -287,13 +287,12 @@ void errMsg(const char *fmt, ...)
 	static int warningboxMessages = 0;
 	int nargs=10;
 	Arg args[10];
-    size_t len;
     struct tm * tms;
     time_t timeofday;
 
     timeofday = time(0L);
     tms = localtime(&timeofday);
-    len = strftime(lstring,TIME_SIZE,"%Y/%m/%d %H:%M ",tms);
+    strftime(lstring,TIME_SIZE,"%Y/%m/%d %H:%M ",tms);
 	va_start(vargs,fmt);
 	vsprintf(&lstring[TIME_SIZE-1],fmt,vargs);
 	va_end(vargs);

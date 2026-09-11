@@ -50,7 +50,7 @@ void closeCurrentCallback( Widget w, Widget currentForm, caddr_t call_data);
 **************************************************************************/
 void currentAlarmHistoryWindow(ALINK *area,Widget menuButton)
 {
-	Widget popup_shell,title,button;
+	Widget popup_shell,button;
 	Widget previous;
 	Atom   WM_DELETE_WINDOW;
 	int    i;
@@ -107,7 +107,7 @@ void currentAlarmHistoryWindow(ALINK *area,Widget menuButton)
 		xstr = XmStringCreateSimple(
 		    "    TIME_STAMP       PROCESS_VARIABLE_NAME          "
 		    "STATUS     SEVERITY   VALUE       ");
-		title = XtVaCreateManagedWidget("CurrentTitle",
+		XtVaCreateManagedWidget("CurrentTitle",
 		    xmLabelGadgetClass,        area->currentAlarmForm,
 		    XmNlabelString,            xstr,
 		    XmNtopAttachment,          XmATTACH_FORM,

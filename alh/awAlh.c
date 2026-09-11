@@ -477,7 +477,7 @@ static int startDrag (
 {
 
 Atom expList[1];
-int status, n;
+int n;
 Arg args[10];
 Widget dc;
 Widget icon;
@@ -485,7 +485,7 @@ Widget icon;
   /* attempt to put pv name into primary select buffer */
   if ( w ) {
     XtDisownSelection( w, XA_PRIMARY, CurrentTime );
-    status = XtOwnSelection( w, XA_PRIMARY, CurrentTime,
+    XtOwnSelection( w, XA_PRIMARY, CurrentTime,
      cvtSel, (XtLoseSelectionProc) 0, (XtSelectionDoneProc) 0 );
   }
 
@@ -516,11 +516,10 @@ static void drag (
 {
 
 struct anyLine *line;
-int stat;
 
   XtVaGetValues( w, XmNuserData, &line, NULL );
 
-  stat = startDrag( line, w, e );
+  startDrag( line, w, e );
 
 }
 
@@ -1226,7 +1225,8 @@ int type;
     if ( (fp=fopen(messBroadcastInfoFileName,"w")) == NULL )
       {
 	createDialog(ar->form_main,XmDIALOG_INFORMATION,"can't open ",messBroadcastInfoFileName);
-	lockf(messBroadcastDeskriptor, F_ULOCK, 0L);
+	if (lockf(messBroadcastDeskriptor, F_ULOCK, 0L) == -1)
+	    perror("Unable to release file lock");
 	return;
           }
 
@@ -1241,7 +1241,8 @@ int type;
     if( (blank=strchr(string,' ')) == NULL )
       {
 	createDialog(ar->form_main,XmDIALOG_INFORMATION,"Wrong format"," ");
-	lockf(messBroadcastDeskriptor, F_ULOCK, 0L);
+	if (lockf(messBroadcastDeskriptor, F_ULOCK, 0L) == -1)
+	    perror("Unable to release file lock");
 	return;
       }
     *blank=0;
@@ -1260,7 +1261,8 @@ int type;
     if( (notsave_time < 0) || (notsave_time > max_not_save_time) ) 
       {
 	createDialog(ar->form_main,XmDIALOG_INFORMATION,"time so big!!!"," ");
-	lockf(messBroadcastDeskriptor, F_ULOCK, 0L);
+	if (lockf(messBroadcastDeskriptor, F_ULOCK, 0L) == -1)
+	    perror("Unable to release file lock");
 	return;     
       }
 
@@ -1296,7 +1298,8 @@ static void messBroadcastFileUnlock()
     }
   if (fp) fclose (fp);
   amIsender=0;
-  lockf(messBroadcastDeskriptor, F_ULOCK, 0L);
+  if (lockf(messBroadcastDeskriptor, F_ULOCK, 0L) == -1)
+      perror("Unable to release file lock");
 }
 
 static void helpMessBroadcast(Widget w,XtPointer item,XtPointer cbs)
@@ -1335,7 +1338,8 @@ createDialog(XtParent(w),XmDIALOG_INFORMATION,
 static void cancelMessBroadcast(Widget w)
 {
 XtUnmanageChild(w);
- lockf(messBroadcastDeskriptor, F_ULOCK, 0L);
+ if (lockf(messBroadcastDeskriptor, F_ULOCK, 0L) == -1)
+     perror("Unable to release file lock");
 }
 
 #endif

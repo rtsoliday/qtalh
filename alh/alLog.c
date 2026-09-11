@@ -114,6 +114,31 @@ FILE *fl=0;       /* write alarm log file pointer */
 
 char buff[260];
 
+/* Log records have fixed-size buffers. Keep them terminated and report any
+ * loss of text instead of writing beyond the end of the buffer. */
+static void formatLogRecord(char *dest, size_t capacity, const char *fmt, ...)
+#ifdef EPICS_PRINTF_STYLE
+    EPICS_PRINTF_STYLE(3,4)
+#endif
+    ;
+
+static void formatLogRecord(char *dest, size_t capacity, const char *fmt, ...)
+{
+    va_list args;
+    int length;
+
+    va_start(args,fmt);
+    length = vsnprintf(dest,capacity,fmt,args);
+    va_end(args);
+    if (length < 0) {
+        dest[0] = '\0';
+        fprintf(stderr,"Unable to format ALH log record\n");
+    } else if ((size_t)length >= capacity) {
+        fprintf(stderr,"ALH log record truncated to %lu bytes\n",
+            (unsigned long)(capacity-1));
+    }
+}
+
 const char *digit2month[12]={"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug",
 		       "Sep","Oct","Nov","Dec"};
 
@@ -341,7 +366,7 @@ void alLogOpModAckMessage(int messageCode,GCLINK* gclink,const char* fmt,...)
     if (gclink) gcdata = gclink->pgcData;
 
     va_start(vargs,fmt);
-    vsprintf(text,fmt,vargs);
+    vsnprintf(text,sizeof(text),fmt,vargs);
     va_end(vargs);
 
     if(text[0] == '\0') sprintf(text," ");
@@ -364,13 +389,12 @@ void alLogOpModAckMessage(int messageCode,GCLINK* gclink,const char* fmt,...)
     }
 #endif
 	if (!alhArea || !alhArea->blinkString){
-		sprintf(buff," : : %s",text);
+		formatLogRecord(buff,sizeof(buff)," : : %s",text);
 	} else {
 		if (!gcdata){
-			sprintf(buff,"%s: : %s %-16s",alhArea->blinkString,text,
-				alhAlarmSeverityString[gcdata->curSevr]);
+			formatLogRecord(buff,sizeof(buff),"%s: : %s",alhArea->blinkString,text);
 		} else {
-			sprintf(buff,"%s: %s:  %s %-16s",alhArea->blinkString,gcdata->name,text,
+			formatLogRecord(buff,sizeof(buff),"%s: %s:  %s %-16s",alhArea->blinkString,gcdata->name,text,
 				alhAlarmSeverityString[gcdata->curSevr]);
 		}
 	}
@@ -444,11 +468,11 @@ Parameters: 1) filePointer
 static int filePrintf(int fileType,char *buf,time_t *ptime,int typeOfRecord)
 {
   int ret=0;
-  int status;
   static char bufSave[1024];
   static char DBbuff[1024];
   struct tm *tms;
   char buf_tmp[1024];
+  char dateSuffix[12];
   time_t timeofday;
 
   if(!fileType) return (-1);
@@ -469,12 +493,13 @@ static int filePrintf(int fileType,char *buf,time_t *ptime,int typeOfRecord)
     {
       if(tms->tm_mday != tm_day_old)
 	{
-	  sprintf(buf_tmp,".%.4d-%.2d-%.2d",
-		  1900+tms->tm_year,1+tms->tm_mon,tms->tm_mday);
-	  buf_tmp[11]=0;
+	  if (!strftime(dateSuffix,sizeof(dateSuffix),".%Y-%m-%d",tms) ||
+	      strlen(psetup.logFile) < 11 || strlen(psetup.opModFile) < 11) {
+	      errMsg("Unable to update dated log filenames\n");
+	      return -1;
+	  }
 	  
-	  psetup.logFile[strlen(psetup.logFile) - 11] = 0;
-	  strncat(psetup.logFile, buf_tmp, strlen(buf_tmp));
+	  memcpy(psetup.logFile+strlen(psetup.logFile)-11,dateSuffix,sizeof(dateSuffix));
 	  if (fl) fclose(fl);
 	  fl = fopen(psetup.logFile,"a");
 	  if (fl) fclose(fl);
@@ -484,8 +509,7 @@ static int filePrintf(int fileType,char *buf,time_t *ptime,int typeOfRecord)
 	  else fl = fopen(psetup.logFile,"r+");
 	  
 	  /* The same with psetup.opModFile: */
-	  psetup.opModFile[strlen(psetup.opModFile) - 11] = 0;
-	  strncat(psetup.opModFile, buf_tmp, strlen(buf_tmp));
+	  memcpy(psetup.opModFile+strlen(psetup.opModFile)-11,dateSuffix,sizeof(dateSuffix));
 	  if (fo) fclose(fo);
 	  fo = fopen(psetup.opModFile,"a");
 	  if (fo) fclose(fo);
@@ -505,7 +529,7 @@ static int filePrintf(int fileType,char *buf,time_t *ptime,int typeOfRecord)
         sprintf(buf_tmp,"<date>%-.2d-%-3s-%-.4d</date> <time>%-.2d:%-.2d:%-.2d</time>",
                 tms->tm_mday,digit2month[tms->tm_mon],1900+tms->tm_year,
                 tms->tm_hour,tms->tm_min,tms->tm_sec);
-        sprintf(bufSave,"<entry>%s %s</entry>\n",buf_tmp,buf);
+        formatLogRecord(bufSave,sizeof(bufSave),"<entry>%s %s</entry>\n",buf_tmp,buf);
     }
     else
     {
@@ -513,7 +537,7 @@ static int filePrintf(int fileType,char *buf,time_t *ptime,int typeOfRecord)
                 tms->tm_mday,digit2month[tms->tm_mon],1900+tms->tm_year,
                 tms->tm_hour,tms->tm_min,tms->tm_sec);
         buf_tmp[20]=0;
-        sprintf(bufSave,"%-20s : %s\n",buf_tmp,buf);
+        formatLogRecord(bufSave,sizeof(bufSave),"%-20s : %s\n",buf_tmp,buf);
     }
 
     /* Write into Alarm log file*/
@@ -525,7 +549,8 @@ static int filePrintf(int fileType,char *buf,time_t *ptime,int typeOfRecord)
 	      fseek(fl,alarmLogFileOffsetBytes,SEEK_SET);
 	    if (alarmLogFileOffsetBytes >= alarmLogFileStringLength*alarmLogFileMaxRecords) {
 	      rewind(fl);
-	      status=truncateFile(psetup.logFile,alarmLogFileOffsetBytes);
+	      if (truncateFile(psetup.logFile,alarmLogFileOffsetBytes) != 0)
+	          errMsg("Unable to truncate alarm log file %s\n",psetup.logFile);
 	      alarmLogFileOffsetBytes = 0;
 	    }
 	} 
@@ -558,7 +583,7 @@ static int filePrintf(int fileType,char *buf,time_t *ptime,int typeOfRecord)
   
 
     if( (_printer_flag) && (fileType==ALARM_FILE) &&printerMsgQId ) {
-      sprintf(DBbuff,"%d %d %s %s",ALARM_LOG_DB, typeOfRecord+1,buf_tmp,buff); 
+      formatLogRecord(DBbuff,sizeof(DBbuff),"%d %d %s %s",ALARM_LOG_DB, typeOfRecord+1,buf_tmp,buff);
 #ifdef HAVE_SYSV_IPC
       write2MQ(printerMsgQId, DBbuff);
 #endif
@@ -569,13 +594,13 @@ static int filePrintf(int fileType,char *buf,time_t *ptime,int typeOfRecord)
       if (fileType==OPMOD_FILE) /* write into AlarmOp Database */ 
 	{
 	  if(typeOfRecord ==0) return(ret);
-	  sprintf(DBbuff,"%d %d %s %s %s %s %s %s %s",OP_MOD_DB,typeOfRecord,applicationName,
+	  formatLogRecord(DBbuff,sizeof(DBbuff),"%d %d %s %s %s %s %s %s %s",OP_MOD_DB,typeOfRecord,applicationName,
 		  deviceName,userID.loginid,userID.myhostname,userID.displayName,buf_tmp,buff);
 	}
       else if (fileType==ALARM_FILE) /* write into AlarmLOG Database */ 
 	{
 	  if(typeOfRecord ==0) return(ret);
-	  sprintf(DBbuff,"%d %d %s %s %s %s %s %s %s", ALARM_LOG_DB, typeOfRecord,applicationName,
+	  formatLogRecord(DBbuff,sizeof(DBbuff),"%d %d %s %s %s %s %s %s %s", ALARM_LOG_DB, typeOfRecord,applicationName,
 		  deviceName,userID.loginid,userID.myhostname,userID.displayName,buf_tmp,buff);
 	}
       else 
@@ -643,7 +668,7 @@ static int write2MQ(int mq,char *message)
 		  tms->tm_hour,tms->tm_min,tms->tm_sec);
 	  sLast[20]=0;
 
-	  sprintf(buf,"%d %d %s %s %s %s %s %s MQ problem: MQ lost %d messages from=%s to=%s\n",
+	  formatLogRecord(buf,sizeof(buf),"%d %d %s %s %s %s %s %s MQ problem: MQ lost %d messages from=%s to=%s\n",
 		  ALARM_LOG_DB,MESSAGE_QUEUE_ALARM, applicationName,deviceName,
 		  userID.loginid,userID.myhostname,userID.displayName,buf_tmp,
 		  lostCount+1,sFirst,sLast);
