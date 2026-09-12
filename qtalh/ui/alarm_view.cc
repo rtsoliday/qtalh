@@ -1,6 +1,12 @@
 // Motif-style presentation only; alarm state remains in the item model.
 #include "alarm_view.h"
 #include <QHeaderView>
+#include <QApplication>
+#include <QClipboard>
+#include <QDrag>
+#include <QMouseEvent>
+#include <QMimeData>
+#include <QToolTip>
 #include <QPainter>
 #include <QScrollBar>
 #include <QStyledItemDelegate>
@@ -39,6 +45,12 @@ public:
 };
 QVariant field(const QModelIndex& row, int column, int role = Qt::DisplayRole) {
   return row.sibling(row.row(), column).data(role);
+}
+bool selectedRow(const QTreeView* view, const QModelIndex& row) {
+  const auto current = view->currentIndex();
+  // Names and action controls are painted in model columns hidden from QTreeView.
+  // A name click can select only that cell, so isRowSelected() misses the active target.
+  return current.isValid() && current.sibling(current.row(), 0) == row.sibling(row.row(), 0);
 }
 } // namespace
 QSize MotifButton::sizeHint() const {
@@ -120,7 +132,13 @@ AlarmView::AlarmView(bool isTree, QWidget* parent) : QTreeView(parent), tree(isT
   setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
   setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
   setExpandsOnDoubleClick(false);
-  setDragEnabled(true);
+  setDragEnabled(false); // Names use ALH's middle-button drag, independent of selection.
+  arrowTimer.setSingleShot(true);
+  connect(&arrowTimer, &QTimer::timeout, this, [this] {
+    const auto index = pendingArrow;
+    pendingArrow = QModelIndex();
+    if (index.isValid()) emit clicked(index);
+  });
   setFrameShape(QFrame::NoFrame);
   if (legacyAppearance()) {
     auto p = palette();
@@ -138,6 +156,9 @@ AlarmView::AlarmView(bool isTree, QWidget* parent) : QTreeView(parent), tree(isT
 void AlarmView::setModel(QAbstractItemModel* next) {
   if (next == model())
     return;
+  arrowTimer.stop();
+  pendingArrow = mouseTarget = dragTarget = QModelIndex();
+  hovered = pressed = QModelIndex();
   if (model())
     disconnect(model(), nullptr, this, nullptr);
   QTreeView::setModel(next);
@@ -270,8 +291,7 @@ void AlarmView::drawRow(QPainter* painter, const QStyleOptionViewItem& option,
       painter->setPen(light);
       painter->drawLine(arrow[0], arrow[1]);
     } else if (column == 0 || column == 2 || column == 4 || column == 5) {
-      bool selected = column == 2 && selectionModel() &&
-                      selectionModel()->isRowSelected(row.row(), row.parent());
+      const bool selected = column == 2 && selectedRow(this, row);
       bevel(painter, rect, color, selected);
       if (selected) {
         painter->setPen(Qt::black);
@@ -295,6 +315,105 @@ void AlarmView::drawRow(QPainter* painter, const QStyleOptionViewItem& option,
     }
   }
   painter->restore();
+}
+void AlarmView::mousePressEvent(QMouseEvent* event) {
+  const auto index = indexAt(event->pos());
+  if (event->button() == Qt::MiddleButton) {
+    QToolTip::hideText();
+    dragTarget = index.column() == 2 ? index : QModelIndex();
+    dragOrigin = event->pos();
+    if (dragTarget.isValid()) {
+      // X11 terminals paste PRIMARY with the middle button; Ctrl+V uses CLIPBOARD.
+      auto data = model()->mimeData({dragTarget});
+      auto clipboard = QApplication::clipboard();
+      clipboard->setText(data->text(), QClipboard::Clipboard);
+      if (clipboard->supportsSelection())
+        clipboard->setText(data->text(), QClipboard::Selection);
+      delete data;
+    }
+  } else if (event->button() == Qt::LeftButton) {
+    mouseTarget = index;
+    // Row controls act on their own target without moving the selected name.
+    if (index.isValid() && (index.column() == 2 || index.column() == 6 || index.column() == 7)) {
+      setFocus(Qt::MouseFocusReason);
+      setCurrentIndex(index);
+    }
+  }
+  event->accept();
+}
+void AlarmView::mouseReleaseEvent(QMouseEvent* event) {
+  if (event->button() == Qt::MiddleButton) dragTarget = QModelIndex();
+  if (event->button() == Qt::LeftButton) {
+    const auto index = mouseTarget;
+    mouseTarget = QModelIndex();
+    if (index.isValid() && index == indexAt(event->pos())) {
+      if (index.column() == 3) {
+        // Defer the toggle so a double-click only expands the branch.
+        if (pendingArrow.isValid() && pendingArrow != index) {
+          const auto previous = pendingArrow;
+          pendingArrow = QModelIndex();
+          emit clicked(previous);
+        }
+        pendingArrow = index;
+        arrowTimer.start(QApplication::doubleClickInterval());
+      } else {
+        emit clicked(index);
+      }
+    }
+  }
+  event->accept();
+}
+void AlarmView::mouseDoubleClickEvent(QMouseEvent* event) {
+  mouseTarget = QModelIndex(); // The following release must not repeat a single-click action.
+  if (event->button() == Qt::LeftButton) {
+    const auto index = indexAt(event->pos());
+    if (index.column() == 3 && pendingArrow == index) {
+      arrowTimer.stop();
+      pendingArrow = QModelIndex();
+    }
+    if (index.isValid() && (index.column() == 2 || index.column() == 3)) {
+      if (index.column() == 2) setCurrentIndex(index);
+      emit doubleClicked(index);
+    }
+  }
+  event->accept();
+}
+void AlarmView::mouseMoveEvent(QMouseEvent* event) {
+  if ((event->buttons() & Qt::MiddleButton) && dragTarget.isValid() &&
+      (event->pos() - dragOrigin).manhattanLength() >= QApplication::startDragDistance()) {
+    const auto index = dragTarget;
+    dragTarget = QModelIndex();
+    startNameDrag(index);
+  }
+  event->accept();
+}
+void AlarmView::startNameDrag(const QModelIndex& index) {
+  auto drag = new QDrag(this);
+  drag->setMimeData(model()->mimeData({index}));
+  // A drag pixmap follows the pointer across application boundaries and vanishes
+  // on drop/cancel. An ordinary tooltip would stay at its initial screen position.
+  const auto text = drag->mimeData()->text();
+  const auto hintFont = QToolTip::font();
+  const auto size = QFontMetrics(hintFont).size(Qt::TextSingleLine, text) + QSize(12, 8);
+  QPixmap preview(size * devicePixelRatioF());
+  preview.setDevicePixelRatio(devicePixelRatioF());
+  const auto colors = QToolTip::palette();
+  preview.fill(colors.color(QPalette::ToolTipBase));
+  {
+    QPainter painter(&preview);
+    painter.setFont(hintFont);
+    painter.setPen(colors.color(QPalette::ToolTipText));
+    painter.drawRect(QRect(QPoint(), size).adjusted(0, 0, -1, -1));
+    painter.drawText(QRect(QPoint(), size).adjusted(6, 4, -6, -4), Qt::AlignLeft | Qt::AlignVCenter, text);
+  }
+  drag->setPixmap(preview);
+  drag->setHotSpot(QPoint(-12, -18));
+  QToolTip::hideText();
+  executeNameDrag(drag);
+  drag->deleteLater();
+}
+void AlarmView::executeNameDrag(QDrag* drag) {
+  drag->exec(Qt::CopyAction);
 }
 bool AlarmView::event(QEvent* event) {
   bool result = QTreeView::event(event);
@@ -330,8 +449,7 @@ void AlarmView::drawStyledRow(QPainter* painter, const QStyleOptionViewItem& opt
                              const QModelIndex& row) const {
   painter->save();
   auto panel = option;
-  panel.state.setFlag(QStyle::State_Selected, selectionModel() &&
-      selectionModel()->isRowSelected(row.row(), row.parent()));
+  panel.state.setFlag(QStyle::State_Selected, selectedRow(this, row));
   painter->fillRect(option.rect, palette().base());
   style()->drawPrimitive(QStyle::PE_PanelItemViewItem, &panel, painter, this);
   const auto rectangles = cells(row, option.rect);
@@ -355,7 +473,8 @@ void AlarmView::drawStyledRow(QPainter* painter, const QStyleOptionViewItem& opt
       button.initFrom(this); button.rect = rect; button.text = text;
       button.fontMetrics = QFontMetrics(painter->font());
       button.state.setFlag(QStyle::State_MouseOver, hovered == index);
-      button.state.setFlag(QStyle::State_Sunken, pressed == index);
+      button.state.setFlag(QStyle::State_Sunken,
+                           pressed == index || (column == 2 && selectedRow(this, row)));
       button.state.setFlag(QStyle::State_HasFocus, hasFocus() && currentIndex() == index);
       style()->drawControl(QStyle::CE_PushButton, &button, painter, this);
       if (column == 0 && color.isValid()) {

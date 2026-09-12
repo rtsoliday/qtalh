@@ -1522,6 +1522,257 @@ private slots:
     QVERIFY(tree->isExpanded(a)); QVERIFY(tree->isExpanded(b)); QVERIFY(tree->isExpanded(x));
   }
 
+  void mouseNavigation_data() {
+    QTest::addColumn<bool>("editor");
+    QTest::newRow("runtime") << false;
+    QTest::newRow("editor") << true;
+  }
+  void mouseNavigation() {
+    QFETCH(bool, editor);
+    auto w = std::make_unique<Window>(parseConfig(
+        "GROUP NULL root\nGROUP root A\nGROUP A B\nGROUP B C\nCHANNEL C one\n"
+        "GROUP root X\nCHANNEL X two\n"), options(editor), false);
+    w->show(); QCoreApplication::processEvents();
+    auto tree = w->findChild<QTreeView*>("alarmTree");
+    auto group = w->findChild<QTreeView*>("groupContents");
+    const auto root = tree->model()->index(0, 0);
+    const auto a = tree->model()->index(0, 0, root);
+    const auto b = tree->model()->index(0, 0, a);
+    const auto c = tree->model()->index(0, 0, b);
+    auto doubleClick = [](QTreeView* view, QModelIndex index) {
+      const auto point = view->visualRect(index).center();
+      QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, point);
+      QTest::mouseDClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, point);
+      QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, point);
+    };
+    for (auto view : {tree, group}) {
+      tree->setCurrentIndex(root.sibling(0, 2));
+      for (bool expanded : {false, true}) {
+        tree->collapseAll(); tree->expand(root);
+        if (expanded) { tree->expand(a); tree->expand(b); }
+        QCoreApplication::processEvents();
+        const auto arrow = view == tree ? a.sibling(a.row(), 3) : group->model()->index(0, 3);
+        doubleClick(view, arrow);
+        QVERIFY(tree->isExpanded(a)); QVERIFY(tree->isExpanded(b));
+        QCOMPARE(tree->currentIndex(), root.sibling(0, 2));
+        QCOMPARE(group->model()->index(0, 2).data().toString(), QString("A"));
+        QTest::qWait(QApplication::doubleClickInterval() + 30);
+        QVERIFY(tree->isExpanded(a)); QVERIFY(tree->isExpanded(b));
+      }
+    }
+    doubleClick(group, group->model()->index(0, 2));
+    QCOMPARE(tree->currentIndex(), a.sibling(a.row(), 2));
+    QCOMPARE(group->model()->index(0, 2).data().toString(), QString("B"));
+    QVERIFY(!group->currentIndex().isValid());
+    for (auto action : w->findChildren<QAction*>())
+      if (action->text() == "Collapse Branch") action->trigger();
+    QVERIFY(!tree->isExpanded(a));
+    tree->expand(a); tree->expand(b); tree->setCurrentIndex(c.sibling(c.row(), 2));
+    doubleClick(group, group->model()->index(0, 2));
+    QVERIFY(!w->findChild<QDialog*>("propertiesDialog"));
+    QCOMPARE(group->currentIndex(), group->model()->index(0, 2));
+    for (int column : {0, 1, 6, 7, 8}) {
+      auto index = group->model()->index(0, column);
+      if (!group->visualRect(index).isEmpty()) doubleClick(group, index);
+      if (!(editor && column >= 6)) QVERIFY(!w->findChild<QDialog*>("propertiesDialog"));
+      QCOMPARE(group->model()->index(0, 2).data().toString(), QString("one"));
+    }
+  }
+  void rowButtonsPreserveSelection_data() {
+    QTest::addColumn<bool>("treePane");
+    QTest::newRow("tree") << true;
+    QTest::newRow("group") << false;
+  }
+  void rowButtonsPreserveSelection() {
+    QFETCH(bool, treePane);
+    auto d = parseConfig(treePane
+        ? "GROUP NULL root\nGROUP root first\nCHANNEL first one\nGROUP root second\n"
+          "$GUIDANCE\nSecond guidance\n$END\n$COMMAND First choice!unused-one!Second choice!unused-two\nCHANNEL second two\n"
+        : "GROUP NULL root\nCHANNEL root first\nCHANNEL root second\n"
+          "$GUIDANCE\nSecond guidance\n$END\n$COMMAND First choice!unused-one!Second choice!unused-two\n");
+    auto w = std::make_unique<Window>(d, options(false), false);
+    const auto nodes = w->document().channels();
+    for (auto node : nodes) w->alarmEngine().event(node, {3, 2, 2, 1, "12"});
+    w->show(); QCoreApplication::processEvents();
+    auto view = w->findChild<QTreeView*>(treePane ? "alarmTree" : "groupContents");
+    const auto parent = treePane ? view->model()->index(0, 0) : QModelIndex();
+    const auto first = view->model()->index(0, 2, parent);
+    view->setCurrentIndex(first);
+    for (auto action : w->findChildren<QAction*>())
+      if (action->text() == "Properties Window") action->trigger();
+    auto properties = w->findChild<QDialog*>("propertiesDialog"); QVERIFY(properties);
+    for (int column : {0, 4, 5}) {
+      const auto index = view->model()->index(1, column, parent);
+      const auto point = view->visualRect(index).center();
+      QCOMPARE(view->indexAt(point), index);
+      QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, point);
+      QTest::mouseDClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, point);
+      QTest::mouseRelease(view->viewport(), Qt::LeftButton, Qt::NoModifier, point);
+      QCoreApplication::processEvents();
+      QCOMPARE(view->currentIndex(), first);
+      QCOMPARE(properties->findChild<QLineEdit*>("propertyNAME")->text(), QString("first"));
+      if (column == 4) {
+        bool found = false;
+        for (auto dialog : w->findChildren<QDialog*>())
+          if (dialog->windowTitle() == "Guidance: second") {
+            QCOMPARE(dialog->findChild<QPlainTextEdit*>()->toPlainText(), QString("Second guidance"));
+            found = true; dialog->close();
+          }
+        QVERIFY(found);
+      }
+      if (column == 5) {
+        bool found = false;
+        for (auto menu : w->findChildren<QMenu*>())
+          if (menu->isVisible() && !menu->actions().isEmpty() && menu->actions().first()->text() == "First choice") {
+            found = true; menu->close();
+          }
+        QVERIFY(found);
+      }
+    }
+    QCOMPARE(w->alarmEngine().state(nodes[0]).unack, 2);
+    QCOMPARE(w->alarmEngine().state(nodes[1]).unack, 0);
+    for (auto action : w->findChildren<QAction*>())
+      if (action->text().contains("Acknowledge Alarm")) action->trigger();
+    QCOMPARE(w->alarmEngine().state(nodes[0]).unack, 0);
+  }
+  void middleButtonNameCopy_data() {
+    QTest::addColumn<bool>("treePane"); QTest::addColumn<int>("row");
+    QTest::newRow("left group") << true << 0;
+    QTest::newRow("right group") << false << 0;
+    QTest::newRow("channel") << false << 1;
+  }
+  void middleButtonNameCopy() {
+    QFETCH(bool, treePane); QFETCH(int, row);
+    auto d = parseConfig("GROUP NULL root\nGROUP root branch\nCHANNEL branch child\nCHANNEL root test:pv\n");
+    Engine engine(d); AlarmModel model(&d, &engine, treePane);
+    AlarmView view(treePane); view.setModel(&model); view.resize(800, 200); view.show();
+    QCoreApplication::processEvents();
+    auto clipboard = QApplication::clipboard();
+    clipboard->setText("previous clipboard");
+    if (clipboard->supportsSelection()) clipboard->setText("previous selection", QClipboard::Selection);
+    const auto index = model.index(row, 2);
+    const auto selected = view.currentIndex();
+    const auto expected = index.data().toString();
+    const auto point = view.visualRect(index).center();
+    QTest::mouseMove(view.viewport(), point);
+    QCOMPARE(clipboard->text(), QString("previous clipboard"));
+    QTest::mouseClick(view.viewport(), Qt::MiddleButton, Qt::NoModifier, point);
+    QCOMPARE(view.currentIndex(), selected);
+    QCOMPARE(clipboard->text(), expected);
+    if (clipboard->supportsSelection()) QCOMPARE(clipboard->text(QClipboard::Selection), expected);
+    // Non-name controls must leave the copied name alone.
+    QTest::mouseClick(view.viewport(), Qt::MiddleButton, Qt::NoModifier,
+                      view.visualRect(model.index(row, 0)).center());
+    QCOMPARE(clipboard->text(), expected);
+    view.hide(); // Copy remains available after leaving the source, without a drag/drop.
+    QPlainTextEdit destination; destination.show(); destination.setFocus();
+    QCoreApplication::processEvents();
+    destination.paste();
+    QCOMPARE(destination.toPlainText(), expected);
+    if (clipboard->supportsSelection()) {
+      destination.clear();
+      QTest::mouseClick(destination.viewport(), Qt::MiddleButton, Qt::NoModifier, QPoint(10, 10));
+      QTRY_COMPARE(destination.toPlainText(), expected);
+    }
+  }
+
+  void middleButtonNameDrag() {
+    class DragView : public AlarmView {
+    public:
+      DragView() : AlarmView(false) {}
+      QStringList dragged;
+      QPixmap preview;
+      void executeNameDrag(QDrag* drag) override {
+        dragged << drag->mimeData()->text();
+        preview = drag->pixmap();
+      }
+    };
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root first\nCHANNEL root second\n");
+    Engine engine(d); AlarmModel model(&d, &engine, false);
+    DragView view; view.setModel(&model); view.resize(800, 200); view.show();
+    QCoreApplication::processEvents();
+    const auto first = model.index(0, 2), second = model.index(1, 2);
+    view.setCurrentIndex(first);
+    auto drag = [&](QModelIndex index, Qt::MouseButton button) {
+      const auto point = view.visualRect(index).center();
+      QTest::mousePress(view.viewport(), button, Qt::NoModifier, point);
+      QMouseEvent move(QEvent::MouseMove, point + QPoint(QApplication::startDragDistance() + 2, 0),
+                       Qt::NoButton, button, Qt::NoModifier);
+      QApplication::sendEvent(view.viewport(), &move);
+      QTest::mouseRelease(view.viewport(), button, Qt::NoModifier, point);
+    };
+    drag(second, Qt::MiddleButton);
+    QCOMPARE(view.dragged, QStringList({"second"}));
+    QCOMPARE(QApplication::clipboard()->text(), QString("second"));
+    if (QApplication::clipboard()->supportsSelection())
+      QCOMPARE(QApplication::clipboard()->text(QClipboard::Selection), QString("second"));
+    QVERIFY(!view.preview.isNull());
+    QVERIFY(view.preview.width() >= QFontMetrics(QToolTip::font()).horizontalAdvance("second"));
+    QCOMPARE(view.currentIndex(), first);
+    drag(model.index(1, 0), Qt::MiddleButton);
+    QCOMPARE(view.dragged.size(), 1);
+    drag(second, Qt::LeftButton);
+    QCOMPARE(view.dragged.size(), 1);
+    QCOMPARE(view.currentIndex(), second);
+    QVERIFY(!second.data(Qt::ToolTipRole).toString().contains("middle mouse button"));
+    QVERIFY(model.flags(second) & Qt::ItemIsDragEnabled);
+    QVERIFY(!(model.flags(model.index(1, 0)) & Qt::ItemIsDragEnabled));
+    // A reset invalidates an armed drag or delayed arrow; no old node may be used.
+    QTest::mousePress(view.viewport(), Qt::MiddleButton, Qt::NoModifier, view.visualRect(second).center());
+    model.reset(&d, &engine);
+    QMouseEvent move(QEvent::MouseMove, QPoint(500, 100), Qt::NoButton, Qt::MiddleButton, Qt::NoModifier);
+    QApplication::sendEvent(view.viewport(), &move);
+    QCOMPARE(view.dragged.size(), 1);
+  }
+
+  void channelSelectionFeedback_data() {
+    QTest::addColumn<int>("filter");
+    QTest::newRow("all") << 0;
+    QTest::newRow("active") << 1;
+  }
+  void channelSelectionFeedback() {
+    QFETCH(int, filter);
+    auto opts = options(false); opts.filter = filter;
+    auto w = std::make_unique<Window>(parseConfig(
+        "GROUP NULL root\nCHANNEL root first\nCHANNEL root second\n"), opts, false);
+    auto& engine = w->alarmEngine(); const auto nodes = w->document().channels();
+    for (auto node : nodes) engine.event(node, {3, 2, 2, 1, "12"});
+    w->show();
+    auto view = w->findChild<QTreeView*>("groupContents");
+    QTRY_COMPARE(view->model()->rowCount(), 2);
+    QCoreApplication::processEvents();
+    auto clickName = [&](int row) {
+      const auto index = view->model()->index(row, 2);
+      QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier,
+                        view->visualRect(index).center());
+    };
+    auto checkBevel = [&](int row, bool down) {
+      if (!legacyAppearance()) return;
+      const auto image = view->viewport()->grab().toImage();
+      const auto rect = view->visualRect(view->model()->index(row, 2));
+      const auto point = (rect.topLeft() + QPoint(5, 0)) * image.devicePixelRatio();
+      QCOMPARE(image.pixelColor(point), QColor(down ? "#5f696d" : "#dde6e9"));
+    };
+    clickName(0); checkBevel(0, true); checkBevel(1, false);
+    QCOMPARE(engine.state(nodes[0]).unack, 2); QCOMPARE(engine.state(nodes[1]).unack, 2);
+    for (auto action : w->findChildren<QAction*>())
+      if (action->text() == "Properties Window") action->trigger();
+    auto properties = w->findChild<QDialog*>("propertiesDialog"); QVERIFY(properties);
+    QCOMPARE(properties->findChild<QLineEdit*>("propertyNAME")->text(), QString("first"));
+    checkBevel(0, true); // Opening another window must not remove the selection indicator.
+    clickName(1);
+    QTRY_COMPARE(properties->findChild<QLineEdit*>("propertyNAME")->text(), QString("second"));
+    checkBevel(0, false); checkBevel(1, true);
+    engine.event(nodes[1], {3, 2, 2, 1, "13"});
+    QTest::qWait(1200); checkBevel(1, true);
+    for (auto action : w->findChildren<QAction*>())
+      if (action->text().contains("Acknowledge Alarm")) action->trigger();
+    QCOMPARE(engine.state(nodes[0]).unack, 2); QCOMPARE(engine.state(nodes[1]).unack, 0);
+    QDir().mkpath(TEST_OUTPUT);
+    QVERIFY(w->grab().save(QString(TEST_OUTPUT) + (legacyAppearance()
+        ? "/classic-channel-selection.png" : "/fusion-channel-selection.png")));
+  }
+
   void filteredSelectionSurvivesUpdates() {
     auto o = options(false);
     o.filter = 1;
@@ -1578,7 +1829,7 @@ private slots:
     QCOMPARE(tree->indexAt(tree->visualRect(arrow).center()), arrow);
     QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier,
                       tree->visualRect(arrow).center());
-    QVERIFY(tree->isExpanded(gamma));
+    QTRY_VERIFY(tree->isExpanded(gamma));
     auto leaf = tree->model()->index(0, 0, gamma);
     QVERIFY(leaf.sibling(0, 3).data().toString().isEmpty());
     QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier,

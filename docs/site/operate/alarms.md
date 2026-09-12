@@ -21,8 +21,10 @@ For modern controls, add `-style fusion`. See [Appearance & font size](/operate/
 ## Navigate the hierarchy
 
 1. Select a group in the left tree to show its contents in the right pane.
-2. Select a channel to make it the target of an action.
-3. Double-click a group in the right pane to open its contents. The arrow control expands or collapses its branch in the tree.
+2. Left-click a channel name to make it the target of an action. Its name stays
+   visually pressed until another row is selected in that pane, including while
+   Properties is open and during alarm updates. Clicking the name does not acknowledge it.
+3. Double-click a group name in the right pane to open its contents and select that group in the left tree. Click an arrow to toggle one level; double-click it to expand the entire branch.
 4. Use the View expansion actions to open a level, a branch, or the whole hierarchy.
 
 The View actions operate on the selected group in the **left tree**, matching ALH:
@@ -33,6 +35,22 @@ The View actions operate on the selected group in the **left tree**, matching AL
 | Expand Branch | `*` | Opens the selected group and all of its descendant groups. |
 | Expand All | `Ctrl+*` | Opens all groups in the tree. |
 | Collapse Branch | `-` | Closes the selected group without closing its sibling branches. |
+
+Double-clicking a channel name selects it and updates open action dialogs. Open
+**Alarm Handler Properties…** from the right-click menu or **View → Properties Window**.
+Double-clicks on other cells do not open Properties or navigate to another group.
+The acknowledgement, **G**, and **P** buttons act on their own row and leave the
+selected name unchanged, so subsequent menu actions still use that selection.
+
+**Middle-click a group or channel name** to copy it without changing the selected
+row. Then middle-click in a Linux terminal to paste it, or use the terminal's
+**Ctrl+Shift+V** shortcut for the regular clipboard. QtALH sets both the regular
+clipboard and the middle-button paste selection on systems that support it.
+
+You can also hold the middle button and drag the name to a text field. A small
+label follows the pointer only during the drag and disappears when you drop or
+cancel. The copied name remains available for a later paste, even if you cancel
+the drag.
 
 The tree arrow uses the same one-level toggle. Selecting a channel in the right
 pane does not change which left-tree branch these View actions target.

@@ -134,8 +134,8 @@ private:
   void replace(Document, bool snapshot = true);
   void properties();
   void forceDialog();
-  void guidance();
-  void related();
+  void guidance(Node* target = nullptr);
+  void related(Node* target = nullptr);
   void masks(bool forced = false);
   void beepSeverity(bool global);
   void showText(const QString&, const QString&, bool fromFile = false);
@@ -145,6 +145,7 @@ private:
   void paste();
   void clearNode();
   void exitApplication();
+  QModelIndex treeIndex(Node*) const;
   void expandOneLevel(const QModelIndex&);
   void expandBranch(const QModelIndex&);
 };

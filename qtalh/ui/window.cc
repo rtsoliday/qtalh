@@ -227,8 +227,10 @@ QVariant AlarmModel::data(const QModelIndex& i, int role) const {
   return {};
 }
 Qt::ItemFlags AlarmModel::flags(const QModelIndex& i) const {
-  return i.isValid() ? Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsDragEnabled
-                     : Qt::NoItemFlags;
+  if (!i.isValid()) return Qt::NoItemFlags;
+  auto flags = Qt::ItemIsEnabled | Qt::ItemIsSelectable;
+  if (i.column() == 2) flags |= Qt::ItemIsDragEnabled;
+  return flags;
 }
 QStringList AlarmModel::mimeTypes() const {
   return {"text/plain"};
@@ -541,13 +543,25 @@ void Window::buildUi() {
   }
   connect(treeView, &QTreeView::clicked, this, [this](QModelIndex i) { click(i, treeModel); });
   connect(groupView, &QTreeView::clicked, this, [this](QModelIndex i) { click(i, groupModel); });
-  connect(groupView, &QTreeView::doubleClicked, this, [this](QModelIndex i) {
-    auto n = groupModel->node(i);
-    if (n && n->group)
-      select(n);
-    else
-      properties();
-  });
+  for (auto view : {treeView, groupView})
+    connect(view, &QTreeView::doubleClicked, this, [this, view](QModelIndex i) {
+      auto model = static_cast<AlarmModel*>(view->model());
+      auto n = model->node(i);
+      if (!n || !n->group) return;
+      const auto index = treeIndex(n);
+      if (!index.isValid()) return;
+      if (i.column() == 3) {
+        for (auto parent = index.parent(); parent.isValid(); parent = parent.parent())
+          treeView->expand(parent);
+        expandBranch(index);
+      } else if (i.column() == 2 && view == groupView) {
+        for (auto parent = index.parent(); parent.isValid(); parent = parent.parent())
+          treeView->expand(parent);
+        treeView->setCurrentIndex(index.sibling(index.row(), 2));
+        select(n);
+        treeView->scrollTo(index);
+      }
+    });
   connect(treeView->selectionModel(), &QItemSelectionModel::currentChanged, this,
           [this](QModelIndex i, QModelIndex) {
             auto n = treeModel->node(i);
@@ -858,8 +872,10 @@ void Window::click(const QModelIndex& i, AlarmModel* m) {
   auto n = m->node(i);
   if (!n)
     return;
-  selection = n;
-  scheduleDialogSync();
+  if (i.column() == 2 || i.column() == 6 || i.column() == 7) {
+    selection = n;
+    scheduleDialogSync();
+  }
   switch (i.column()) {
   case 0:
     engine->acknowledge(n);
@@ -870,16 +886,7 @@ void Window::click(const QModelIndex& i, AlarmModel* m) {
     break;
   case 3:
     if (n->group) {
-      std::function<QModelIndex(Node*)> locate = [&](Node* node) -> QModelIndex {
-        auto parent = node->parent ? locate(node->parent) : QModelIndex();
-        for (int row = 0; row < treeModel->rowCount(parent); ++row) {
-          auto index = treeModel->index(row, 0, parent);
-          if (treeModel->node(index) == node)
-            return index;
-        }
-        return {};
-      };
-      auto index = locate(n);
+      auto index = treeIndex(n);
       if (index.isValid()) {
         for (auto parent = index.parent(); parent.isValid(); parent = parent.parent())
           treeView->expand(parent);
@@ -888,10 +895,10 @@ void Window::click(const QModelIndex& i, AlarmModel* m) {
     }
     break;
   case 4:
-    guidance();
+    guidance(n);
     break;
   case 5:
-    related();
+    related(n);
     break;
   case 6:
     masks();
@@ -901,6 +908,15 @@ void Window::click(const QModelIndex& i, AlarmModel* m) {
     break;
   }
   refresh();
+}
+QModelIndex Window::treeIndex(Node* node) const {
+  const auto parent = node->parent ? treeIndex(node->parent) : QModelIndex();
+  if (node->parent && !parent.isValid()) return {};
+  for (int row = 0; row < treeModel->rowCount(parent); ++row) {
+    const auto index = treeModel->index(row, 0, parent);
+    if (treeModel->node(index) == node) return index;
+  }
+  return {};
 }
 void Window::expandOneLevel(const QModelIndex& i) {
   if (!i.isValid()) return;
@@ -1971,19 +1987,21 @@ void Window::beepSeverity(bool global) {
   sizeDialog(dialog, QSize(170, 178));
   finishSelectionDialog(dialog);
 }
-void Window::guidance() {
-  auto url = selection->option("GUIDANCE");
+void Window::guidance(Node* target) {
+  if (!target) target = selection;
+  auto url = target->option("GUIDANCE");
   if (!url.isEmpty()) {
     QUrl u =
         QUrl::fromUserInput(url, QFileInfo(doc.filename).absolutePath(), QUrl::AssumeLocalFile);
     if (!QDesktopServices::openUrl(u))
       error("Cannot open guidance: " + url);
   } else
-    showText("Guidance: " + selection->name,
-             selection->option("GUIDANCE_TEXT", "No guidance available."));
+    showText("Guidance: " + target->name,
+             target->option("GUIDANCE_TEXT", "No guidance available."));
 }
-void Window::related() {
-  auto text = selection->option("COMMAND");
+void Window::related(Node* target) {
+  if (!target) target = selection;
+  auto text = target->option("COMMAND");
   if (text.isEmpty())
     return;
   auto entries = relatedEntries(text);
