@@ -82,9 +82,9 @@ $(OBJ_DIR)/benchmark_cpu.exe: $(OBJECTS) $(OBJ_DIR)/tests/benchmark_cpu.obj
 benchmark-cpu: $(OBJ_DIR)/benchmark_cpu.exe
 	QT_QPA_PLATFORM=offscreen $< 10000 idle 10
 clean:
-	rm -rf O.$(OS)-$(ARCH)-qt5 O.$(OS)-$(ARCH)-qt6
+	$(PYTHON) -c "from pathlib import Path; import shutil; [shutil.rmtree(p) for p in (Path('O.$(OS)-$(ARCH)-qt5'), Path('O.$(OS)-$(ARCH)-qt6')) if p.exists()]"
 distclean: clean
-	rm -f $(BIN_DIR)/qtalh.exe
+	$(PYTHON) -c "from pathlib import Path; Path('$(BIN_DIR)/qtalh.exe').unlink(missing_ok=True)"
 FORCE:
 
 $(OBJ_DIR)/tests/test_visual.obj: $(OBJ_DIR)/test_visual.moc

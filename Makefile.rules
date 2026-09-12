@@ -1,9 +1,15 @@
 # Linux, macOS and Windows builds; override paths on the command line.
+ifneq ($(filter Windows Windows_NT,$(OS)),)
+OS := Windows
+ARCH := $(if $(filter AMD64 amd64,$(PROCESSOR_ARCHITECTURE)),x86_64,$(PROCESSOR_ARCHITECTURE))
+else
 OS := $(shell uname -s)
 ARCH := $(shell uname -m)
+endif
 ifneq ($(filter CYGWIN% MINGW% MSYS% Windows_NT,$(OS)),)
   OS := Windows
 endif
+PYTHON ?= $(if $(filter Windows,$(OS)),python,python3)
 RULES_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 OBJ_DIR = O.$(OS)-$(ARCH)
 BIN_DIR = ../bin/$(OS)-$(ARCH)

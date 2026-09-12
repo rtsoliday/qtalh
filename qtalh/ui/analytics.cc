@@ -1,5 +1,6 @@
 #include "dialogs.h"
 #include "window.h"
+#include <QTimeZone>
 #include <QtWidgets>
 #include <algorithm>
 namespace alh {
@@ -8,7 +9,8 @@ QString duration(qint64 ms) {
   return ms < 0 ? QString("—") : QString::number(ms / 1000.0, 'f', 1) + " s";
 }
 QString utc(qint64 time) {
-  return time ? QDateTime::fromMSecsSinceEpoch(time, Qt::UTC).toString(Qt::ISODate) : QString("—");
+  return time ? QDateTime::fromMSecsSinceEpoch(time, QTimeZone(0)).toUTC().toString(Qt::ISODate)
+              : QString("—");
 }
 QString quality(const AnalyticsChannel& c) {
   return c.ambiguous      ? "Ambiguous identity"

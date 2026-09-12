@@ -86,11 +86,11 @@ endif
 .PHONY: docs
 DOCS_BASE ?= /
 docs:
-	python3 scripts/build-docs.py --base "$(DOCS_BASE)"
+	$(PYTHON) scripts/build-docs.py --base "$(DOCS_BASE)"
 
 # Remove generated docs while preserving authored pages and original archives.
 .PHONY: docs-clean docs-distclean
 docs-clean:
-	python3 scripts/sync-docs.py --clean
+	$(PYTHON) scripts/sync-docs.py --clean
 docs-distclean:
-	python3 scripts/sync-docs.py --distclean
+	$(PYTHON) scripts/sync-docs.py --distclean

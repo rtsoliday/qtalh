@@ -205,6 +205,8 @@ installed EPICS or Qt development packages. At the repository root, cleanup also
 uses Python 3 to remove generated documentation; `distclean` additionally removes
 `docs/site/node_modules`. Authored documentation is preserved. Use `make docs-clean`
 or `make docs-distclean` to clean only the documentation.
+Windows cleanup uses `python` (other platforms use `python3`); override with
+`PYTHON=/path/to/python` if needed.
 
 The original extensions makefile is preserved as `alh/Makefile.epics`.
 CDEV and CMLOG are outside the Qt port's scope.

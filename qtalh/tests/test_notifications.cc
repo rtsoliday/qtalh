@@ -441,7 +441,7 @@ private slots:
     a.load();
     b.load();
     a.save(settings());
-    QVERIFY_EXCEPTION_THROWN(b.save(settings()), std::runtime_error);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error, b.save(settings()));
     auto loaded = b.load();
     QCOMPARE(loaded.subscriptions.size(), 1);
     b.save(loaded);
@@ -449,11 +449,11 @@ private slots:
     QVERIFY(f.open(QIODevice::WriteOnly));
     f.write("broken");
     f.close();
-    QVERIFY_EXCEPTION_THROWN(a.load(), std::runtime_error);
-    QVERIFY_EXCEPTION_THROWN(a.save(settings()), std::runtime_error);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error, a.load());
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error, a.save(settings()));
     QVERIFY(f.open(QIODevice::WriteOnly));
     f.close();
-    QVERIFY_EXCEPTION_THROWN(a.load(), std::runtime_error);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error, a.load());
   }
   void headerAndUrlSafety() {
     auto s = settings();
@@ -468,7 +468,7 @@ private slots:
     auto message = NotificationService::mailMessage(d, e);
     QVERIFY(!message.contains("\r\nBcc:"));
     d.sender += "\nBcc: bad";
-    QVERIFY_EXCEPTION_THROWN(NotificationService::mailMessage(d, e), std::runtime_error);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error, NotificationService::mailMessage(d, e));
     d = s.destinations[0];
     d.url = "http://example.invalid";
     QVERIFY(!NotificationService::validateWebhook(d).isEmpty());
@@ -745,7 +745,8 @@ int main(int argc, char** argv) {
   QCoreApplication app(argc, argv);
   if (app.arguments().value(1) == "--fake-mail") {
     QFile in, out;
-    in.open(stdin, QIODevice::ReadOnly);
+    if (!in.open(stdin, QIODevice::ReadOnly))
+      return 1;
     out.setFileName(app.arguments().value(2));
     if (!out.open(QIODevice::WriteOnly))
       return 1;

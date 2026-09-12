@@ -1302,7 +1302,7 @@ private slots:
     o.font = custom.toString();
     auto w = std::make_unique<Window>(sample(), o, false);
     w->showInitial();
-    auto view = w->findChild<AlarmView*>("groupContents");
+    auto view = w->findChild<QTreeView*>("groupContents");
     QVERIFY(view);
     QWidget* runtime = nullptr;
     for (auto widget : QApplication::topLevelWidgets())
@@ -1391,7 +1391,7 @@ private slots:
     auto d = parseConfig("GROUP NULL root\nCHANNEL root very_long_channel_name_for_geometry\n$GUIDANCE\nGuidance\n$END\n$COMMAND echo test\n");
     auto w = std::make_unique<Window>(d, options(false), false);
     w->show();
-    auto view = w->findChild<AlarmView*>("groupContents");
+    auto view = w->findChild<QTreeView*>("groupContents");
     QCoreApplication::processEvents();
     auto index = view->model()->index(0, 2);
     auto initial = view->visualRect(index);

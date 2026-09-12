@@ -1,5 +1,6 @@
 #include "notifications.h"
 #include <QDateTime>
+#include <QTimeZone>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -223,7 +224,7 @@ QByteArray notificationPayload(const NotificationEnvelope& e) {
         {"status", s.status},
         {"unacknowledgedSeverity", s.unack},
         {"observedAt",
-         QDateTime::fromMSecsSinceEpoch(s.observedAt, Qt::UTC).toString(Qt::ISODateWithMs)}});
+         QDateTime::fromMSecsSinceEpoch(s.observedAt, QTimeZone(0)).toUTC().toString(Qt::ISODateWithMs)}});
   }
   return QJsonDocument(
              QJsonObject{{"version", 1},

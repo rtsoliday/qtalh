@@ -1,5 +1,6 @@
 #include "analytics.h"
 #include <QDateTime>
+#include <QTimeZone>
 #include <QUuid>
 #include <algorithm>
 namespace alh {
@@ -53,7 +54,8 @@ void point(AnalyticsStats& s, const AnalyticsRecord& r) {
   s.incomplete += r.incomplete;
 }
 QString stamp(qint64 utc) {
-  return utc ? QDateTime::fromMSecsSinceEpoch(utc, Qt::UTC).toString(Qt::ISODateWithMs) : QString();
+  return utc ? QDateTime::fromMSecsSinceEpoch(utc, QTimeZone(0)).toUTC().toString(Qt::ISODateWithMs)
+             : QString();
 }
 QString number(qint64 ms) { return QString::number(ms / 1000.0, 'f', 3); }
 QString field(QString value) {
