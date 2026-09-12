@@ -7,8 +7,11 @@ They do not alter the ALH configuration file.
 
 ## Set up notifications
 
-1. Open **Setup → Notifications…** in a runtime window.
-2. In **Destinations**, add an email or webhook destination.
+1. Open **Setup → Notifications…** in a runtime window. With no destinations saved,
+   the dialog opens on **Destinations**; otherwise it opens on **Subscriptions**.
+2. In **Destinations**, add an email or webhook destination. If you choose
+   **Add subscription** before creating a destination, QtALH opens the destination
+   editor first and then continues to the subscription editor.
 3. In **Subscriptions**, add a subscription. Select the whole configuration or a
    group/channel, optionally narrow it with a PV wildcard, and check the match count.
 4. Set the minimum unacknowledged severity (default **MAJOR**), repeat suppression

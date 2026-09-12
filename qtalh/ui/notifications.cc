@@ -285,25 +285,38 @@ void Window::showNotifications() {
   auto rl = new QVBoxLayout(rulesPage);
   auto rules = new QListWidget;
   rules->setObjectName("notificationSubscriptions");
+  auto setupHint = new QLabel;
+  setupHint->setObjectName("notificationSetupHint");
+  setupHint->setWordWrap(true);
+  rl->addWidget(setupHint);
   rl->addWidget(rules);
   auto destinationsPage = new QWidget;
   auto dl = new QVBoxLayout(destinationsPage);
   auto destinations = new QListWidget;
   destinations->setObjectName("notificationDestinations");
+  auto destinationHint = new QLabel(
+      "First add an email or webhook destination, then create a subscription to choose "
+      "which alarms to send and when.");
+  destinationHint->setWordWrap(true);
+  dl->addWidget(destinationHint);
   dl->addWidget(destinations);
   auto activity = new QPlainTextEdit;
   activity->setObjectName("notificationActivity");
   activity->setReadOnly(true);
-  tabs->addTab(rulesPage, "Subscriptions");
   tabs->addTab(destinationsPage, "Destinations");
+  tabs->addTab(rulesPage, "Subscriptions");
   tabs->addTab(activity, "Activity");
   auto draft = std::make_shared<NotificationSettings>(notifications->policy.settings());
+  tabs->setCurrentWidget(draft->destinations.isEmpty() ? destinationsPage : rulesPage);
   auto dirty = std::make_shared<bool>(false);
   auto save = new QPushButton("Save and Apply");
   save->setObjectName("saveNotifications");
   auto test = new QPushButton("Send Test");
   test->setObjectName("testNotification");
   auto refresh = [=] {
+    setupHint->setText(draft->destinations.isEmpty()
+        ? "Add a destination first. Add subscription will guide you through creating one."
+        : "Add a subscription, then add a stage and check the destinations that should receive it.");
     rules->clear();
     for (const auto& r : draft->subscriptions)
       if (r.configuration == notificationConfiguration(doc.filename)) {
@@ -338,6 +351,15 @@ void Window::showNotifications() {
       QMessageBox::warning(dialog, "Subscription",
                            "Save the alarm configuration before adding subscriptions.");
       return;
+    }
+    if (add && draft->destinations.isEmpty()) {
+      NotificationDestination destination;
+      destination.id = notificationId();
+      if (!destinationEditor(dialog, destination))
+        return;
+      draft->destinations << destination;
+      *dirty = true;
+      refresh();
     }
     int at = -1;
     if (!add) {

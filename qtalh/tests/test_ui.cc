@@ -134,6 +134,47 @@ private slots:
     QVERIFY(reaction.elapsed()<1000);
   }
 
+  void notificationFirstRun() {
+    NotificationStore store; store.load(); store.save(NotificationSettings{});
+    QTemporaryDir dir;
+    auto document = sample(); document.filename = dir.filePath("alarms.alh");
+    auto w = std::make_unique<Window>(std::move(document), options(false), false);
+    for (auto action : w->findChildren<QAction*>())
+      if (action->text() == "Notifications...") action->trigger();
+    auto dialog = w->findChild<QDialog*>("notificationsDialog"); QVERIFY(dialog);
+    auto tabs = dialog->findChild<QTabWidget*>();
+    QCOMPARE(tabs->tabText(0), QString("Destinations"));
+    QCOMPARE(tabs->currentIndex(), 0);
+    tabs->setCurrentIndex(1);
+    auto add = dialog->findChild<QPushButton*>("addNotificationSubscription");
+    // Cancelling the prerequisite leaves no partial destination or subscription.
+    QTimer::singleShot(0, dialog, [dialog] {
+      auto editor = dialog->findChild<QDialog*>("notificationDestinationEditor");
+      QVERIFY(editor); editor->reject();
+    });
+    add->click();
+    QCOMPARE(dialog->findChild<QListWidget*>("notificationDestinations")->count(), 0);
+    QTimer::singleShot(0, dialog, [dialog] {
+      auto editor = dialog->findChild<QDialog*>("notificationDestinationEditor");
+      QVERIFY(editor);
+      editor->findChild<QLineEdit*>("destinationName")->setText("Operators");
+      editor->findChild<QComboBox*>()->setCurrentText("webhook");
+      editor->findChild<QLineEdit*>("webhookUrl")->setText("http://127.0.0.1:1/test");
+      QTimer::singleShot(0, dialog, [dialog] {
+        auto subscription = dialog->findChild<QDialog*>("notificationSubscriptionEditor");
+        QVERIFY(subscription); subscription->reject();
+      });
+      editor->accept();
+    });
+    add->click();
+    QCOMPARE(dialog->findChild<QListWidget*>("notificationDestinations")->count(), 1);
+    QCOMPARE(dialog->findChild<QListWidget*>("notificationSubscriptions")->count(), 0);
+    QVERIFY(!dialog->findChild<QLabel*>("notificationSetupHint")->text().contains("first"));
+    dialog->findChild<QPushButton*>("saveNotifications")->click();
+    QCOMPARE(store.load().destinations.size(), 1);
+    store.save(NotificationSettings{});
+  }
+
   void notificationWorkflow() {
     QTemporaryDir dir;
     auto document = sample(); document.filename = dir.filePath("alarms.alh");
@@ -174,7 +215,8 @@ private slots:
       editor->findChild<QLineEdit*>("subscriptionName")->setText("Updated subscription");
       editor->accept();
     });
-    auto page = dialog->findChild<QTabWidget*>()->widget(0);
+    auto page = dialog->findChild<QTabWidget*>()->currentWidget();
+    QVERIFY(page->isAncestorOf(rules));
     for (auto button : page->findChildren<QPushButton*>())
       if (button->text() == "Edit") button->click();
     QVERIFY(!dialog->findChild<QPushButton*>("testNotification")->isEnabled());
