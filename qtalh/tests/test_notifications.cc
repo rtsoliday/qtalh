@@ -726,7 +726,7 @@ private slots:
     QVERIFY(!engine.channelUpdate(n).initialized);
     engine.event(n, {3, 2, 2, 1, "v"});
     QCOMPARE(updates.last().unack, 2);
-    engine.shelve(n, 1, "test");
+    engine.shelve(n, 1, "test", "tester");
     QVERIFY(updates.last().suppressed);
     engine.unshelve(n);
     QVERIFY(!updates.last().suppressed);

@@ -353,13 +353,6 @@ void Window::showAnalytics() {
     table->sortByColumn(t == 1 ? 3 : 1, Qt::DescendingOrder);
     table->horizontalHeader()->setStretchLastSection(true);
     table->verticalHeader()->hide();
-    table->setColumnWidth(0, 280);
-    for (int col = 1; col < headers[t].size(); ++col) {
-      int width = table->fontMetrics().horizontalAdvance(headers[t][col]) + 28;
-      if (headers[t][col].contains("UTC"))
-        width = qMax(width, table->fontMetrics().horizontalAdvance("2023-11-14T22:13:20Z") + 16);
-      table->setColumnWidth(col, qMax(75, width));
-    }
     split->addWidget(table);
     auto plot = new AnalyticsPlot(t);
     plot->setObjectName("analyticsPlot" + QString::number(t));
@@ -414,15 +407,23 @@ void Window::showAnalytics() {
     coverage->setText(text);
     for (int t = 0; t < 4; ++t) {
       auto table = tables[t];
-      auto selectedId = table->currentIndex().data(Qt::UserRole).toString();
+      const auto selectedId = table->currentIndex().data(Qt::UserRole).toString();
+      const int selectedColumn = qMax(0, table->currentIndex().column());
+      const int horizontalPosition = table->horizontalScrollBar()->value();
+      const int verticalPosition = table->verticalScrollBar()->value();
       models[t]->replace(*report);
       for (int i = 0; i < table->model()->rowCount(); ++i)
         if (table->model()->index(i, 0).data(Qt::UserRole).toString() == selectedId) {
-          table->setCurrentIndex(table->model()->index(i, 0));
+          table->setCurrentIndex(table->model()->index(i, selectedColumn));
           break;
         }
       if (!table->currentIndex().isValid() && table->model()->rowCount())
         table->setCurrentIndex(table->model()->index(0, 0));
+      // Resetting the model and restoring selection can scroll the current cell into view.
+      // Complete the pending layout before restoring the operator's viewport.
+      table->doItemsLayout();
+      table->horizontalScrollBar()->setValue(horizontalPosition);
+      table->verticalScrollBar()->setValue(verticalPosition);
       plots[t]->report = *report;
       plots[t]->update();
     }
@@ -530,7 +531,23 @@ void Window::showAnalytics() {
   connect(timer, &QTimer::timeout, dialog, [=] { analytics->request(query()); });
   timer->start();
   analytics->request(query());
-  dialog->resize(1120, 800);
+  // Measure the actual header after it inherits the dialog's font and style.
+  // Reserve arrow space for every column so sorting never clips another title.
+  dialog->ensurePolished();
+  for (auto table : tables) {
+    auto header = table->horizontalHeader();
+    header->ensurePolished();
+    const int arrowSpace = header->style()->pixelMetric(QStyle::PM_HeaderMarkSize, nullptr, header) +
+        2 * header->style()->pixelMetric(QStyle::PM_HeaderMargin, nullptr, header);
+    for (int col = 0; col < table->model()->columnCount(); ++col) {
+      int width = header->sectionSizeHint(col) + arrowSpace;
+      const auto title = table->model()->headerData(col, Qt::Horizontal).toString();
+      if (title.contains("UTC"))
+        width = qMax(width, table->fontMetrics().horizontalAdvance("2023-11-14T22:13:20Z") + 16);
+      table->setColumnWidth(col, qMax(col == 0 ? 280 : 75, width));
+    }
+  }
+  dialog->resize(1220, 800);
   dialog->show();
 }
 } // namespace alh

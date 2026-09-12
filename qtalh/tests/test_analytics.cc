@@ -338,7 +338,7 @@ private slots:
     e.event(n, {22, 4, 0, -1, "0"});
     QCOMPARE(e.state(n).severity, 0); // Preserve the display's legacy alarm filter.
     QVERIFY(!e.channelUpdate(n).available);
-    e.shelve(n, 1, "outage");
+    e.shelve(n, 1, "outage", "tester");
     e.unshelve(n);
     QVERIFY(!e.channelUpdate(n).available);
     now = 10000;
@@ -388,7 +388,7 @@ private slots:
     QVERIFY(!report(a, 2500).rows[0].channel.available);
     QCOMPARE(report(a, 2500).rows[0].stats.observedMs, qint64(1000));
     // Other presentation operations cannot establish a monitoring baseline.
-    e.shelve(n, 1, "awaiting reconnect");
+    e.shelve(n, 1, "awaiting reconnect", "tester");
     e.unshelve(n);
     QVERIFY(!e.channelUpdate(n).available);
     now = 3000;

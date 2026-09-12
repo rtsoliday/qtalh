@@ -27,7 +27,7 @@ struct PvService {
 // Per-runtime suppression. Never serialized into the ALH configuration or written to PVs.
 struct Shelf {
   qint64 until = 0;
-  QString reason;
+  QString reason, username;
 };
 // Operator-facing aggregates; the original State fields still drive automation.
 struct Presentation {
@@ -113,8 +113,10 @@ public:
   static QString nodeIdentity(const Node*);
   ChannelUpdate channelUpdate(Node*) const;
   void restoreLocalAcknowledgements(const QHash<QString, int>&);
+  static constexpr int MaximumShelfMinutes = 365 * 24 * 60;
   // Group operations skip existing shelves; replacement is channel-only.
-  int shelve(Node*, int minutes, const QString& reason, bool replace = false);
+  static bool validShelfUsername(const QString&);
+  int shelve(Node*, int minutes, const QString& reason, const QString& username, bool replace = false);
   void unshelve(Node*);
   QVector<ShelfSnapshot> shelves() const;
   void restoreShelves(const QVector<ShelfSnapshot>&);

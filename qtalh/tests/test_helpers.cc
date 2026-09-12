@@ -328,10 +328,10 @@ private slots:
       Logging log(o, "root"); Engine engine(d); engine.now = [&] { return time; };
       engine.operation = [&](Node* n, const QString& text) { log.operation(n, text); };
       auto n = d.channels()[0];
-      engine.shelve(n, 1, "Investigating Ack Channel behavior");
-      engine.shelve(n, 2, "Investigating Ack Group behavior", true);
+      engine.shelve(n, 1, "Investigating Ack Channel behavior", "tester");
+      engine.shelve(n, 2, "Investigating Ack Group behavior", "tester", true);
       engine.unshelve(n);
-      engine.shelve(n, 1, "Maintenance complete");
+      engine.shelve(n, 1, "Maintenance complete", "tester");
       time += 60000; engine.tick();
       log.operation(n, "Notification Queued: Ack Group and Ack Channel subscription");
     };
@@ -343,6 +343,9 @@ private slots:
     QVERIFY(text.contains("Shelve /root/branch/pv until="));
     QVERIFY(text.contains("reason=Investigating Ack Channel behavior"));
     QVERIFY(text.contains("Change shelf /root/branch/pv until="));
+    QVERIFY(text.contains("username=tester"));
+    QVERIFY(text.contains("previous_username=tester"));
+    QVERIFY(text.contains("shelved_by=tester"));
     QVERIFY(text.contains("Unshelve /root/branch/pv until="));
     QVERIFY(text.contains("Shelf expired /root/branch/pv until="));
 #ifndef Q_OS_WIN

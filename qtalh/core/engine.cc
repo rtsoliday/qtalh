@@ -766,11 +766,19 @@ QString Engine::channelPath(const Node* n) {
   }
   return "/" + parts.join('/');
 }
-int Engine::shelve(Node* n, int minutes, const QString& reason, bool replace) {
+bool Engine::validShelfUsername(const QString& username) {
+  const auto text = username.trimmed();
+  return !text.isEmpty() && text.size() <= 120 &&
+      !text.contains(QRegularExpression("[\\s\\x{0000}-\\x{001f}\\x{007f}\\x{2028}\\x{2029}]"));
+}
+int Engine::shelve(Node* n, int minutes, const QString& reason, const QString& username, bool replace) {
+  const QString user = username.trimmed();
+  if (!validShelfUsername(user))
+    throw ParseError("Shelving requires a username (1–120 characters, without spaces or control characters).");
   const QString text = reason.trimmed();
-  if (minutes < 1 || minutes > 1440 || text.isEmpty() || text.size() > 240 ||
+  if (minutes < 1 || minutes > MaximumShelfMinutes || text.isEmpty() || text.size() > 240 ||
       text.contains(QRegularExpression("[\\r\\n\\x{2028}\\x{2029}]")))
-    throw ParseError("Shelving requires 1–1440 minutes and a single-line reason (1–240 characters).");
+    throw ParseError("Shelving requires a duration from 1 minute to 365 days and a single-line reason (1–240 characters).");
   if (!n || (replace && n->group)) throw ParseError("Select one channel to change its shelf.");
   state(n); // Validate ownership before traversing.
   const qint64 time = now();
@@ -783,12 +791,14 @@ int Engine::shelve(Node* n, int minutes, const QString& reason, bool replace) {
     if (s.shelf.until && s.shelf.until <= time) clearShelf(c, "Shelf expired");
     if (s.shelf.until && !replace) return;
     State before = s;
-    s.shelf = {time + duration, text};
+    s.shelf = {time + duration, text, user};
     updatePresentation(c, before);
     publish(c, before, ObservationCause::Suppression);
     noteDeadline(s.shelf.until);
     logOperation(c, QString(before.shelf.until ? "Change shelf " : "Shelve ") + channelPath(c) +
         " until=" + QDateTime::fromMSecsSinceEpoch(s.shelf.until).toString(Qt::ISODateWithMs) +
+        " username=" + user +
+        (before.shelf.until ? " previous_username=" + before.shelf.username : QString()) +
         " reason=" + text);
     ++count;
   });
@@ -804,7 +814,7 @@ void Engine::clearShelf(Node* n, const QString& action) {
   publish(n, before, ObservationCause::Suppression);
   logOperation(n, action + " " + channelPath(n) + " until=" +
       QDateTime::fromMSecsSinceEpoch(before.shelf.until).toString(Qt::ISODateWithMs) +
-      " reason=" + before.shelf.reason);
+      " shelved_by=" + before.shelf.username + " reason=" + before.shelf.reason);
   if (changed) changed();
 }
 void Engine::unshelve(Node* n) {
@@ -833,7 +843,7 @@ void Engine::restoreShelves(const QVector<ShelfSnapshot>& saved) {
       logOperation(document.root.get(), "Drop shelf on reload " + entry.path +
           " (missing or ambiguous identity) until=" +
           QDateTime::fromMSecsSinceEpoch(entry.shelf.until).toString(Qt::ISODateWithMs) +
-          " reason=" + entry.shelf.reason);
+          " shelved_by=" + entry.shelf.username + " reason=" + entry.shelf.reason);
       continue;
     }
     auto n = matches.front();

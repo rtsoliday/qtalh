@@ -152,11 +152,19 @@ void Window::showLogBrowser(bool alarm) {
 
 void Window::shelveDialog(Node* target, bool change) {
   if (options.editor || !target) return;
-  if (auto prior = findChild<QDialog*>("shelveDialog")) {
-    if (prior->isEnabled()) { prior->show(); prior->raise(); prior->activateWindow(); return; }
+  for (auto prior : findChildren<QDialog*>("shelveDialog")) {
+    if (!prior->isEnabled()) continue;
+    if (prior->property("shelfTargetNode").value<quintptr>() == reinterpret_cast<quintptr>(target) &&
+        prior->property("shelfChange").toBool() == change) {
+      prior->show(); prior->raise(); prior->activateWindow(); return;
+    }
+    prior->setEnabled(false);
+    prior->close();
   }
   auto dialog = new QDialog(this);
   dialog->setObjectName("shelveDialog");
+  dialog->setProperty("shelfTargetNode", QVariant::fromValue(reinterpret_cast<quintptr>(target)));
+  dialog->setProperty("shelfChange", change);
   dialog->setAttribute(Qt::WA_DeleteOnClose);
   dialog->setWindowTitle(change ? "Change Shelf" : "Shelve Alarms");
   auto layout = dialogColumn(dialog);
@@ -179,14 +187,24 @@ void Window::shelveDialog(Node* target, bool change) {
     duration->addItem(minutes < 60 ? QString("%1 minutes").arg(minutes) :
         QString("%1 hour%2").arg(minutes / 60).arg(minutes == 60 ? "" : "s"), minutes);
   duration->addItem("Custom minutes", 0);
+  duration->addItem("Custom hours", -60);
+  duration->addItem("Custom days", -1440);
   duration->setCurrentIndex(2);
   auto custom = new QSpinBox;
   custom->setObjectName("shelfCustomMinutes");
-  custom->setRange(1, 1440);
+  custom->setRange(1, Engine::MaximumShelfMinutes);
+  custom->setProperty("minutesPerUnit", 1);
+  custom->setSuffix(" minutes");
   custom->setValue(60);
   custom->setEnabled(false);
   form->addRow("Duration", duration);
-  form->addRow("Custom minutes", custom);
+  auto customLabel = new QLabel("Custom minutes");
+  form->addRow(customLabel, custom);
+  auto username = new QLineEdit;
+  username->setObjectName("shelfUsername");
+  username->setMaxLength(120);
+  username->setPlaceholderText("Enter your username");
+  form->addRow("Username (required)", username);
   auto reason = new QLineEdit;
   reason->setObjectName("shelfReason");
   reason->setMaxLength(240);
@@ -213,11 +231,24 @@ void Window::shelveDialog(Node* target, bool change) {
         QString("%1 channels to shelve; %2 existing shelves retained.").arg(available).arg(existing));
     const auto text = reason->text().trimmed();
     buttons->button(QDialogButtonBox::Ok)->setEnabled((change || available > 0) &&
+        Engine::validShelfUsername(username->text()) &&
         !text.isEmpty() && !text.contains(QRegularExpression("[\\r\\n\\x{2028}\\x{2029}]")));
   };
   connect(reason, &QLineEdit::textChanged, dialog, update);
+  connect(username, &QLineEdit::textChanged, dialog, update);
   connect(duration, QOverload<int>::of(&QComboBox::currentIndexChanged), dialog,
-          [=] { custom->setEnabled(duration->currentData().toInt() == 0); });
+          [=] {
+            const int value = duration->currentData().toInt();
+            custom->setEnabled(value <= 0);
+            if (value > 0) return;
+            const int unit = qMax(1, -value);
+            const int minutes = custom->value() * custom->property("minutesPerUnit").toInt();
+            custom->setRange(1, Engine::MaximumShelfMinutes / unit);
+            custom->setValue((minutes + unit - 1) / unit);
+            custom->setProperty("minutesPerUnit", unit);
+            custom->setSuffix(unit == 1440 ? " days" : unit == 60 ? " hours" : " minutes");
+            customLabel->setText(duration->currentText());
+          });
   auto timer = new QTimer(dialog);
   connect(timer, &QTimer::timeout, dialog, update);
   timer->start(1000);
@@ -225,8 +256,9 @@ void Window::shelveDialog(Node* target, bool change) {
   connect(buttons, &QDialogButtonBox::accepted, dialog, [=] {
     if (!dialog->isEnabled()) return;
     try {
-      engine->shelve(target, duration->currentData().toInt() ? duration->currentData().toInt() :
-          custom->value(), reason->text(), change);
+      const int value = duration->currentData().toInt();
+      const int minutes = value > 0 ? value : custom->value() * qMax(1, -value);
+      engine->shelve(target, minutes, reason->text(), username->text(), change);
       dialog->accept();
       refresh();
     } catch (const std::exception& e) { status->setText(e.what()); }
@@ -234,7 +266,7 @@ void Window::shelveDialog(Node* target, bool change) {
   update();
   sizeDialog(dialog, QSize(560, dialog->sizeHint().height()));
   dialog->show();
-  reason->setFocus();
+  username->setFocus();
 }
 void Window::showShelvedAlarms() {
   if (options.editor) return;
@@ -247,10 +279,10 @@ void Window::showShelvedAlarms() {
   dialog->setAttribute(Qt::WA_DeleteOnClose);
   dialog->setWindowTitle("Shelved Alarms — This Runtime");
   auto layout = dialogColumn(dialog);
-  auto table = new QTableWidget(0, 7);
+  auto table = new QTableWidget(0, 8);
   table->setObjectName("shelvedAlarmsTable");
   table->setHorizontalHeaderLabels({"Channel path", "Severity", "Unacknowledged", "Expires (local)",
-                                   "Remaining", "Reason", "Value"});
+                                   "Remaining", "Reason", "Value", "Username"});
   table->setSelectionBehavior(QAbstractItemView::SelectRows);
   table->setSelectionMode(QAbstractItemView::ExtendedSelection);
   table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -309,7 +341,7 @@ void Window::refreshShelfList() {
     const QString remaining = QString("%1:%2:%3").arg(seconds / 3600).arg((seconds / 60) % 60, 2, 10, QChar('0'))
         .arg(seconds % 60, 2, 10, QChar('0'));
     const QStringList values{Engine::channelPath(n), severityName(s.severity), severityName(s.unack),
-        QDateTime::fromMSecsSinceEpoch(s.shelf.until).toString(Qt::ISODate), remaining, s.shelf.reason, s.value};
+        QDateTime::fromMSecsSinceEpoch(s.shelf.until).toString(Qt::ISODate), remaining, s.shelf.reason, s.value, s.shelf.username};
     for (int col = 0; col < values.size(); ++col) {
       auto item = table->item(row, col);
       if (!item) { item = new QTableWidgetItem; table->setItem(row, col, item); }

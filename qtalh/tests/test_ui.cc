@@ -91,7 +91,7 @@ private slots:
       now += 100; engine.event(nodes[0], {0,0,0,1,"0"});
     }
     now += 1000; engine.event(nodes[1], {3,2,2,1,"20"});
-    engine.shelve(nodes[1],1,"Analytics screenshot");
+    engine.shelve(nodes[1],1,"Analytics screenshot", "tester");
     now += 2000;
     for (auto action:w->findChildren<QAction*>()) if(action->text()=="Alarm Analytics...") action->trigger();
     auto dialog=w->findChild<QDialog*>("analyticsDialog"); QVERIFY(dialog);
@@ -100,6 +100,18 @@ private slots:
     QTRY_COMPARE(table->model()->rowCount(),3);
     QCOMPARE(table->model()->index(0,1).data().toString(),QString("5"));
     QCOMPARE(dialog->findChild<QComboBox*>("analyticsRange")->currentIndex(),1);
+    // Every title must fit when its column becomes the sort column.
+    for (int t = 0; t < 4; ++t) {
+      tabs->setCurrentIndex(t); QCoreApplication::processEvents();
+      auto data = dialog->findChild<QTableView*>("analyticsTable" + QString::number(t));
+      auto header = data->horizontalHeader();
+      for (int col = 0; col < data->model()->columnCount(); ++col) {
+        data->sortByColumn(col, Qt::DescendingOrder);
+        QVERIFY2(data->columnWidth(col) >= header->sectionSizeHint(col),
+                 qPrintable(data->model()->headerData(col, Qt::Horizontal).toString()));
+      }
+      data->sortByColumn(t == 1 ? 3 : 1, Qt::DescendingOrder);
+    }
     QDir().mkpath(TEST_OUTPUT);
     for(int t=0;t<4;++t){tabs->setCurrentIndex(t);QCoreApplication::processEvents();
       QVERIFY(dialog->grab().save(QString(TEST_OUTPUT)+(legacyAppearance()?"/classic-analytics-":"/fusion-analytics-")+QString::number(t)+".png"));}
@@ -121,6 +133,52 @@ private slots:
     QCOMPARE(table->model()->index(0,1).data().toString(),QString("0"));
     auto editor=std::make_unique<Window>(sample(),options(true),false);QVERIFY(!editor->alarmAnalytics());
   }
+  void analyticsPreservesScrollOnRefresh() {
+    QString config = "GROUP NULL scroll\n";
+    for (int i = 0; i < 100; ++i) config += QString("CHANNEL scroll pv%1\n").arg(i);
+    auto w = std::make_unique<Window>(parseConfig(config), options(false), false);
+    w->show();
+    auto service = w->alarmAnalytics();
+    qint64 now = 0;
+    service->monotonicNow = [&] { return now; };
+    service->utcNow = [&] { return 1700000000000LL + now; };
+    service->reset();
+    for (auto channel : w->document().channels()) {
+      w->alarmEngine().event(channel, {0, 0, 0, 1, "0"});
+      w->alarmEngine().event(channel, {3, 2, 2, 1, "12"});
+    }
+    for (auto action : w->findChildren<QAction*>())
+      if (action->text() == "Alarm Analytics...") action->trigger();
+    auto dialog = w->findChild<QDialog*>("analyticsDialog"); QVERIFY(dialog);
+    auto tabs = dialog->findChild<QTabWidget*>("analyticsTabs");
+    for (int tab = 0; tab < 4; ++tab) {
+      tabs->setCurrentIndex(tab);
+      auto table = dialog->findChild<QTableView*>("analyticsTable" + QString::number(tab));
+      QTRY_COMPARE(table->model()->rowCount(), 100);
+      table->setColumnWidth(0, 1000);
+      table->setCurrentIndex(table->model()->index(50, 2));
+      table->doItemsLayout();
+      auto horizontal = table->horizontalScrollBar();
+      auto vertical = table->verticalScrollBar();
+      QVERIFY(horizontal->maximum() > 0); QVERIFY(vertical->maximum() > 0);
+      horizontal->setValue(qMax(1, horizontal->maximum() / 2));
+      vertical->setValue(qMax(1, vertical->maximum() / 2));
+      const int x = horizontal->value(), y = vertical->value();
+      const auto selected = table->currentIndex().data(Qt::UserRole).toString();
+      QSignalSpy refreshed(table->model(), &QAbstractItemModel::modelReset);
+      for (int round = 0; round < 2; ++round) {
+        const int prior = refreshed.count();
+        now += 1000;
+        QTRY_VERIFY(refreshed.count() > prior);
+        QCoreApplication::processEvents();
+        QCOMPARE(horizontal->value(), x); QCOMPARE(vertical->value(), y);
+        QCOMPARE(table->currentIndex().column(), 2);
+        QCOMPARE(table->currentIndex().data(Qt::UserRole).toString(), selected);
+        QCOMPARE(table->columnWidth(0), 1000);
+      }
+    }
+  }
+
   void analyticsLargeDashboard() {
     QString config="GROUP NULL large\n"; for(int i=0;i<10000;++i)config+=QString("CHANNEL large pv%1\n").arg(i);
     auto w=std::make_unique<Window>(parseConfig(config),options(false),false);
@@ -200,6 +258,9 @@ private slots:
     auto dialog = open(w.get()); QVERIFY(dialog);
     auto enable = dialog->findChild<QCheckBox*>("notificationsEnabled");
     QVERIFY(enable); QVERIFY(!enable->isChecked());
+    auto notificationIndicator = w->findChild<QLabel*>("notificationsEnabledStatus");
+    QVERIFY(notificationIndicator); QVERIFY(!notificationIndicator->isHidden());
+    QCOMPARE(notificationIndicator->text(), QString("Notifications Enabled: NO"));
     auto rules = dialog->findChild<QListWidget*>("notificationSubscriptions");
     auto destinations = dialog->findChild<QListWidget*>("notificationDestinations");
     QCOMPARE(rules->count(), 1); QCOMPARE(destinations->count(), 1);
@@ -223,6 +284,10 @@ private slots:
     dialog->findChild<QPushButton*>("saveNotifications")->click();
     QCOMPARE(store.load().subscriptions.first().name, QString("Updated subscription"));
     enable->setChecked(true);
+    QTRY_COMPARE(notificationIndicator->text(), QString("Notifications Enabled: YES"));
+    enable->setChecked(false);
+    QTRY_COMPARE(notificationIndicator->text(), QString("Notifications Enabled: NO"));
+    enable->setChecked(true);
     QTest::qWait(550);
     QVERIFY(dialog->findChild<QLabel*>("notificationStatus")->text().contains("enabled"));
     QDir().mkpath(TEST_OUTPUT);
@@ -232,12 +297,145 @@ private slots:
     auto fresh = std::make_unique<Window>(std::move(freshDocument), options(false), false);
     auto freshDialog = open(fresh.get()); QVERIFY(freshDialog);
     QVERIFY(!freshDialog->findChild<QCheckBox*>("notificationsEnabled")->isChecked());
+    auto unrelatedDocument = sample(); unrelatedDocument.filename = dir.filePath("other.alh");
+    auto unrelated = std::make_unique<Window>(std::move(unrelatedDocument), options(false), false);
+    QVERIFY(unrelated->findChild<QLabel*>("notificationsEnabledStatus")->isHidden());
     store.save(NotificationSettings{});
+    dialog->findChild<QPushButton*>("reloadNotifications")->click();
+    QTRY_VERIFY(notificationIndicator->isHidden());
   }
   void notificationsUnavailableInEditor() {
     auto w = std::make_unique<Window>(sample(), options(true), false);
+    QVERIFY(w->findChild<QLabel*>("notificationsEnabledStatus")->isHidden());
     for (auto action : w->findChildren<QAction*>())
       QVERIFY(action->text() != "Notifications...");
+  }
+
+  void shelvingContextMenu() {
+    auto w = std::make_unique<Window>(parseConfig(
+        "GROUP NULL root\nCHANNEL root one\nCHANNEL root two\n"
+        "GROUP root section\nCHANNEL section three\nCHANNEL section four\n"), options(false), false);
+    w->show();
+    auto& engine = w->alarmEngine();
+    const auto channels = w->document().channels();
+    for (auto n : channels) engine.event(n, {3, 2, 2, 1, "12"});
+    auto tree = w->findChild<QTreeView*>("alarmTree");
+    auto contents = w->findChild<QTreeView*>("groupContents");
+    QCoreApplication::processEvents();
+    auto openMenu = [](QTreeView* view, const QModelIndex& index) {
+      const auto point = view->visualRect(index).center();
+      QTest::mouseClick(view->viewport(), Qt::RightButton, Qt::NoModifier, point);
+      QContextMenuEvent context(QContextMenuEvent::Mouse, point, view->viewport()->mapToGlobal(point));
+      QApplication::sendEvent(view->viewport(), &context);
+      return view->findChild<QMenu*>("alarmContextMenu");
+    };
+    contents->setCurrentIndex(contents->model()->index(2, 2));
+    // Right-clicking even the acknowledgement cell must not acknowledge the alarm.
+    auto menu = openMenu(contents, contents->model()->index(1, 0)); QVERIFY(menu);
+    QCOMPARE(engine.state(channels[0]).unack, 2);
+    auto action = menu->findChild<QAction*>("shelveContextTarget"); QVERIFY(action);
+    QCOMPARE(action->text(), QString("Shelve this channel..."));
+    QCOMPARE(menu->actions().size(), 2);
+    auto detailsAction = menu->actions()[1];
+    QCOMPARE(detailsAction->text(), QString("Alarm Handler Properties..."));
+    detailsAction->trigger();
+    auto properties = w->findChild<QDialog*>("propertiesDialog"); QVERIFY(properties);
+    QCOMPARE(properties->windowTitle(), QString("Alarm Handler Properties"));
+    QCOMPARE(properties->findChild<QLineEdit*>("propertyNAME")->text(), QString("one"));
+    properties->close();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    menu = openMenu(contents, contents->model()->index(1, 0)); QVERIFY(menu);
+    menu->findChild<QAction*>("shelveContextTarget")->trigger(); menu->close();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QPointer<QDialog> first = w->findChild<QDialog*>("shelveDialog"); QVERIFY(first);
+    QCOMPARE(first->findChild<QLabel*>("shelfTarget")->text(), QString("/root/one"));
+    contents->setCurrentIndex(contents->model()->index(2, 2));
+    QCOMPARE(first->findChild<QLabel*>("shelfTarget")->text(), QString("/root/one"));
+    menu = openMenu(contents, contents->model()->index(2, 2)); QVERIFY(menu);
+    menu->findChild<QAction*>("shelveContextTarget")->trigger(); menu->close();
+    QVERIFY(!first || !first->isEnabled());
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    auto dialog = w->findChild<QDialog*>("shelveDialog"); QVERIFY(dialog);
+    QCOMPARE(dialog->findChild<QLabel*>("shelfTarget")->text(), QString("/root/two"));
+    dialog->findChild<QLineEdit*>("shelfUsername")->setText("ui_tester");
+    dialog->findChild<QLineEdit*>("shelfReason")->setText("Right-click channel");
+    dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->click();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QCOMPARE(engine.state(channels[0]).shelf.until, qint64(0));
+    QVERIFY(engine.state(channels[1]).shelf.until > engine.now());
+    menu = openMenu(contents, contents->model()->index(0, 2)); QVERIFY(menu);
+    action = menu->findChild<QAction*>("shelveContextTarget");
+    QCOMPARE(action->text(), QString("Shelve this group..."));
+    menu->actions()[1]->trigger();
+    properties = w->findChild<QDialog*>("propertiesDialog"); QVERIFY(properties);
+    QCOMPARE(properties->findChild<QLineEdit*>("propertyNAME")->text(), QString("section"));
+    properties->close();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier,
+                      tree->visualRect(tree->model()->index(0, 2)).center());
+    menu = openMenu(contents, contents->model()->index(0, 2)); QVERIFY(menu);
+    menu->findChild<QAction*>("shelveContextTarget")->trigger(); menu->close();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    dialog = w->findChild<QDialog*>("shelveDialog"); QVERIFY(dialog);
+    QCOMPARE(dialog->findChild<QLabel*>("shelfTarget")->text(), QString("/root/section"));
+    QVERIFY(dialog->findChild<QLabel*>("shelfScope")->text().contains("2 channels"));
+    dialog->findChild<QLineEdit*>("shelfUsername")->setText("ui_tester");
+    dialog->findChild<QLineEdit*>("shelfReason")->setText("Right-click group");
+    dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->click();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    for (int i : {2, 3}) QVERIFY(engine.state(channels[i]).shelf.until > engine.now());
+    QCOMPARE(engine.state(channels[0]).shelf.until, qint64(0));
+    menu = openMenu(tree, tree->model()->index(0, 2)); QVERIFY(menu);
+    QPointer<QAction> stale = menu->findChild<QAction*>("shelveContextTarget");
+    QPointer<QAction> staleProperties = menu->findChild<QAction*>("propertiesContextTarget");
+    static_cast<AlarmModel*>(tree->model())->reset(&w->document(), &engine);
+    if (stale) stale->trigger();
+    if (staleProperties) staleProperties->trigger();
+    QVERIFY(!w->findChild<QDialog*>("shelveDialog"));
+    QVERIFY(!w->findChild<QDialog*>("propertiesDialog"));
+    auto editor = std::make_unique<Window>(sample(), options(true), false);
+    QVERIFY(editor->findChild<QTreeView*>("alarmTree")->contextMenuPolicy() != Qt::CustomContextMenu);
+  }
+
+  void shelvingCustomUnits_data() {
+    QTest::addColumn<QString>("choice");
+    QTest::addColumn<int>("amount");
+    QTest::addColumn<int>("minutes");
+    QTest::newRow("minutes") << "Custom minutes" << 90 << 90;
+    QTest::newRow("hours") << "Custom hours" << 36 << 2160;
+    QTest::newRow("days") << "Custom days" << 2 << 2880;
+    QTest::newRow("maximum-days") << "Custom days" << 365 << 525600;
+  }
+  void shelvingCustomUnits() {
+    QFETCH(QString, choice); QFETCH(int, amount); QFETCH(int, minutes);
+    auto w = std::make_unique<Window>(sample(), options(false), false);
+    auto& engine = w->alarmEngine();
+    const qint64 now = 1700000000000LL; engine.now = [=] { return now; };
+    for (auto action : w->findChildren<QAction*>())
+      if (action->text() == "Shelve Alarms...") action->trigger();
+    auto dialog = w->findChild<QDialog*>("shelveDialog"); QVERIFY(dialog);
+    auto duration = dialog->findChild<QComboBox*>("shelfDuration");
+    auto custom = dialog->findChild<QSpinBox*>("shelfCustomMinutes");
+    duration->setCurrentText(choice);
+    QVERIFY(custom->isEnabled());
+    custom->setValue(amount);
+    if (choice == "Custom hours") {
+      duration->setCurrentText("Custom minutes"); QCOMPARE(custom->value(), minutes);
+      duration->setCurrentText(choice); QCOMPARE(custom->value(), amount);
+    }
+    dialog->findChild<QLineEdit*>("shelfUsername")->setText("ui_tester");
+    dialog->findChild<QLineEdit*>("shelfReason")->setText("Custom duration");
+    dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->click();
+    for (auto n : w->document().channels())
+      QCOMPARE(engine.state(n).shelf.until, now + qint64(minutes) * 60000);
+    auto shelfList = [&] {
+      for (auto action : w->findChildren<QAction*>())
+        if (action->text() == "Shelved Alarms...") action->trigger();
+      return w->findChild<QDialog*>("shelvedAlarmsDialog");
+    }();
+    QVERIFY(shelfList);
+    auto table = shelfList->findChild<QTableWidget*>("shelvedAlarmsTable");
+    QCOMPARE(table->rowCount(), w->document().channels().size());
   }
 
   void shelvingWorkflow() {
@@ -248,7 +446,7 @@ private slots:
     qint64 time = startTime; e.now = [&] { return time; };
     const auto channels = w->document().channels();
     for (auto n : channels) e.event(n, {3, 2, 2, 1, "99"});
-    e.shelve(channels[0], 15, "Individual maintenance");
+    e.shelve(channels[0], 15, "Individual maintenance", "tester");
     QAction *shelve = nullptr, *list = nullptr;
     for (auto a : w->findChildren<QAction*>()) {
       if (a->text() == "Shelve Alarms...") shelve = a;
@@ -257,13 +455,18 @@ private slots:
     QVERIFY(shelve && list); shelve->trigger();
     auto dialog = w->findChild<QDialog*>("shelveDialog"); QVERIFY(dialog);
     auto reason = dialog->findChild<QLineEdit*>("shelfReason");
+    auto username = dialog->findChild<QLineEdit*>("shelfUsername");
+    QVERIFY(username); QVERIFY(username->text().isEmpty());
     auto duration = dialog->findChild<QComboBox*>("shelfDuration");
     auto custom = dialog->findChild<QSpinBox*>("shelfCustomMinutes");
     auto apply = dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok);
     QVERIFY(!apply->isEnabled()); QCOMPARE(duration->currentData().toInt(), 60);
     QVERIFY(dialog->findChild<QLabel*>("shelfScope")->text().contains("2 channels"));
     reason->setText("  "); QVERIFY(!apply->isEnabled());
-    reason->setText("Vacuum maintenance"); QVERIFY(apply->isEnabled());
+    reason->setText("Vacuum maintenance"); QVERIFY(!apply->isEnabled());
+    username->setText("  "); QVERIFY(!apply->isEnabled());
+    username->setText("two names"); QVERIFY(!apply->isEnabled());
+    username->setText("  operator_one  "); QVERIFY(apply->isEnabled());
     duration->setCurrentIndex(5); QVERIFY(custom->isEnabled()); custom->setValue(2);
     auto tree = w->findChild<QTreeView*>("alarmTree");
     tree->setCurrentIndex(tree->model()->index(0, 0, tree->model()->index(0, 0)));
@@ -283,14 +486,20 @@ private slots:
     QCOMPARE(table->rowCount(), 3);
     QCOMPARE(table->item(0, 0)->text(), QString("/BOOSTER/Power_Supplies/test:power"));
     QCOMPARE(table->item(0, 5)->text(), QString("Individual maintenance"));
+    QCOMPARE(table->item(0, 7)->text(), QString("tester"));
+    QCOMPARE(e.state(channels[1]).shelf.username, QString("operator_one"));
     QVERIFY(browser->grab().save(QString(TEST_OUTPUT) + name + "-shelved-list.png"));
     table->selectRow(0); browser->findChild<QPushButton*>("changeShelf")->click();
     dialog = w->findChild<QDialog*>("shelveDialog"); QVERIFY(dialog);
     QCOMPARE(dialog->findChild<QLineEdit*>("shelfReason")->text(), QString("Individual maintenance"));
+    QVERIFY(dialog->findChild<QLineEdit*>("shelfUsername")->text().isEmpty());
+    QVERIFY(!dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->isEnabled());
+    dialog->findChild<QLineEdit*>("shelfUsername")->setText("ui_tester");
     dialog->findChild<QLineEdit*>("shelfReason")->setText("Extended maintenance");
     dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->click();
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     QCOMPARE(e.state(channels[0]).shelf.until, startTime + 3600000);
+    QCOMPARE(e.state(channels[0]).shelf.username, QString("ui_tester"));
     const auto remaining = table->item(0, 4)->text();
     time += 1000;
     QTRY_VERIFY(table->item(0, 4)->text() != remaining);
@@ -307,7 +516,7 @@ private slots:
     for (auto n : d.channels()) e.event(n, {});
     auto n = d.channels()[0]; e.event(n, {3, 2, 2, 1, "99"});
     AlarmModel tree(&d, &e, true), group(&d, &e, false); group.setGroup(n->parent);
-    e.shelve(n, 1, "check filters");
+    e.shelve(n, 1, "check filters", "tester");
     for (int filter : {1, 2}) {
       tree.setFilter(filter); group.setFilter(filter);
       QCOMPARE(tree.rowCount(), 0); QCOMPARE(group.rowCount(), 0);
@@ -333,7 +542,7 @@ private slots:
     auto w = std::make_unique<Window>(d, o, false);
     auto old = w->document().channels()[0];
     w->alarmEngine().event(old, {3, 2, 2, 1, "99"}); w->alarmEngine().event(old, {});
-    w->alarmEngine().shelve(old, 60, "Preserve across reload");
+    w->alarmEngine().shelve(old, 60, "Preserve across reload", "tester");
     const auto deadline = w->alarmEngine().state(old).shelf.until;
     const auto copy = dir.filePath("saved"); w->saveTo(copy);
     QCOMPARE(w->alarmEngine().state(old).shelf.until, deadline);
@@ -347,6 +556,7 @@ private slots:
     auto n = w->document().channels()[2]; QCOMPARE(n->name, QString("one"));
     QCOMPARE(w->alarmEngine().state(n).shelf.until, deadline);
     QCOMPARE(w->alarmEngine().state(n).shelf.reason, QString("Preserve across reload"));
+    QCOMPARE(w->alarmEngine().state(n).shelf.username, QString("tester"));
     w->alarmEngine().event(n, {});
     QCOMPARE(w->alarmEngine().state(n).unack, 2);
     QCOMPARE(w->alarmEngine().state(w->document().channels()[1]).shelf.until, qint64(0));
@@ -423,7 +633,7 @@ private slots:
     auto w = std::make_unique<Window>(d, o, false);
     auto n = w->document().channels()[0];
     w->alarmEngine().event(n, {3, 2, 2, 1, "99"});
-    w->alarmEngine().shelve(n, 60, "Preserve after failed reload");
+    w->alarmEngine().shelve(n, 60, "Preserve after failed reload", "tester");
     const auto deadline = w->alarmEngine().state(n).shelf.until;
     QFile file(o.config);
     QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
@@ -1261,6 +1471,57 @@ private slots:
       QCOMPARE(e.state(n).noAckUntil, qint64(0));
     }
   }
+  void expandViewActions_data() {
+    QTest::addColumn<bool>("editor"); QTest::addColumn<int>("column");
+    for (bool editor : {false, true})
+      for (int column : {0, 2, 3, 6})
+        QTest::newRow(qPrintable(QString("%1-column-%2").arg(editor ? "editor" : "runtime").arg(column)))
+            << editor << column;
+  }
+  void expandViewActions() {
+    QFETCH(bool, editor); QFETCH(int, column);
+    auto w = std::make_unique<Window>(parseConfig(
+        "GROUP NULL root\nGROUP root A\nGROUP A B\nGROUP B C\nCHANNEL C one\n"
+        "GROUP root X\nGROUP X Y\nCHANNEL Y two\n"), options(editor), false);
+    w->show();
+    auto tree = w->findChild<QTreeView*>("alarmTree");
+    auto model = tree->model();
+    const auto root = model->index(0, 0);
+    const auto a = model->index(0, 0, root), b = model->index(0, 0, a);
+    const auto x = model->index(1, 0, root);
+    auto trigger = [&](const QString& title) {
+      for (auto action : w->findChildren<QAction*>())
+        if (action->text() == title) { action->trigger(); return; }
+      QFAIL("View action missing");
+    };
+    tree->collapseAll(); tree->expand(root);
+    tree->setCurrentIndex(a.sibling(a.row(), column));
+    trigger("Expand Branch");
+    QVERIFY(tree->isExpanded(a)); QVERIFY(tree->isExpanded(b));
+    QVERIFY(!tree->isExpanded(x));
+    trigger("Collapse Branch"); QVERIFY(!tree->isExpanded(a));
+    trigger("Expand One Level");
+    QVERIFY(tree->isExpanded(a)); QVERIFY(!tree->isExpanded(b));
+    trigger("Expand One Level"); QVERIFY(!tree->isExpanded(a));
+    trigger("Expand One Level"); QVERIFY(tree->isExpanded(a));
+    trigger("Expand All");
+    QVERIFY(tree->isExpanded(root)); QVERIFY(tree->isExpanded(a));
+    QVERIFY(tree->isExpanded(b)); QVERIFY(tree->isExpanded(x));
+    trigger("Collapse Branch"); QVERIFY(!tree->isExpanded(a)); QVERIFY(tree->isExpanded(x));
+    tree->collapseAll(); tree->setCurrentIndex(QModelIndex());
+    trigger("Expand Branch"); QVERIFY(!tree->isExpanded(root));
+    tree->expand(root); tree->setCurrentIndex(a.sibling(a.row(), column));
+    w->activateWindow(); tree->setFocus(); QCoreApplication::processEvents();
+    QTest::keyClick(tree, Qt::Key_Asterisk);
+    QVERIFY(tree->isExpanded(a)); QVERIFY(tree->isExpanded(b));
+    QTest::keyClick(tree, Qt::Key_Minus); QVERIFY(!tree->isExpanded(a));
+    QTest::keyClick(tree, Qt::Key_Plus);
+    QVERIFY(tree->isExpanded(a)); QVERIFY(!tree->isExpanded(b));
+    QTest::keyClick(tree, Qt::Key_Plus); QVERIFY(!tree->isExpanded(a));
+    QTest::keyClick(tree, Qt::Key_Asterisk, Qt::ControlModifier);
+    QVERIFY(tree->isExpanded(a)); QVERIFY(tree->isExpanded(b)); QVERIFY(tree->isExpanded(x));
+  }
+
   void filteredSelectionSurvivesUpdates() {
     auto o = options(false);
     o.filter = 1;

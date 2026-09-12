@@ -25,6 +25,18 @@ For modern controls, add `-style fusion`. See [Appearance & font size](/operate/
 3. Double-click a group in the right pane to open its contents. The arrow control expands or collapses its branch in the tree.
 4. Use the View expansion actions to open a level, a branch, or the whole hierarchy.
 
+The View actions operate on the selected group in the **left tree**, matching ALH:
+
+| Action | Shortcut | Behavior |
+| --- | --- | --- |
+| Expand One Level | `+` | Opens a collapsed group to show its immediate subgroups; closes it if already open. Deeper branches stay collapsed when reopening. |
+| Expand Branch | `*` | Opens the selected group and all of its descendant groups. |
+| Expand All | `Ctrl+*` | Opens all groups in the tree. |
+| Collapse Branch | `-` | Closes the selected group without closing its sibling branches. |
+
+The tree arrow uses the same one-level toggle. Selecting a channel in the right
+pane does not change which left-tree branch these View actions target.
+
 Group indications summarize their eligible descendant channels. Cancelled and disabled channels do not contribute active severity in the same way as monitored, enabled channels. [Mask reference](/reference/configuration) explains the individual settings.
 
 <figure>

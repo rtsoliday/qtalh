@@ -92,7 +92,7 @@ private slots:
     QTest::qWait(100);
     QCOMPARE(engine.state(n).unack, 2); QCOMPARE(output, 2.0);
     QVERIFY(!engine.state(n).mask[AckT]);
-    engine.shelve(n, 1, "Notification suppression");
+    engine.shelve(n, 1, "Notification suppression", "tester");
     QVERIFY(policy.activeChannels().isEmpty());
     QCOMPARE(engine.state(n).unack, 2); QCOMPARE(output, 2.0);
     QVERIFY(ca.put(n->name, 0));
@@ -117,7 +117,7 @@ private slots:
     ChannelAccess observer; double output = -99;
     observer.number(prefix + "severity", [&](double value) { output = value; });
     int records = 0; e.alarmLog = [&](Node*, const State&, qint64) { ++records; };
-    e.shelve(n, 1, "IOC integration");
+    e.shelve(n, 1, "IOC integration", "tester");
     QVERIFY(ca.put(n->name, 20));
     QTRY_COMPARE(e.state(n).severity, 2); QTRY_COMPARE(peer.state(other).severity, 2);
     QTRY_COMPARE(e.state(n).unack, 2); QTRY_COMPARE(output, 2.0);
@@ -131,7 +131,7 @@ private slots:
     QVERIFY(!e.state(n).mask[AckT]);
     time += 60000; e.tick();
     QCOMPARE(e.presentation(d.root.get()).unack, 2); QVERIFY(e.audible());
-    e.shelve(n, 1, "Other operator acknowledges"); peer.acknowledge(other);
+    e.shelve(n, 1, "Other operator acknowledges", "tester"); peer.acknowledge(other);
     QTRY_COMPARE(e.state(n).unack, 0);
     e.unshelve(n); QVERIFY(!e.audible());
   }

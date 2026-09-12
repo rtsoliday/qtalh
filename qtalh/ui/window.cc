@@ -130,7 +130,7 @@ QVariant AlarmModel::data(const QModelIndex& i, int role) const {
     if (s.shelf.until && i.column() != 4 && i.column() != 5)
       return Engine::channelPath(n) + "\nShelved until " +
           QDateTime::fromMSecsSinceEpoch(s.shelf.until).toString(Qt::ISODate) +
-          "\nReason: " + s.shelf.reason + "\nUnderlying: " + statusName(s.status) + " " +
+          "\nShelved by: " + s.shelf.username + "\nReason: " + s.shelf.reason + "\nUnderlying: " + statusName(s.status) + " " +
           severityName(s.severity) + "; unacknowledged: " + severityName(s.unack) + "\n" + s.value;
     if (i.column() == 4) {
       QStringList guidance;
@@ -510,6 +510,35 @@ void Window::buildUi() {
     row->addWidget(label); row->addWidget(divider, 1);
     layout->addLayout(row);
   }
+  if (!options.editor) {
+    for (auto view : {treeView, groupView}) {
+      view->setContextMenuPolicy(Qt::CustomContextMenu);
+      connect(view, &QWidget::customContextMenuRequested, this, [this, view](const QPoint& point) {
+        const QPersistentModelIndex index(view->indexAt(point));
+        auto model = static_cast<AlarmModel*>(view->model());
+        auto target = model ? model->node(index) : nullptr;
+        if (!target) return;
+        auto menu = new QMenu(view);
+        menu->setObjectName("alarmContextMenu");
+        auto shelve = menu->addAction(target->group ? "Shelve this group..." : "Shelve this channel...");
+        shelve->setObjectName("shelveContextTarget");
+        connect(shelve, &QAction::triggered, this, [this, model, index] {
+          if (index.isValid()) shelveDialog(model->node(index));
+        });
+        auto details = menu->addAction("Alarm Handler Properties...");
+        details->setObjectName("propertiesContextTarget");
+        connect(details, &QAction::triggered, this, [this, model, index] {
+          if (!index.isValid()) return;
+          selection = model->node(index);
+          scheduleDialogSync();
+          properties();
+        });
+        connect(model, &QAbstractItemModel::modelReset, menu, &QMenu::close);
+        connect(menu, &QMenu::aboutToHide, menu, &QObject::deleteLater);
+        menu->popup(view->viewport()->mapToGlobal(point));
+      });
+    }
+  }
   connect(treeView, &QTreeView::clicked, this, [this](QModelIndex i) { click(i, treeModel); });
   connect(groupView, &QTreeView::clicked, this, [this](QModelIndex i) { click(i, groupModel); });
   connect(groupView, &QTreeView::doubleClicked, this, [this](QModelIndex i) {
@@ -602,12 +631,17 @@ void Window::buildUi() {
   silenceForeverLabel->setObjectName("silenceForever");
   beepLabel = new QLabel;
   beepLabel->setObjectName("beepSeverity");
+  notificationsEnabledLabel = new QLabel;
+  notificationsEnabledLabel->setObjectName("notificationsEnabledStatus");
+  notificationsEnabledLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+  notificationsEnabledLabel->setToolTip("Automatic notifications in this runtime. Change in Setup → Notifications….");
   silenceForeverLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
   beepLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-  // Each line occupies the same height, including the two status labels.
+  // Each line occupies the same height, including the status labels.
   for (QWidget* row :
        {static_cast<QWidget*>(silenceBox), static_cast<QWidget*>(currentBox),
-        static_cast<QWidget*>(silenceForeverLabel), static_cast<QWidget*>(beepLabel)}) {
+        static_cast<QWidget*>(silenceForeverLabel), static_cast<QWidget*>(beepLabel),
+        static_cast<QWidget*>(notificationsEnabledLabel)}) {
     if (legacyAppearance()) row->setFixedHeight(20);
     silence->addWidget(row, 0, Qt::AlignRight);
   }
@@ -769,6 +803,18 @@ void Window::refreshStatus() {
   silenceForeverLabel->setText(
       QString("Silence Forever: %1").arg(engine->silenceForever ? "On" : "Off"));
   beepLabel->setText(QString("ALH Beep Severity: %1").arg(severityName(doc.beepSeverity)));
+  bool configuredNotifications = false;
+  if (notifications) {
+    const auto configuration = notificationConfiguration(doc.filename);
+    for (const auto& subscription : notifications->policy.settings().subscriptions)
+      if (subscription.configuration == configuration) {
+        configuredNotifications = true;
+        break;
+      }
+  }
+  notificationsEnabledLabel->setVisible(configuredNotifications);
+  notificationsEnabledLabel->setText(QString("Notifications Enabled: %1")
+      .arg(notifications && notifications->policy.enabled() ? "YES" : "NO"));
   {
     QSignalBlocker b(silenceBox);
     silenceBox->setChecked(engine->silenceUntil > engine->now());
@@ -837,7 +883,7 @@ void Window::click(const QModelIndex& i, AlarmModel* m) {
       if (index.isValid()) {
         for (auto parent = index.parent(); parent.isValid(); parent = parent.parent())
           treeView->expand(parent);
-        treeView->setExpanded(index, !treeView->isExpanded(index));
+        expandOneLevel(index);
       }
     }
     break;
@@ -856,10 +902,25 @@ void Window::click(const QModelIndex& i, AlarmModel* m) {
   }
   refresh();
 }
+void Window::expandOneLevel(const QModelIndex& i) {
+  if (!i.isValid()) return;
+  const auto row = i.sibling(i.row(), 0);
+  if (treeView->isExpanded(row)) {
+    treeView->collapse(row);
+    return;
+  }
+  // ALH's EXPANDCOLLAPSE1 opens only immediate children, even after Expand Branch.
+  for (int child = 0; child < treeModel->rowCount(row); ++child)
+    treeView->collapse(treeModel->index(child, 0, row));
+  treeView->expand(row);
+}
 void Window::expandBranch(const QModelIndex& i) {
-  treeView->expand(i);
-  for (int r = 0; r < treeModel->rowCount(i); ++r)
-    expandBranch(treeModel->index(r, 0, i));
+  if (!i.isValid()) return;
+  // The painted name/arrow/mask cells use nonzero columns, which have no model children.
+  const auto row = i.sibling(i.row(), 0);
+  treeView->expand(row);
+  for (int child = 0; child < treeModel->rowCount(row); ++child)
+    expandBranch(treeModel->index(child, 0, row));
 }
 void Window::menus() {
   auto action = [this](QMenu* m, QString name, std::function<void()> fn,
@@ -985,13 +1046,16 @@ void Window::menus() {
     action(view, "Alarm Analytics...", [this] { showAnalytics(); });
   }
   action(
-      view, "Expand One Level", [this] { treeView->expand(treeView->currentIndex()); },
+      view, "Expand One Level", [this] { expandOneLevel(treeView->currentIndex()); },
       QKeySequence("+"));
   action(
       view, "Expand Branch", [this] { expandBranch(treeView->currentIndex()); }, QKeySequence("*"));
   action(view, "Expand All", [this] { treeView->expandAll(); }, QKeySequence("Ctrl+*"));
   action(
-      view, "Collapse Branch", [this] { treeView->collapse(treeView->currentIndex()); },
+      view, "Collapse Branch", [this] {
+        const auto index = treeView->currentIndex();
+        if (index.isValid()) treeView->collapse(index.sibling(index.row(), 0));
+      },
       QKeySequence("-"));
   if (!options.editor) {
     action(view, "Current Alarm History", [this] { showHistory(); });

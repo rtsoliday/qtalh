@@ -1,0 +1,17 @@
+GROUP NULL FeatureLab
+$ALIAS QtALH local feature lab
+$GUIDANCE
+Use the lab terminal to raise and clear alarms.
+Values: 0 normal, 7 MINOR, 12 MAJOR.
+Notifications are captured by the local webhook receiver.
+$END
+GROUP FeatureLab Process
+CHANNEL Process qtalh_lab:pressure -----
+$ALIAS Pressure - manual alarms
+CHANNEL Process qtalh_lab:temperature -----
+$ALIAS Temperature - standing alarm
+GROUP FeatureLab Diagnostics
+CHANNEL Diagnostics qtalh_lab:chatter -----
+$ALIAS Chattering alarm
+CHANNEL Diagnostics qtalh_lab:maintenance -----
+$ALIAS Maintenance - shelving

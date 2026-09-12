@@ -49,7 +49,7 @@ bool destinationEditor(QWidget* parent, NotificationDestination& d) {
   mf->addRow("Arguments (one per line)", args);
   mf->addRow("From", from);
   mf->addRow("Recipients (comma separated)", recipients);
-  mf->addRow(new QLabel("Uses a local sendmail-compatible program; exit 0 means submitted."));
+  mf->addRow(new QLabel("Uses a local sendmail-compatible program."));
   stack->addWidget(mail);
   auto web = new QWidget;
   auto wf = new QFormLayout(web);

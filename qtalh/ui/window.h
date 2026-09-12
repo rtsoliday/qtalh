@@ -83,7 +83,8 @@ private:
   AlarmModel *treeModel = nullptr, *groupModel = nullptr;
   QTreeView *treeView = nullptr, *groupView = nullptr;
   QLabel *execution = nullptr, *filename = nullptr, *messageArea = nullptr, *beepLabel = nullptr,
-         *silenceForeverLabel = nullptr, *disabledForceLabel = nullptr, *shelvedLabel = nullptr;
+         *silenceForeverLabel = nullptr, *disabledForceLabel = nullptr, *shelvedLabel = nullptr,
+         *notificationsEnabledLabel = nullptr;
   QWidget* runtime = nullptr;
   QPushButton* runtimeButton = nullptr;
   QCheckBox *silenceBox = nullptr, *currentBox = nullptr;
@@ -144,6 +145,7 @@ private:
   void paste();
   void clearNode();
   void exitApplication();
+  void expandOneLevel(const QModelIndex&);
   void expandBranch(const QModelIndex&);
 };
 } // namespace alh

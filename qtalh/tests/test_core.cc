@@ -67,7 +67,7 @@ private slots:
     for (auto c : d.channels()) e.event(c, {});
     e.event(n, {3, 1, 0, 1, {}});
     QVERIFY(e.audible());
-    QCOMPARE(e.shelve(n, 1, "  Testing hardware  "), 1);
+    QCOMPARE(e.shelve(n, 1, "  Testing hardware  ", "tester"), 1);
     const auto deadline = e.state(n).shelf.until;
     QCOMPARE(e.state(n).shelf.reason, QString("Testing hardware"));
     QCOMPARE(e.state(n).unack, 1);
@@ -97,28 +97,57 @@ private slots:
     const int logs = operations.size(); e.tick(); QCOMPARE(operations.size(), logs);
     e.acknowledge(n); QCOMPARE(e.state(n).unack, 0);
   }
+  void shelvingUsernameAttribution() {
+    auto doc = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
+    Engine engine(doc); qint64 now = 1000; engine.now = [&] { return now; };
+    auto channel = doc.channels()[0];
+    QStringList logs;
+    engine.operation = [&](Node*, const QString& text) { logs << text; };
+    for (const auto& user : QStringList{"", "   ", "two names", "bad\nuser", "bad\tuser",
+                                        QString(121, 'x'), QString("bad") + QChar(0)}) {
+      QVERIFY_THROWS_EXCEPTION(ParseError, engine.shelve(channel, 1, "reason", user));
+      QCOMPARE(engine.state(channel).shelf.until, qint64(0));
+    }
+    QCOMPARE(engine.shelve(channel, 1, "reason", "  operator_one  "), 1);
+    QCOMPARE(engine.state(channel).shelf.username, QString("operator_one"));
+    QVERIFY(logs.last().contains(" username=operator_one "));
+    engine.shelve(doc.root.get(), 2, "group", "operator_two");
+    QCOMPARE(engine.state(channel).shelf.username, QString("operator_one"));
+    QCOMPARE(engine.shelve(channel, 3, "extended", "operator_two", true), 1);
+    QVERIFY(logs.last().contains("username=operator_two previous_username=operator_one"));
+    QCOMPARE(engine.shelves().first().shelf.username, QString("operator_two"));
+    auto copy = parseConfig(writeConfig(doc)); Engine restored(copy); restored.now = [&] { return now; };
+    restored.restoreShelves(engine.shelves());
+    QCOMPARE(restored.state(copy.channels()[0]).shelf.username, QString("operator_two"));
+    now = engine.state(channel).shelf.until; engine.tick();
+    QVERIFY(logs.last().contains("shelved_by=operator_two"));
+    QVERIFY(engine.state(channel).shelf.username.isEmpty());
+  }
+
   void shelvingValidationAndGroups() {
     auto d = parseConfig("GROUP NULL root\nGROUP root branch\nCHANNEL branch one\nCHANNEL branch two\nCHANNEL root three\n");
     Engine e(d); qint64 time = 1000; e.now = [&] { return time; };
     auto channels = d.channels(); auto root = d.root.get();
     for (auto c : channels) e.event(c, {3, 2, 0, 1, {}});
-    QVERIFY_THROWS_EXCEPTION(ParseError, e.shelve(root, 0, "reason"));
-    QVERIFY_THROWS_EXCEPTION(ParseError, e.shelve(root, 1441, "reason"));
-    QVERIFY_THROWS_EXCEPTION(ParseError, e.shelve(root, 60, "  "));
-    QVERIFY_THROWS_EXCEPTION(ParseError, e.shelve(root, 60, "line\nline"));
-    QVERIFY_THROWS_EXCEPTION(ParseError, e.shelve(root, 60, QString(241, 'a')));
+    QVERIFY_THROWS_EXCEPTION(ParseError, e.shelve(root, 0, "reason", "tester"));
+    QVERIFY_THROWS_EXCEPTION(ParseError, e.shelve(root, Engine::MaximumShelfMinutes + 1, "reason", "tester"));
+    QVERIFY_THROWS_EXCEPTION(ParseError, e.shelve(root, 60, "  ", "tester"));
+    QVERIFY_THROWS_EXCEPTION(ParseError, e.shelve(root, 60, "line\nline", "tester"));
+    QVERIFY_THROWS_EXCEPTION(ParseError, e.shelve(root, 60, QString(241, 'a'), "tester"));
     QCOMPARE(e.presentation(root).shelved, 0);
-    QCOMPARE(e.shelve(channels[0], 15, "individual"), 1);
+    QCOMPARE(e.shelve(channels[0], 15, "individual", "tester"), 1);
     auto first = e.state(channels[0]).shelf.until;
     time += 1000;
-    QCOMPARE(e.shelve(root, 60, "group"), 2);
+    QCOMPARE(e.shelve(root, 60, "group", "tester"), 2);
     QCOMPARE(e.state(channels[0]).shelf.until, first);
     QCOMPARE(e.state(channels[0]).shelf.reason, QString("individual"));
     QCOMPARE(e.presentation(root).shelved, 3);
     QCOMPARE(e.presentation(channels[0]->parent).shelved, 2);
-    QCOMPARE(e.shelve(root, 60, "no change"), 0);
-    QCOMPARE(e.shelve(channels[0], 1440, "extended", true), 1);
+    QCOMPARE(e.shelve(root, 60, "no change", "tester"), 0);
+    QCOMPARE(e.shelve(channels[0], 1440, "extended", "tester", true), 1);
     QVERIFY(e.state(channels[0]).shelf.until > first);
+    QCOMPARE(e.shelve(channels[0], Engine::MaximumShelfMinutes, "maximum", "tester", true), 1);
+    QCOMPARE(e.state(channels[0]).shelf.until, time + qint64(365) * 24 * 60 * 60000);
     e.unshelve(channels[0]->parent);
     QCOMPARE(e.presentation(root).shelved, 1);
     QCOMPARE(e.presentation(root).unack, 2);
@@ -126,7 +155,7 @@ private slots:
     e.unshelve(root); QCOMPARE(e.presentation(root).shelved, 0);
     QCOMPARE(e.presentation(root).counts[2], 3);
     // Clock moves back; absolute expiry is retained. A forward jump expires it.
-    e.shelve(root, 1, "clock"); const auto deadline = e.state(channels[0]).shelf.until;
+    e.shelve(root, 1, "clock", "tester"); const auto deadline = e.state(channels[0]).shelf.until;
     time -= 100000; e.tick(); QCOMPARE(e.presentation(root).shelved, 3);
     time = deadline + 86400000; e.tick(); QCOMPARE(e.presentation(root).shelved, 0);
   }
@@ -154,7 +183,7 @@ private slots:
     ea.start(); eb.start();
     auto na = a.channels()[0], nb = b.channels()[0];
     ea.event(na, {}); eb.event(nb, {});
-    ea.shelve(na, 1, "maintenance");
+    ea.shelve(na, 1, "maintenance", "tester");
     for (const Event& ev : {Event{3, 1, 1, 1, {}}, Event{3, 2, 2, 1, {}}, Event{0, 0, 2, 1, {}}, Event{0, 0, 0, 1, {}}, Event{0, 4, 4, 1, {}}, Event{0, 0, 4, 1, {}}}) {
       ea.event(na, ev); eb.event(nb, ev);
       QVERIFY(!ea.audible());
@@ -170,7 +199,7 @@ private slots:
     QCOMPARE(ea.state(a.root.get()).severity, eb.state(b.root.get()).severity);
     QCOMPARE(ea.presentation(a.root.get()).unack, eb.presentation(b.root.get()).unack);
     const int count = pa.writes.size(); const int commands = ca.size();
-    ea.shelve(na, 1, "again"); ea.shelve(na, 2, "extend", true); ea.unshelve(na);
+    ea.shelve(na, 1, "again", "tester"); ea.shelve(na, 2, "extend", "tester", true); ea.unshelve(na);
     QCOMPARE(pa.writes.size(), count); QCOMPARE(ca.size(), commands);
   }
   void shelvingMaskAndFilterInteractions() {
@@ -178,7 +207,7 @@ private slots:
                          "$FORCEPV gate -D--- 1 0\n");
     Engine e(d); qint64 time = 1000; e.now = [&] { return time; };
     auto n = d.channels()[0]; auto root = d.root.get();
-    e.event(n, {}); e.shelve(n, 1, "filter");
+    e.event(n, {}); e.shelve(n, 1, "filter", "tester");
     const auto until = e.state(n).shelf.until;
     e.event(n, {3, 2, 0, 1, {}}); time += 2000; e.tick();
     QCOMPARE(e.state(n).severity, 2); QCOMPARE(e.presentation(root).severity, 0);
@@ -188,12 +217,12 @@ private slots:
     time = until; e.tick(); QVERIFY(!e.state(n).shelf.until);
     QCOMPARE(e.presentation(root).severity, 0);
     e.forceValue(n, 0); QCOMPARE(e.presentation(root).severity, 2);
-    e.shelve(n, 1, "cancel"); e.setMask(n, Mask::parse("C"));
+    e.shelve(n, 1, "cancel", "tester"); e.setMask(n, Mask::parse("C"));
     time += 60000; e.tick(); QCOMPARE(e.presentation(root).severity, 0);
     e.resetMask(n); e.event(n, {3, 2, 0, 1, {}}); time += 2000; e.tick();
-    e.shelve(n, 1, "beep"); e.setBeep(root, 3); e.unshelve(n);
+    e.shelve(n, 1, "beep", "tester"); e.setBeep(root, 3); e.unshelve(n);
     QVERIFY(!e.audible()); e.setBeep(root, 1); QVERIFY(e.audible());
-    e.shelve(n, 1, "silence"); e.silenceForever = true;
+    e.shelve(n, 1, "silence", "tester"); e.silenceForever = true;
     time += 60000; e.tick(); QVERIFY(!e.audible());
     e.silenceForever = false; e.silenceUntil = time + 1000; QVERIFY(!e.audible());
     time += 1000; QVERIFY(e.audible());
@@ -203,7 +232,7 @@ private slots:
                              "GROUP root b\nCHANNEL b same\n";
     auto d = parseConfig(original); Engine e(d); qint64 time = 1000; e.now = [&] { return time; };
     for (auto n : d.channels()) { e.event(n, {3, 2, 0, 1, {}}); e.event(n, {}); }
-    e.shelve(d.root.get(), 10, "work"); auto saved = e.shelves();
+    e.shelve(d.root.get(), 10, "work", "tester"); auto saved = e.shelves();
     auto replacement = parseConfig("GROUP NULL root\nGROUP root b\nCHANNEL b same\n"
         "GROUP root a\nCHANNEL a added\nCHANNEL a same\n");
     Engine next(replacement); next.now = [&] { return time; };
@@ -233,11 +262,11 @@ private slots:
   void shelvingAmbiguousReload() {
     const QString config = "GROUP NULL root\nCHANNEL root same\nCHANNEL root same\n";
     auto d = parseConfig(config); Engine e(d);
-    e.shelve(d.channels()[0], 60, "duplicate"); auto saved = e.shelves();
+    e.shelve(d.channels()[0], 60, "duplicate", "tester"); auto saved = e.shelves();
     QVERIFY(!saved[0].unique);
     auto single = parseConfig("GROUP NULL root\nCHANNEL root same\n"); Engine next(single);
     next.restoreShelves(saved); QCOMPARE(next.presentation(single.root.get()).shelved, 0);
-    next.shelve(single.root.get(), 60, "unique");
+    next.shelve(single.root.get(), 60, "unique", "tester");
     Engine duplicate(d); duplicate.restoreShelves(next.shelves());
     QCOMPARE(duplicate.presentation(d.root.get()).shelved, 0);
   }
@@ -246,7 +275,7 @@ private slots:
     for (int i = 0; i < 10000; ++i) config += QString("CHANNEL root pv%1\n").arg(i);
     auto d = parseConfig(config); Engine e(d); qint64 time = 1000; e.now = [&] { return time; };
     QElapsedTimer elapsed; elapsed.start();
-    e.shelve(d.root.get(), 1, "large group");
+    e.shelve(d.root.get(), 1, "large group", "tester");
     for (auto n : d.channels()) e.event(n, {3, 2, 0, 1, {}});
     QCOMPARE(e.presentation(d.root.get()).shelved, 10000);
     QCOMPARE(e.presentation(d.root.get()).severity, 0);

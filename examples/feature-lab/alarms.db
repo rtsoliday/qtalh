@@ -1,0 +1,25 @@
+# Loopback-only feature lab. Values: 0 normal, 7 MINOR, 12 MAJOR.
+record(ai, "qtalh_lab:pressure") {
+  field(DESC, "Manual alarm and acknowledgement")
+  field(PINI, "YES")
+  field(HIGH, "5") field(HSV, "MINOR")
+  field(HIHI, "10") field(HHSV, "MAJOR") field(ACKT, "YES")
+}
+record(ai, "qtalh_lab:temperature") {
+  field(DESC, "Standing alarm")
+  field(PINI, "YES")
+  field(HIGH, "5") field(HSV, "MINOR")
+  field(HIHI, "10") field(HHSV, "MAJOR") field(ACKT, "YES")
+}
+record(ai, "qtalh_lab:chatter") {
+  field(DESC, "Chattering alarm")
+  field(PINI, "YES")
+  field(HIGH, "5") field(HSV, "MINOR")
+  field(HIHI, "10") field(HHSV, "MAJOR") field(ACKT, "YES")
+}
+record(ai, "qtalh_lab:maintenance") {
+  field(DESC, "Shelving and suppression")
+  field(PINI, "YES")
+  field(HIGH, "5") field(HSV, "MINOR")
+  field(HIHI, "10") field(HHSV, "MAJOR") field(ACKT, "YES")
+}
