@@ -31,9 +31,9 @@ $(error Qt Multimedia is required; install the module matching QT_DIR or set QT_
 endif
 endif
 
-CORE = core/model.cc core/config.cc core/engine.cc
-SERVICES = services/log_browser.cc services/channel_access.cc services/options.cc services/logging.cc services/ipc.cc
-GUI = ui/appearance.cc ui/workflows.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc
+CORE = core/analytics.cc core/model.cc core/config.cc core/engine.cc core/notifications.cc
+SERVICES = services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/options.cc services/logging.cc services/ipc.cc
+GUI = ui/analytics.cc ui/notifications.cc ui/appearance.cc ui/workflows.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc
 OBJECTS = $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.obj) $(SERVICES:.cc=.obj) $(GUI:.cc=.obj)) $(OBJ_DIR)/resources.obj
 # MSVC does not emit GCC-style .d files. Rebuild on project header changes.
 HEADERS = $(wildcard core/*.h services/*.h ui/*.h)
@@ -62,7 +62,7 @@ $(OBJ_DIR)/test_%.moc: tests/test_%.cc $(HEADERS) $(BUILD_FILES)
 	@mkdir -p $(OBJ_DIR)
 	$(MOC) -D_WIN32 $(CPPFLAGS) $(INCLUDES) $(QT_CFLAGS) $< -o $@
 
-TESTS = core ui ioc helpers
+TESTS = core ui ioc helpers notifications analytics
 define test_rules
 $(OBJ_DIR)/tests/test_$(1).obj: $(OBJ_DIR)/test_$(1).moc
 $(OBJ_DIR)/test_$(1).exe: $(OBJECTS) $(OBJ_DIR)/tests/test_$(1).obj

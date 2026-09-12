@@ -187,6 +187,34 @@ At the 2026-09-10 workflow checkpoint, the local suites passed 90 core, 42 UI,
 Targeted Valgrind runs for the
 new browser and dialog/runtime lifetimes report zero errors and no lost blocks.
 
+## Qt-specific timed shelving
+
+Runtime channels can be shelved for 1–1,440 minutes with a required reason.
+Group actions skip already shelved channels; group unshelving clears all
+remaining descendant shelves. Shelving is an independent presentation state,
+not a legacy mask bit. Separate incremental aggregates exclude shelved channels
+from visible alarm counts, filters, the runtime indicator, and audio without
+changing alarm processing, raw aggregates, commands, or output PVs.
+
+The runtime provides Shelve/Unshelve actions, inline markers, a shelved count,
+and a list with underlying state, deadlines, countdowns, reasons, early
+unshelving, and individual changes. Core expiry uses the existing deadline
+scheduler. Latches remain governed by the normal local/global rules, and bulk
+acknowledgement skips shelved channels.
+
+Same-runtime reload restores original shelves by unique full node identity and
+preserves matched local outstanding latches; global latches follow IOC updates.
+Missing or ambiguous identities are logged and discarded. Shelves are never
+serialized into `.alhConfig`, persisted across restart, or shared with other
+runtimes. Save As does not alter them. The original Motif application and helper
+protocols are unchanged.
+
+Regression coverage includes fake-clock boundaries, transient latches, group
+behavior, mask/filter/Force PV interactions, unchanged automation and PV writes,
+reload identity matching, UI controls in both appearances, a live loopback IOC,
+and 10,000-channel shelving/expiry. See the test guide for reproduction; these
+checks do not establish field acceptance on every platform.
+
 ## Command line and environment
 
 Supported legacy switches: `-c`, `-global`, `-S`, `-D`, `-s`, `-B`, `-L`,
@@ -351,3 +379,22 @@ The event-loop implementation follows the non-preemptive callback guidance in
 and [Qt QSocketNotifier](https://doc.qt.io/qt-6/qsocketnotifier.html). Callbacks
 are serialized on the GUI thread; polling is guarded against reentrancy and
 subscriptions are cancelled before model destruction.
+
+## QtALH personal notification extension
+
+QtALH provides built-in personal sendmail/email and generic JSON webhook
+subscriptions with delayed escalation stages, grouped summaries, cooldowns, and
+optional resolution messages. This is a QtALH extension, separate from legacy
+ALH command hooks and database IPC. It adds no ALH configuration directives or
+Channel Access writes. Each runtime starts paused and operates independently;
+there is no shared notification owner or server. See the
+[notification guide](site/operate/notifications.md).
+
+## QtALH session analytics extension
+
+Session analytics are an in-memory QtALH extension to runtime operation. They
+observe processed alarm state without changing legacy configuration, command
+hooks, logging, acknowledgement, shelving, or output PV behavior. Analytics and
+notifications use independent engine observers. No external analytics service,
+historical log import, or database dependency is added. See the
+[analytics guide](site/operate/analytics.md).

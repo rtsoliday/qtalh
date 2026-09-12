@@ -3,6 +3,7 @@
 #include "dialogs.h"
 #include "services/log_browser.h"
 #include <QThread>
+#include <QtWidgets>
 namespace alh {
 namespace {
 class LogSearchJob final : public QThread {
@@ -148,4 +149,179 @@ void Window::showLogBrowser(bool alarm) {
   dialog->show();
   QTimer::singleShot(0, search, &QPushButton::click);
 }
+
+void Window::shelveDialog(Node* target, bool change) {
+  if (options.editor || !target) return;
+  if (auto prior = findChild<QDialog*>("shelveDialog")) {
+    if (prior->isEnabled()) { prior->show(); prior->raise(); prior->activateWindow(); return; }
+  }
+  auto dialog = new QDialog(this);
+  dialog->setObjectName("shelveDialog");
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  dialog->setWindowTitle(change ? "Change Shelf" : "Shelve Alarms");
+  auto layout = dialogColumn(dialog);
+  auto targetLabel = new QLabel(Engine::channelPath(target));
+  targetLabel->setTextFormat(Qt::PlainText);
+  targetLabel->setWordWrap(true);
+  targetLabel->setObjectName("shelfTarget");
+  layout->addWidget(targetLabel);
+  auto scope = new QLabel;
+  scope->setObjectName("shelfScope");
+  layout->addWidget(scope);
+  auto explanation = new QLabel("Shelving affects this runtime's display and sound only. Monitoring, logging, "
+      "commands and output PVs continue. Shelves survive reloads, but end when this runtime closes.");
+  explanation->setWordWrap(true);
+  layout->addWidget(explanation);
+  auto form = new QFormLayout;
+  auto duration = new QComboBox;
+  duration->setObjectName("shelfDuration");
+  for (int minutes : {15, 30, 60, 240, 480})
+    duration->addItem(minutes < 60 ? QString("%1 minutes").arg(minutes) :
+        QString("%1 hour%2").arg(minutes / 60).arg(minutes == 60 ? "" : "s"), minutes);
+  duration->addItem("Custom minutes", 0);
+  duration->setCurrentIndex(2);
+  auto custom = new QSpinBox;
+  custom->setObjectName("shelfCustomMinutes");
+  custom->setRange(1, 1440);
+  custom->setValue(60);
+  custom->setEnabled(false);
+  form->addRow("Duration", duration);
+  form->addRow("Custom minutes", custom);
+  auto reason = new QLineEdit;
+  reason->setObjectName("shelfReason");
+  reason->setMaxLength(240);
+  if (change) reason->setText(engine->state(target).shelf.reason);
+  form->addRow("Reason (required)", reason);
+  layout->addLayout(form);
+  auto status = new QLabel;
+  status->setWordWrap(true);
+  layout->addWidget(status);
+  auto buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+  buttons->button(QDialogButtonBox::Ok)->setText(change ? "Change Shelf" : "Shelve");
+  layout->addWidget(buttons);
+  auto update = [=] {
+    if (!dialog->isEnabled()) return;
+    int existing = 0, available = 0;
+    for (auto n : doc.channels()) {
+      auto ancestor = n;
+      while (ancestor && ancestor != target) ancestor = ancestor->parent;
+      if (!ancestor) continue;
+      if (engine->state(n).shelf.until > engine->now()) ++existing;
+      else ++available;
+    }
+    scope->setText(change ? "Change this channel's deadline and reason." :
+        QString("%1 channels to shelve; %2 existing shelves retained.").arg(available).arg(existing));
+    const auto text = reason->text().trimmed();
+    buttons->button(QDialogButtonBox::Ok)->setEnabled((change || available > 0) &&
+        !text.isEmpty() && !text.contains(QRegularExpression("[\\r\\n\\x{2028}\\x{2029}]")));
+  };
+  connect(reason, &QLineEdit::textChanged, dialog, update);
+  connect(duration, QOverload<int>::of(&QComboBox::currentIndexChanged), dialog,
+          [=] { custom->setEnabled(duration->currentData().toInt() == 0); });
+  auto timer = new QTimer(dialog);
+  connect(timer, &QTimer::timeout, dialog, update);
+  timer->start(1000);
+  connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
+  connect(buttons, &QDialogButtonBox::accepted, dialog, [=] {
+    if (!dialog->isEnabled()) return;
+    try {
+      engine->shelve(target, duration->currentData().toInt() ? duration->currentData().toInt() :
+          custom->value(), reason->text(), change);
+      dialog->accept();
+      refresh();
+    } catch (const std::exception& e) { status->setText(e.what()); }
+  });
+  update();
+  sizeDialog(dialog, QSize(560, dialog->sizeHint().height()));
+  dialog->show();
+  reason->setFocus();
+}
+void Window::showShelvedAlarms() {
+  if (options.editor) return;
+  if (shelfListDialog && shelfListDialog->isEnabled()) {
+    shelfListDialog->show(); shelfListDialog->raise(); shelfListDialog->activateWindow(); return;
+  }
+  auto dialog = new QDialog(this);
+  shelfListDialog = dialog;
+  dialog->setObjectName("shelvedAlarmsDialog");
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  dialog->setWindowTitle("Shelved Alarms — This Runtime");
+  auto layout = dialogColumn(dialog);
+  auto table = new QTableWidget(0, 7);
+  table->setObjectName("shelvedAlarmsTable");
+  table->setHorizontalHeaderLabels({"Channel path", "Severity", "Unacknowledged", "Expires (local)",
+                                   "Remaining", "Reason", "Value"});
+  table->setSelectionBehavior(QAbstractItemView::SelectRows);
+  table->setSelectionMode(QAbstractItemView::ExtendedSelection);
+  table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+  table->horizontalHeader()->setStretchLastSection(false);
+  layout->addWidget(table);
+  auto row = new QHBoxLayout;
+  auto remove = new QPushButton("Unshelve Selected"); remove->setObjectName("unshelveSelected");
+  auto change = new QPushButton("Change Shelf..."); change->setObjectName("changeShelf");
+  auto close = new QPushButton("Close");
+  row->addWidget(remove); row->addWidget(change); row->addStretch(); row->addWidget(close);
+  layout->addLayout(row);
+  connect(table, &QTableWidget::itemSelectionChanged, dialog, [=] {
+    const int count = table->selectionModel()->selectedRows().size();
+    remove->setEnabled(count > 0); change->setEnabled(count == 1);
+  });
+  connect(remove, &QPushButton::clicked, dialog, [=] {
+    if (!dialog->isEnabled()) return;
+    const auto rows = table->selectionModel()->selectedRows();
+    for (const auto& row : rows) {
+      auto n = reinterpret_cast<Node*>(table->item(row.row(), 0)->data(Qt::UserRole).value<quintptr>());
+      engine->unshelve(n);
+    }
+    refresh();
+  });
+  connect(change, &QPushButton::clicked, dialog, [=] {
+    if (!dialog->isEnabled()) return;
+    const auto rows = table->selectionModel()->selectedRows();
+    if (rows.size() == 1)
+      shelveDialog(reinterpret_cast<Node*>(table->item(rows[0].row(), 0)->data(Qt::UserRole).value<quintptr>()), true);
+  });
+  connect(close, &QPushButton::clicked, dialog, &QDialog::close);
+  auto timer = new QTimer(dialog);
+  connect(timer, &QTimer::timeout, dialog, [this] { refreshShelfList(); });
+  timer->start(1000);
+  refreshShelfList();
+  table->resizeColumnsToContents();
+  dialog->resize(qMax(1050, table->horizontalHeader()->length() + table->verticalHeader()->width() + 80), 400);
+  dialog->show();
+}
+void Window::refreshShelfList() {
+  if (!shelfListDialog || !shelfListDialog->isEnabled()) return;
+  auto table = shelfListDialog->findChild<QTableWidget*>("shelvedAlarmsTable");
+  if (!table) return;
+  QSet<quintptr> selected;
+  for (const auto& row : table->selectionModel()->selectedRows())
+    selected.insert(table->item(row.row(), 0)->data(Qt::UserRole).value<quintptr>());
+  QSignalBlocker blocker(table);
+  QVector<Node*> channels;
+  for (auto n : doc.channels()) if (engine->state(n).shelf.until) channels.push_back(n);
+  table->setRowCount(channels.size());
+  table->clearSelection();
+  for (int row = 0; row < channels.size(); ++row) {
+    auto n = channels[row];
+    const auto& s = engine->state(n);
+    const auto seconds = qMax(qint64(0), (s.shelf.until - engine->now() + 999) / 1000);
+    const QString remaining = QString("%1:%2:%3").arg(seconds / 3600).arg((seconds / 60) % 60, 2, 10, QChar('0'))
+        .arg(seconds % 60, 2, 10, QChar('0'));
+    const QStringList values{Engine::channelPath(n), severityName(s.severity), severityName(s.unack),
+        QDateTime::fromMSecsSinceEpoch(s.shelf.until).toString(Qt::ISODate), remaining, s.shelf.reason, s.value};
+    for (int col = 0; col < values.size(); ++col) {
+      auto item = table->item(row, col);
+      if (!item) { item = new QTableWidgetItem; table->setItem(row, col, item); }
+      item->setText(values[col]); item->setToolTip(values[col]);
+      if (col == 0) item->setData(Qt::UserRole, QVariant::fromValue(reinterpret_cast<quintptr>(n)));
+    }
+    if (selected.contains(reinterpret_cast<quintptr>(n)))
+      table->selectionModel()->select(table->model()->index(row, 0), QItemSelectionModel::Select | QItemSelectionModel::Rows);
+  }
+  const int count = table->selectionModel()->selectedRows().size();
+  shelfListDialog->findChild<QPushButton*>("unshelveSelected")->setEnabled(count > 0);
+  shelfListDialog->findChild<QPushButton*>("changeShelf")->setEnabled(count == 1);
+}
+
 } // namespace alh

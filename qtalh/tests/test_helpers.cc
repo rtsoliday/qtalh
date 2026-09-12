@@ -315,6 +315,45 @@ private slots:
     QCOMPARE(receiveQueue(q.id), text);
   }
 #endif
+
+  void shelvingOperationLogs() {
+    QTemporaryDir dir;
+    Options o; o.alarmFile = dir.filePath("alarm"); o.opmodFile = dir.filePath("opmod"); o.maxRecords = 0;
+#ifndef Q_OS_WIN
+    Queue queue; QVERIFY(queue.id >= 0); o.databaseKey = queue.key;
+#endif
+    auto d = parseConfig("GROUP NULL root\nGROUP root branch\nCHANNEL branch pv\n");
+    qint64 time = 1000;
+    auto run = [&] {
+      Logging log(o, "root"); Engine engine(d); engine.now = [&] { return time; };
+      engine.operation = [&](Node* n, const QString& text) { log.operation(n, text); };
+      auto n = d.channels()[0];
+      engine.shelve(n, 1, "Investigating Ack Channel behavior");
+      engine.shelve(n, 2, "Investigating Ack Group behavior", true);
+      engine.unshelve(n);
+      engine.shelve(n, 1, "Maintenance complete");
+      time += 60000; engine.tick();
+      log.operation(n, "Notification Queued: Ack Group and Ack Channel subscription");
+    };
+    run();
+    QFile file(o.opmodFile); QVERIFY(file.open(QIODevice::ReadOnly));
+    const auto text = file.readAll(); file.close();
+    QCOMPARE(text.count('\n'), 6);
+    QVERIFY(text.contains("Notification Queued: Ack Group and Ack Channel subscription"));
+    QVERIFY(text.contains("Shelve /root/branch/pv until="));
+    QVERIFY(text.contains("reason=Investigating Ack Channel behavior"));
+    QVERIFY(text.contains("Change shelf /root/branch/pv until="));
+    QVERIFY(text.contains("Unshelve /root/branch/pv until="));
+    QVERIFY(text.contains("Shelf expired /root/branch/pv until="));
+#ifndef Q_OS_WIN
+    struct { long type; char bytes[1024]; } message{};
+    QCOMPARE(msgrcv(queue.id, &message, sizeof(message.bytes), 0, IPC_NOWAIT), ssize_t(-1));
+    QCOMPARE(errno, ENOMSG); // Shelf reasons never emit legacy DB acknowledgement messages.
+#endif
+    o.noLog = true; run();
+    QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(), text);
+  }
+
   void logging() {
     QTemporaryDir dir;
     Options o;

@@ -23,6 +23,12 @@ int effective(const State& s) {
 int unacknowledged(const State& s) {
   return s.mask[Disable] || s.mask[Cancel] || s.mask[Ack] ? 0 : s.unack;
 }
+QString identity(const Node* n) {
+  QString result;
+  for (; n; n = n->parent)
+    result.prepend(QString(n->group ? "G%1:%2" : "C%1:%2").arg(n->name.size()).arg(n->name));
+  return result;
+}
 int beep(const State& s) {
   int n = unacknowledged(s);
   return n >= s.beepThreshold ? n : 0;
@@ -54,7 +60,9 @@ Engine::Engine(Document& d, EngineOptions o, PvService* p) : options(o), documen
       g.severity = highest(g.counts);
     }
   }
+  rebuildPresentation();
 }
+
 Engine::~Engine() {
   stop();
 }
@@ -218,8 +226,9 @@ void Engine::severityCommands(Node* n, int prev, int current) {
         command(d.value.mid(t.size()).trimmed());
     }
 }
-void Engine::propagate(Node* n, const State& before) {
+void Engine::propagate(Node* n, const State& before, ObservationCause cause) {
   auto& s = states[n];
+  updatePresentation(n, before);
   int oldBeep = beep(before), newBeep = beep(s);
   for (auto p = n->parent; p; p = p->parent) {
     auto& g = states[p];
@@ -256,12 +265,11 @@ void Engine::propagate(Node* n, const State& before) {
     }
   }
   s.beep = beep(s);
-  if (newBeep > oldBeep && newBeep >= document.beepSeverity)
-    silenceCurrent = false;
+  publish(n, before, cause);
   if (changed)
     changed();
 }
-void Engine::process(Node* n, Event e, qint64 time) {
+void Engine::process(Node* n, Event e, qint64 time, int monitorSeverity) {
   if (options.debug)
     debugLog(true, "alarm", QString("%1 status=%2 severity=%3 ACKS=%4 ACKT=%5 value=%6")
         .arg(n->name, statusName(e.status), severityName(e.severity))
@@ -270,6 +278,8 @@ void Engine::process(Node* n, Event e, qint64 time) {
   State before = s;
   e.severity = qBound(0, e.severity, 4);
   e.acks = qBound(0, e.acks, 4);
+  s.observedSeverity = monitorSeverity < 0 ? e.severity : qBound(0, monitorSeverity, 4);
+  s.awaitingObservation = false;
   s.value = e.value;
   if (options.global) {
     s.unack = e.acks;
@@ -321,7 +331,17 @@ void Engine::process(Node* n, Event e, qint64 time) {
     if (!s.mask[Ack] && !options.global && (s.severity >= s.unack || s.mask[AckT]))
       s.unack = s.severity;
   }
-  propagate(n, before);
+  auto cause = ObservationCause::Processed;
+  // A recovery filter may retain the alarm severity after the IOC has cleared.
+  // Use the monitor state to distinguish automatic clears from acknowledgement.
+  if (options.global && before.initialized && !before.awaitingObservation &&
+      before.observedSeverity < 4 && s.observedSeverity < 4 &&
+      before.unack > 0 && s.unack == 0 && !s.mask[Ack] && !s.mask[Disable] &&
+      (s.observedSeverity > 0 || (before.observedSeverity == 0 && !s.mask[AckT])))
+    cause = requestedAcknowledgements.contains(n) ? ObservationCause::RequestedAcknowledgement
+                                                : ObservationCause::ExternalAcknowledgement;
+  if (!s.unack || s.severity == 4) requestedAcknowledgements.remove(n);
+  propagate(n, before, cause);
 }
 void Engine::event(Node* n, Event e) {
   auto& s = states[n];
@@ -330,6 +350,16 @@ void Engine::event(Node* n, Event e) {
   qint64 time = now();
   Event previous = s.pending;
   s.pending = e;
+  // A normal-to-ERROR transition can be held by the display's alarm filter.
+  // Invalidate observation coverage immediately; only processing a fresh state
+  // may establish a baseline again, including after a short filtered outage.
+  if (e.severity >= ErrorSeverity && s.initialized && s.severity == 0 &&
+      s.filterSeconds && !s.awaitingObservation) {
+    State before = s;
+    s.awaitingObservation = true;
+    requestedAcknowledgements.remove(n);
+    publish(n, before, ObservationCause::Suppression);
+  }
   if (!s.initialized || s.filterSeconds == 0) {
     process(n, e, time);
     return;
@@ -361,7 +391,7 @@ void Engine::event(Node* n, Event e) {
       Event held = e;
       held.status = s.status;
       held.severity = s.severity;
-      process(n, held, time);
+      process(n, held, time, e.severity);
       if (!s.filterUntil) {
         s.filterUntil = time + 1000LL * s.filterSeconds;
         noteDeadline(s.filterUntil);
@@ -390,19 +420,19 @@ void Engine::acknowledge(Node* n) {
                       (n->group ? "Group" : "Channel") + " (" + severityName(state(n).unack) + ")");
   eachChannel(n, [&](Node* c) {
     auto& s = states[c];
-    if (!unacknowledged(s))
+    if (s.shelf.until || !unacknowledged(s))
       return;
     if (acknowledgement)
       acknowledgement(c);
     if (options.global && pv) {
-      pv->put(c->name, s.unack, WriteKind::Acknowledge);
+      if (pv->put(c->name, s.unack, WriteKind::Acknowledge)) requestedAcknowledgements.insert(c);
       auto a = fields(c->option("ACKPV"));
       if (a.size() == 2)
         pv->put(a[0], a[1].toDouble());
     } else {
       State old = s;
       s.unack = 0;
-      propagate(c, old);
+      propagate(c, old, ObservationCause::LocalAcknowledgement);
     }
   });
 }
@@ -420,9 +450,11 @@ void Engine::applyMask(Node* n, Mask requested, bool automatic, Node* forceSourc
     if (options.passive && (!automatic || options.global))
       mask[AckT] = old.mask[AckT];
     s.mask = mask;
+    if (mask[Cancel] || mask[Disable] || mask[Ack]) requestedAcknowledgements.remove(c);
     if (options.global)
       s.mask[AckT] = old.mask[AckT];
     if (mask[Cancel]) {
+      s.awaitingObservation = true;
       s.filterUntil = s.filterStarted = 0;
       s.edgeIndex = 0;
       std::fill(s.edges.begin(), s.edges.end(), 0);
@@ -615,13 +647,215 @@ void Engine::setBeep(Node* n, int v) {
   states[n].beepThreshold = v;
   n->setOption("BEEPSEVR", severityName(v));
   rebuildBeep();
+  rebuildPresentation();
   logOperation(n, "Set beep severity " + severityName(v));
 }
 bool Engine::audible() const {
   if (silenceForever || silenceCurrent || now() < silenceUntil || !document.root)
     return false;
-  return state(document.root.get()).beep >= qMax(1, document.beepSeverity);
+  return presentation(document.root.get()).beep >= qMax(1, document.beepSeverity);
 }
+
+Presentation Engine::presentation(Node* n) const {
+  const auto& s = state(n);
+  if (n->group) return s.presentation;
+  Presentation result;
+  result.shelved = s.shelf.until != 0;
+  if (!result.shelved) {
+    result.severity = effective(s);
+    result.unack = unacknowledged(s);
+    result.beep = beep(s);
+    result.counts[result.severity] = 1;
+  }
+  return result;
+}
+void Engine::updatePresentation(Node* n, const State& before, bool notify) {
+  const auto& after = states[n];
+  int oldB = before.shelf.until ? 0 : beep(before);
+  int newB = after.shelf.until ? 0 : beep(after);
+  for (auto p = n->parent; p; p = p->parent) {
+    auto& parent = states[p];
+    auto& g = parent.presentation;
+    if (!before.shelf.until) {
+      --g.counts[effective(before)];
+      if (unacknowledged(before)) --g.unackCounts[unacknowledged(before)];
+    }
+    if (!after.shelf.until) {
+      ++g.counts[effective(after)];
+      if (unacknowledged(after)) ++g.unackCounts[unacknowledged(after)];
+    }
+    g.shelved += int(after.shelf.until != 0) - int(before.shelf.until != 0);
+    if (oldB) --g.beepCounts[oldB];
+    if (newB) ++g.beepCounts[newB];
+    g.severity = highest(g.counts);
+    g.unack = highest(g.unackCounts);
+    g.beep = highest(g.beepCounts);
+    if (g.beep < parent.beepThreshold) g.beep = 0;
+    if (oldB < parent.beepThreshold) oldB = 0;
+    if (newB < parent.beepThreshold) newB = 0;
+  }
+  if (notify && newB > oldB && newB >= document.beepSeverity) silenceCurrent = false;
+}
+void Engine::rebuildPresentation() {
+  for (auto n : document.nodes()) states[n].presentation = {};
+  // A shelved placeholder contributes no counts. Balance its shelf count before
+  // adding each real channel through the same incremental aggregation path.
+  State absent;
+  absent.shelf.until = 1;
+  for (auto n : document.channels()) {
+    for (auto p = n->parent; p; p = p->parent) ++states[p].presentation.shelved;
+    updatePresentation(n, absent, false);
+  }
+}
+AlarmSubscription Engine::observe(std::function<void(const AlarmObservation&)> callback) {
+  auto lifetime = std::make_shared<int>(0);
+  observers.push_back({lifetime, std::move(callback)});
+  return lifetime;
+}
+void Engine::publish(Node* n, const State& before, ObservationCause cause) {
+  observers.erase(std::remove_if(observers.begin(), observers.end(),
+      [](const Observer& o) { return o.lifetime.expired(); }), observers.end());
+  if (!channelUpdated && observers.isEmpty()) return;
+  auto after = channelUpdate(n);
+  if (channelUpdated) channelUpdated(after);
+  if (observers.isEmpty()) return;
+  AlarmObservation observation{snapshot(n, before), after, cause};
+  const auto listeners = observers;
+  for (const auto& listener : listeners)
+    if (!listener.lifetime.expired()) listener.callback(observation);
+}
+QString Engine::nodeIdentity(const Node* n) { return identity(n); }
+ChannelUpdate Engine::channelUpdate(Node* n) const { return snapshot(n, state(n)); }
+ChannelUpdate Engine::snapshot(Node* n, const State& s) const {
+  ChannelUpdate u;
+  u.identity = identity(n); u.path = channelPath(n); u.pv = n->name; u.value = s.value;
+  for (auto p = n; p; p = p->parent) u.ancestors << identity(p);
+  u.severity = s.severity; u.status = s.status; u.unack = s.unack;
+  u.initialized = s.initialized;
+  u.suppressed = s.mask[Cancel] || s.mask[Disable] || s.mask[Ack] || s.shelf.until;
+  u.cancelled = s.mask[Cancel]; u.disabled = s.mask[Disable];
+  u.noAck = s.mask[Ack]; u.shelved = s.shelf.until != 0;
+  u.available = s.initialized && !s.awaitingObservation && s.severity < 4 && !u.cancelled;
+  u.observedAt = now();
+  return u;
+}
+void Engine::restoreLocalAcknowledgements(const QHash<QString, int>& saved) {
+  if (options.global || saved.isEmpty()) return;
+  QHash<QString, int> counts;
+  for (auto n : document.channels()) ++counts[identity(n)];
+  for (auto n : document.channels()) {
+    auto& s = states[n]; const auto key = identity(n);
+    if (counts[key] == 1 && saved.contains(key) && !s.mask[Ack] && !s.mask[Disable] && !s.mask[Cancel])
+      s.unack = qBound(0, saved[key], 4);
+  }
+  for (auto n : document.nodes()) if (n->group) states[n].unackCounts.fill(0);
+  for (auto n : document.channels()) {
+    const int u = unacknowledged(states[n]);
+    if (u) for (auto p = n->parent; p; p = p->parent) ++states[p].unackCounts[u];
+  }
+  for (auto n : document.nodes()) if (n->group) states[n].unack = highest(states[n].unackCounts);
+  rebuildBeep(); rebuildPresentation();
+}
+QString Engine::channelPath(const Node* n) {
+  QStringList parts;
+  for (; n; n = n->parent) {
+    QString part = n->name;
+    part.replace("\\", "\\\\");
+    part.replace("/", "\\/");
+    parts.prepend(part);
+  }
+  return "/" + parts.join('/');
+}
+int Engine::shelve(Node* n, int minutes, const QString& reason, bool replace) {
+  const QString text = reason.trimmed();
+  if (minutes < 1 || minutes > 1440 || text.isEmpty() || text.size() > 240 ||
+      text.contains(QRegularExpression("[\\r\\n\\x{2028}\\x{2029}]")))
+    throw ParseError("Shelving requires 1–1440 minutes and a single-line reason (1–240 characters).");
+  if (!n || (replace && n->group)) throw ParseError("Select one channel to change its shelf.");
+  state(n); // Validate ownership before traversing.
+  const qint64 time = now();
+  const qint64 duration = qint64(minutes) * 60000;
+  if (time > std::numeric_limits<qint64>::max() - duration)
+    throw ParseError("Shelving deadline is out of range.");
+  int count = 0;
+  eachChannel(n, [&](Node* c) {
+    auto& s = states[c];
+    if (s.shelf.until && s.shelf.until <= time) clearShelf(c, "Shelf expired");
+    if (s.shelf.until && !replace) return;
+    State before = s;
+    s.shelf = {time + duration, text};
+    updatePresentation(c, before);
+    publish(c, before, ObservationCause::Suppression);
+    noteDeadline(s.shelf.until);
+    logOperation(c, QString(before.shelf.until ? "Change shelf " : "Shelve ") + channelPath(c) +
+        " until=" + QDateTime::fromMSecsSinceEpoch(s.shelf.until).toString(Qt::ISODateWithMs) +
+        " reason=" + text);
+    ++count;
+  });
+  if (count && changed) changed();
+  return count;
+}
+void Engine::clearShelf(Node* n, const QString& action) {
+  auto& s = states[n];
+  if (!s.shelf.until) return;
+  State before = s;
+  s.shelf = {};
+  updatePresentation(n, before);
+  publish(n, before, ObservationCause::Suppression);
+  logOperation(n, action + " " + channelPath(n) + " until=" +
+      QDateTime::fromMSecsSinceEpoch(before.shelf.until).toString(Qt::ISODateWithMs) +
+      " reason=" + before.shelf.reason);
+  if (changed) changed();
+}
+void Engine::unshelve(Node* n) {
+  if (!n) return;
+  state(n);
+  eachChannel(n, [&](Node* c) { clearShelf(c, "Unshelve"); });
+}
+QVector<ShelfSnapshot> Engine::shelves() const {
+  QHash<QString, int> counts;
+  const auto channels = document.channels();
+  for (auto n : channels) ++counts[identity(n)];
+  QVector<ShelfSnapshot> result;
+  for (auto n : channels) {
+    const auto& s = state(n);
+    if (s.shelf.until)
+      result.push_back({identity(n), channelPath(n), s.shelf, s.unack, counts[identity(n)] == 1});
+  }
+  return result;
+}
+void Engine::restoreShelves(const QVector<ShelfSnapshot>& saved) {
+  QHash<QString, QVector<Node*>> targets;
+  for (auto n : document.channels()) targets[identity(n)].push_back(n);
+  for (const auto& entry : saved) {
+    const auto matches = targets.value(entry.identity);
+    if (!entry.unique || matches.size() != 1) {
+      logOperation(document.root.get(), "Drop shelf on reload " + entry.path +
+          " (missing or ambiguous identity) until=" +
+          QDateTime::fromMSecsSinceEpoch(entry.shelf.until).toString(Qt::ISODateWithMs) +
+          " reason=" + entry.shelf.reason);
+      continue;
+    }
+    auto n = matches.front();
+    auto& s = states[n];
+    State before = s;
+    s.shelf = entry.shelf;
+    if (!options.global && !s.mask[Ack] && !s.mask[Disable]) s.unack = entry.localUnack;
+    updatePresentation(n, before, false);
+    if (s.shelf.until <= now()) clearShelf(n, "Shelf expired during reload");
+    else noteDeadline(s.shelf.until);
+  }
+  for (auto n : document.nodes()) if (n->group) states[n].unackCounts.fill(0);
+  for (auto n : document.channels()) {
+    const int u = unacknowledged(states[n]);
+    if (u) for (auto p = n->parent; p; p = p->parent) ++states[p].unackCounts[u];
+  }
+  for (auto n : document.nodes()) if (n->group) states[n].unack = highest(states[n].unackCounts);
+  rebuildBeep();
+  rebuildPresentation();
+  if (changed) changed();
+}
+
 void Engine::noteDeadline(qint64 deadline) {
   if (deadline && (!nextStateDeadline || deadline < nextStateDeadline))
     nextStateDeadline = deadline;
@@ -641,6 +875,9 @@ void Engine::tick() {
         std::fill(s.edges.begin(), s.edges.end(), 0);
         process(n, s.pending, s.filterStarted);
       }
+      if (s.shelf.until && t >= s.shelf.until)
+        clearShelf(n, "Shelf expired");
+      noteDeadline(s.shelf.until);
       if (s.noAckUntil && t >= s.noAckUntil) {
         noAck(n, false);
         logOperation(n, "Set Ack after expiration of NoAck one hour timer");

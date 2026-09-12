@@ -20,9 +20,9 @@ $(error Qt $(QT_VERSION) Widgets, Network, PrintSupport, and Multimedia developm
 endif
 endif
 INCLUDES = -I. -I$(OBJ_DIR) -I$(EPICS_BASE)/include -I$(EPICS_BASE)/include/compiler/$(EPICS_COMPILER) -I$(EPICS_BASE)/include/os/$(OS)
-CORE = core/model.cc core/config.cc core/engine.cc
-SERVICES = services/log_browser.cc services/channel_access.cc services/options.cc services/logging.cc services/ipc.cc
-GUI = ui/appearance.cc ui/workflows.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc main.cc
+CORE = core/analytics.cc core/model.cc core/config.cc core/engine.cc core/notifications.cc
+SERVICES = services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/options.cc services/logging.cc services/ipc.cc
+GUI = ui/analytics.cc ui/notifications.cc ui/appearance.cc ui/workflows.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc main.cc
 OBJECTS = $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o) $(SERVICES:.cc=.o) $(GUI:.cc=.o)) $(OBJ_DIR)/resources.o
 PROGRAMS = qtalh qtalh_printer qtalh_DB
 .PHONY: all test test-core test-ui test-ioc test-helpers clean distclean
@@ -85,7 +85,27 @@ $(OBJ_DIR)/test_helpers: $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o)) $(OBJ_DIR)/serv
 test-helpers: all $(OBJ_DIR)/test_helpers
 	$(OBJ_DIR)/test_helpers
 
-test: test-core test-ui test-ioc test-helpers
+test: test-core test-ui test-ioc test-helpers test-notifications test-analytics
+
+$(OBJ_DIR)/test_analytics.moc: tests/test_analytics.cc
+	@mkdir -p $(OBJ_DIR)
+	$(MOC) $(INCLUDES) $(QT_CFLAGS) $< -o $@
+$(OBJ_DIR)/tests/test_analytics.o: $(OBJ_DIR)/test_analytics.moc
+$(OBJ_DIR)/test_analytics: $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o)) $(OBJ_DIR)/services/analytics.o $(OBJ_DIR)/services/notifications.o $(OBJ_DIR)/tests/test_analytics.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(call qt_libs,Test Core Network)
+.PHONY: test-analytics
+test-analytics: $(OBJ_DIR)/test_analytics
+	$(OBJ_DIR)/test_analytics
+
+$(OBJ_DIR)/test_notifications.moc: tests/test_notifications.cc
+	@mkdir -p $(OBJ_DIR)
+	$(MOC) $(INCLUDES) $(QT_CFLAGS) $< -o $@
+$(OBJ_DIR)/tests/test_notifications.o: $(OBJ_DIR)/test_notifications.moc
+$(OBJ_DIR)/test_notifications: $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o)) $(OBJ_DIR)/services/notifications.o $(OBJ_DIR)/tests/test_notifications.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(call qt_libs,Test Core Network)
+.PHONY: test-notifications
+test-notifications: $(OBJ_DIR)/test_notifications
+	$(OBJ_DIR)/test_notifications
 
 $(OBJ_DIR)/resources.cc: resources/qtalh.qrc resources/alh.xbm
 	@mkdir -p $(OBJ_DIR)

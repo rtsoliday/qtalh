@@ -18,6 +18,19 @@ A CA subscription delivers an event to the engine. The engine updates channel st
 
 Channel Access uses a shared non-preemptive context, socket notifiers, and a 100 ms fallback poll. Callbacks are serialized on the GUI thread, polling is guarded against reentrancy, and subscriptions are cleared before model destruction. Ownership distinguishes subscriptions for separate rows using the same PV.
 
+Analytics and notifications subscribe independently through lifetime-managed
+engine observers. Observations carry before/after state, availability, suppression
+flags, and acknowledgement causes. The compatibility logging callbacks remain
+separate; a global acknowledgement request is not an analytics confirmation.
+
+Session analytics retain compact transitions in a bounded rolling buffer and
+incremental session summaries. The GUI requests immutable report snapshots at
+most once per second. A single background job per runtime aggregates each
+snapshot; generation checks discard results invalidated by reset or reload.
+Virtual table models and QPainter charts share the resulting report.
+
+See [Alarm analytics](/operate/analytics) for metric definitions and coverage limits.
+
 ## Timers and background work
 
 The engine's 200 ms tick handles due filter/NoAck work. Heartbeats use a separate precise timer and skip missed beats after event-loop delays. UI status/blink work is separated from full model refreshes. Historical log searches run in a cancellable worker thread with bounded results.

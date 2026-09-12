@@ -519,9 +519,14 @@ void Logging::acknowledgement(Node* n) {
     record(false, "Ack Channel--- " + padded(n->name, 28), QDateTime::currentMSecsSinceEpoch(), 6);
 }
 void Logging::operation(Node* n, const QString& s) {
+  // Free-text shelving reasons must not turn a local presentation action into
+  // a legacy database acknowledgement or mask-change message.
+  const bool shelving = s.startsWith("Shelve ") || s.startsWith("Change shelf ") ||
+      s.startsWith("Unshelve ") || s.startsWith("Shelf expired") || s.startsWith("Drop shelf on reload ");
   record(false, facility + ": " + (n ? n->name : QString()) + ":  " + s,
          QDateTime::currentMSecsSinceEpoch(),
-         s.contains("Ack Group")       ? 6
+         (shelving || s.startsWith("Notification ")) ? 0
+         : s.contains("Ack Group")     ? 6
          : s.contains("Ack Channel")   ? 5
          : s.startsWith("Change Mask") ? 7
                                        : 0);

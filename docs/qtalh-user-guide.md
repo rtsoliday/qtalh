@@ -53,6 +53,55 @@ identified. Previews show the effective `qtedm` command when a leading `medm`
 executable is substituted. Hovering never opens guidance or executes commands.
 These tooltips work with both Motif and modern styles.
 
+## Timed shelving
+
+Select a channel or group and choose **Action → Shelve Alarms…**. Choose 15 or
+30 minutes, 1, 4, or 8 hours, or custom whole minutes from 1 to 1,440. The default
+is one hour. Enter a single-line reason (1–240 characters); the timer starts
+when you click **Shelve**. A group operation shelves its currently unshelved
+channels and retains existing shelves' deadlines and reasons. The dialog keeps
+its displayed target even if you select another row in the main window.
+
+Shelving affects **only this runtime's display and sound**, including when
+running in global or passive mode. Shelved channels do not contribute to active
+or unacknowledged alarm counts and are excluded from those display filters.
+Unfiltered views mark them **[Shelved]**. Monitoring, count filtering, alarm
+logging, command hooks, and severity-output PVs continue normally. Other ALH or
+QtALH runtimes are unaffected. Shelving never acknowledges an alarm or changes
+its mask, ACKS, or ACKT.
+
+Click **Shelved: N**, or choose **View → Shelved Alarms…**, to see full channel
+paths, underlying severity and outstanding acknowledgements, expiration in local
+time, remaining duration, and reasons. **Unshelve Selected** restores selected
+channels immediately. **Change Shelf…** replaces one channel's deadline and
+reason. **Action → Unshelve Alarms** clears all shelves beneath the selected
+group, including shelves originally applied individually. Unshelve a channel
+before acknowledging it; bulk acknowledgement skips shelved channels.
+
+At expiry, current alarm presentation returns automatically. Outstanding
+unacknowledged alarms can sound again, subject to existing thresholds and silence
+settings. A latched transient can reappear even if the PV recovered while
+shelved. Explicit mask changes and acknowledgement by other clients still apply.
+If Disable or Cancel remains set, expiry does not override it. Shelving is
+therefore different from **NoAck for One Hour**, which changes acknowledgement
+behavior, and **silencing**, which affects sound without removing alarm counts.
+
+Shelves survive successful configuration reloads in the same runtime, retaining
+their deadlines and reasons. Matching uses the full hierarchy, not PV names or
+row positions alone. Removed, renamed, moved, or ambiguous channels lose their
+shelves with an operator-log explanation. Newly added channels start unshelved.
+Failed reloads leave shelving unchanged. Local latches for matched shelved
+channels survive reload; global acknowledgements are reconciled with fresh IOC
+updates.
+
+Shelves are not saved in `.alhConfig` or shared with another runtime. Runtime
+Save As leaves existing shelves intact but does not export them. Stopping the
+runtime clears them; hiding the main window while its compact window remains
+open does not. Deadlines follow the system wall clock, expire on the next engine
+tick, and are checked after system suspend. Operator logs record shelving,
+changes, early unshelving, expiry, and reload-related removal, unless logging is
+disabled.
+
 ## Command-line reference
 
 Syntax: `qtalh [OPTIONS] [configfile]`. One configuration is supported per
@@ -304,3 +353,25 @@ models, dialogs, and windows. Core depends on Qt Core and EPICS calculation
 routines, but not Widgets or CA. The service interfaces and clock/command/log
 callbacks support deterministic core tests. Preserve the original license and
 source provenance when modifying the port.
+
+## Personal notifications and escalation
+
+**Setup → Notifications…** adds personal email/sendmail and generic JSON webhook
+subscriptions, scope/PV matching, delayed stages, repeat suppression, optional
+resolution messages, preview, explicit synthetic test submission, and delivery
+activity. Each runtime starts paused; select **Enable notifications in this runtime**.
+Subscriptions operate independently in local/global/passive modes and never write
+alarm PVs. Shelving and Cancel/Disable/NoAck suppress notifications; silence does not.
+Settings are saved atomically in the per-user Qt configuration directory, separate
+from ALH files. See the [notification guide](site/operate/notifications.md) for setup,
+reload behavior, delivery guarantees, retry rules, and limits.
+
+## Session alarm analytics
+
+**View → Alarm Analytics…** provides frequent-offender rankings, configurable
+chatter detection, standing-alarm durations, confirmed acknowledgement response
+times, charts, and CSV export. Collection starts automatically in each runtime
+and remains in memory. Session summaries survive same-configuration reloads;
+rolling history is bounded and reports disclose gaps and partial coverage.
+See the [analytics guide](site/operate/analytics.md) for metric definitions,
+suppression behavior, acknowledgement confirmation, and export details.

@@ -172,3 +172,39 @@ regenerate the fixture. From `qtalh/tests/`:
 ffmpeg -f lavfi -i sine=frequency=880:duration=0.2:sample_rate=44100 \
   -c:a libvorbis -q:a 2 alarm.ogg
 ```
+
+## Timed shelving checks
+
+The core suite covers shelf expiry, preserved transients, group operations,
+independent display aggregates, mask/filter interactions, automation equivalence,
+reload identity/latches, and 10,000-channel bursts. The IOC suite verifies that
+shelving one runtime leaves IOC acknowledgements, severity outputs, and a second
+client operating normally. The UI suites exercise reasons/durations, fixed
+selection targets, list changes, filters, reloads, and Save As.
+
+Run `test-core`, `test-ui`, `test-ui-fusion`, and `test-ioc` from `qtalh`.
+The shelving UI fixture writes `classic-shelve-dialog.png`,
+`classic-shelved-main.png`, and `classic-shelved-list.png`, with corresponding
+`fusion-` captures, under the build's `test-artifacts` directory. These are
+synthetic local fixtures; their clocks are controlled by the tests.
+
+### Notification subscriptions
+
+`make -C qtalh test-notifications` runs fake-clock scheduling tests, reload and
+suppression cases, 10,000-channel batching, queue pressure, settings conflict and
+corruption handling, MIME/header validation, a local fake mailer, and loopback
+HTTP retry/redirect/timeout tests. No real email or external webhook is used.
+The target is included in `test` on Unix and Windows. UI tests exercise settings,
+match preview, explicit runtime enable, and paused restart in both appearances;
+screenshots are `classic-notifications.png` and `fusion-notifications.png`.
+
+### Session analytics
+
+`make -C qtalh test-analytics` covers metric definitions with a fake clock,
+rolling boundaries, suppression, gaps, reload/reset, CSV safety, independent
+notification observers, background-result invalidation, and bounded history
+under 10,000 channels / 300,000 transitions. It is included in `test` on Unix and
+Windows. UI tests exercise all four tabs, charts, scope/search, CSV export,
+reset, and the 10,000-channel dashboard in both appearances. IOC tests check
+confirmed/requested/external acknowledgement and access gaps. Screenshots are
+`classic-analytics-0.png` through `-3.png` and their `fusion-analytics-*` equivalents.

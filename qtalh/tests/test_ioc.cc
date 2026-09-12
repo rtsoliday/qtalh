@@ -1,4 +1,6 @@
 #include "services/channel_access.h"
+#include "core/notifications.h"
+#include "core/analytics.h"
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QtTest>
@@ -33,6 +35,107 @@ private slots:
     ioc.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
     startIoc();
   }
+
+  void analyticsConfirmedAcknowledgementsAndGaps() {
+    auto doc=parseConfig("GROUP NULL analytics\nCHANNEL analytics "+prefix+"alarm\nCHANNEL analytics "+prefix+"protected\n");
+    ChannelAccess ca({true});Engine engine(doc,{true},&ca);auto n=doc.channels()[0];auto protectedNode=doc.channels()[1];
+    QElapsedTimer clock;clock.start();AlarmAnalytics analytics(0,QDateTime::currentMSecsSinceEpoch());
+    QVector<ChannelUpdate> initial;for(auto c:doc.channels())initial<<engine.channelUpdate(c);
+    analytics.reconcile(initial,0,QDateTime::currentMSecsSinceEpoch());
+    ObservationCause lastAck=ObservationCause::Processed;
+    auto observer=engine.observe([&](const AlarmObservation&o){analytics.observe(o,clock.elapsed(),QDateTime::currentMSecsSinceEpoch());if(o.cause==ObservationCause::RequestedAcknowledgement||o.cause==ObservationCause::ExternalAcknowledgement)lastAck=o.cause;});
+    engine.start();QTRY_VERIFY(engine.state(n).initialized);
+    ChannelAccess driver;driver.prepare(prefix+"permit");QTRY_VERIFY(driver.put(prefix+"permit",1));
+    QVERIFY(ca.put(n->name,0));QVERIFY(ca.put(n->name,1,WriteKind::AckTransient));QVERIFY(ca.put(n->name,3,WriteKind::Acknowledge));
+    QTRY_COMPARE(engine.state(n).unack,0);QTRY_VERIFY(engine.channelUpdate(protectedNode).available);
+    auto result=[&]{AnalyticsQuery q;q.rangeMs=0;q.search=n->name;return AlarmAnalytics::query(analytics.snapshot(clock.elapsed(),QDateTime::currentMSecsSinceEpoch()),q).rows[0];};
+    QVERIFY(ca.put(n->name,20));QTRY_COMPARE(engine.state(n).unack,2);engine.acknowledge(n);
+    QTRY_COMPARE(engine.state(n).unack,0);QCOMPARE(lastAck,ObservationCause::RequestedAcknowledgement);
+    QCOMPARE(result().stats.ackCount,qint64(1));QVERIFY(result().standingMs>=0);
+    QVERIFY(ca.put(n->name,0));QTRY_COMPARE(engine.state(n).severity,0);
+    QVERIFY(ca.put(n->name,20));QTRY_COMPARE(engine.state(n).unack,2);
+    QVERIFY(ca.put(n->name,3,WriteKind::Acknowledge));QTRY_COMPARE(engine.state(n).unack,0);
+    QCOMPARE(lastAck,ObservationCause::ExternalAcknowledgement);QCOMPARE(result().stats.ackCount,qint64(2));
+    QVERIFY(driver.put(prefix+"permit",0));QTRY_VERIFY(!engine.channelUpdate(protectedNode).available);
+    QVERIFY(driver.put(prefix+"permit",1));QTRY_VERIFY(engine.channelUpdate(protectedNode).available);
+    AnalyticsQuery q;q.rangeMs=0;q.search=protectedNode->name;
+    auto gap=AlarmAnalytics::query(analytics.snapshot(clock.elapsed(),QDateTime::currentMSecsSinceEpoch()),q).rows[0];
+    QVERIFY(gap.stats.gaps>=1);QCOMPARE(gap.stats.activations,qint64(0));
+    QVERIFY(ca.put(n->name,0));QTRY_COMPARE(engine.state(n).severity,0);
+  }
+
+  void notificationsLeaveIocAcknowledgementsAndOutputsUnchanged() {
+    auto d = parseConfig("GROUP NULL notify\nCHANNEL notify " + prefix + "alarm\n$SEVRPV " + prefix + "severity\n");
+    ChannelAccess ca({true}); Engine engine(d, {true}, &ca);
+    auto n = d.channels()[0];
+    NotificationSettings settings;
+    NotificationDestination destination; destination.id = "test"; destination.name = "Test";
+    destination.kind = "webhook"; destination.url = "http://127.0.0.1:1/test";
+    settings.destinations << destination;
+    NotificationSubscription rule; rule.id = "rule"; rule.name = "IOC notification";
+    rule.configuration = "/ioc-test.alh"; rule.stages = {{"initial", 0, {"test"}}};
+    settings.subscriptions << rule;
+    NotificationPolicy policy; policy.configure(settings, rule.configuration); policy.enable(true);
+    engine.channelUpdated = [&](const ChannelUpdate& update) { policy.observe(update, 0); };
+    engine.start(); QTRY_VERIFY(engine.state(n).initialized);
+    QVERIFY(ca.put(n->name, 0));
+    QVERIFY(ca.put(n->name, 1, WriteKind::AckTransient));
+    QVERIFY(ca.put(n->name, 3, WriteKind::Acknowledge));
+    QTRY_COMPARE(engine.state(n).unack, 0);
+    ChannelAccess observer; double output = -1;
+    observer.number(prefix + "severity", [&](double v) { output = v; });
+    QVERIFY(ca.put(n->name, 20));
+    QTRY_COMPARE(engine.state(n).unack, 2); QTRY_COMPARE(output, 2.0);
+    policy.tick(0); policy.tick(10000); NotificationEnvelope envelope;
+    QVERIFY(policy.take(envelope, 10000)); envelope.attempts = 1;
+    policy.attempted(envelope, 10000); policy.completed(envelope, true);
+    QTest::qWait(100);
+    QCOMPARE(engine.state(n).unack, 2); QCOMPARE(output, 2.0);
+    QVERIFY(!engine.state(n).mask[AckT]);
+    engine.shelve(n, 1, "Notification suppression");
+    QVERIFY(policy.activeChannels().isEmpty());
+    QCOMPARE(engine.state(n).unack, 2); QCOMPARE(output, 2.0);
+    QVERIFY(ca.put(n->name, 0));
+    QTRY_COMPARE(engine.state(n).severity, 0);
+    QVERIFY(ca.put(n->name, 3, WriteKind::Acknowledge));
+    QTRY_COMPARE(engine.state(n).unack, 0);
+  }
+
+  void shelvingKeepsIocStateAndOutputs() {
+    auto d = parseConfig("GROUP NULL shelfTest\nCHANNEL shelfTest " + prefix + "alarm\n$SEVRPV " + prefix + "severity\n");
+    auto peerDoc = parseConfig("GROUP NULL peer\nCHANNEL peer " + prefix + "alarm\n");
+    ChannelAccess ca({true}), peerCa({true});
+    Engine e(d, {true}, &ca), peer(peerDoc, {true}, &peerCa);
+    auto n = d.channels()[0], other = peerDoc.channels()[0];
+    qint64 time = 1000; e.now = [&] { return time; };
+    e.start(); peer.start();
+    QTRY_VERIFY(e.state(n).initialized && peer.state(other).initialized);
+    QVERIFY(ca.put(n->name, 0));
+    QVERIFY(ca.put(n->name, 1, WriteKind::AckTransient));
+    QVERIFY(ca.put(n->name, 3, WriteKind::Acknowledge));
+    QTRY_COMPARE(e.state(n).severity, 0); QTRY_COMPARE(e.state(n).unack, 0);
+    ChannelAccess observer; double output = -99;
+    observer.number(prefix + "severity", [&](double value) { output = value; });
+    int records = 0; e.alarmLog = [&](Node*, const State&, qint64) { ++records; };
+    e.shelve(n, 1, "IOC integration");
+    QVERIFY(ca.put(n->name, 20));
+    QTRY_COMPARE(e.state(n).severity, 2); QTRY_COMPARE(peer.state(other).severity, 2);
+    QTRY_COMPARE(e.state(n).unack, 2); QTRY_COMPARE(output, 2.0);
+    QCOMPARE(e.presentation(d.root.get()).severity, 0);
+    QCOMPARE(peer.presentation(peerDoc.root.get()).severity, 2);
+    QVERIFY(!e.audible()); QVERIFY(records > 0);
+    e.acknowledge(d.root.get());
+    QVERIFY(ca.put(n->name, 0));
+    QTRY_COMPARE(e.state(n).severity, 0); QTRY_COMPARE(output, 0.0);
+    QCOMPARE(e.state(n).unack, 2);
+    QVERIFY(!e.state(n).mask[AckT]);
+    time += 60000; e.tick();
+    QCOMPARE(e.presentation(d.root.get()).unack, 2); QVERIFY(e.audible());
+    e.shelve(n, 1, "Other operator acknowledges"); peer.acknowledge(other);
+    QTRY_COMPARE(e.state(n).unack, 0);
+    e.unshelve(n); QVERIFY(!e.audible());
+  }
+
   void alarmAndWrites() {
     auto d = parseConfig("GROUP NULL integration\n$HEARTBEATPV " + prefix +
                          "heartbeat 0.1 7\nCHANNEL integration " + prefix + "alarm\n$ACKPV " +

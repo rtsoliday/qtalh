@@ -30,6 +30,9 @@ export default defineConfig({
         { text: 'Monitor & acknowledge', link: '/operate/alarms' },
         { text: 'Appearance & font size', link: '/operate/appearance' },
         { text: 'Silence & display filters', link: '/operate/silence-filters' },
+        { text: 'Timed shelving', link: '/operate/shelving' },
+        { text: 'Notifications & escalation', link: '/operate/notifications' },
+        { text: 'Alarm analytics', link: '/operate/analytics' },
         { text: 'Read alarm logs', link: '/operate/logs' },
         { text: 'Troubleshooting', link: '/operate/troubleshooting' }
       ]},

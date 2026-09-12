@@ -33,3 +33,10 @@ The command-line equivalents are `-filter no`, `-filter active`, and `-filter un
 ## Temporarily remove acknowledgement requirements
 
 Timed NoAck (**Ctrl+N**) is different from silence. It changes acknowledgement behavior and is shown as `H` in the mask summary. Use the [mask reference](/reference/configuration) before changing NoAck, NoAckT, Disable, or Cancel settings.
+
+## Temporarily shelve alarms
+
+Use [timed shelving](/operate/shelving) to exclude selected channels from active
+counts, alarm lists, and sound while preserving normal monitoring, logging, and
+acknowledgement state. Shelves require a reason and expire automatically; they
+are separate from timed NoAck and silencing.

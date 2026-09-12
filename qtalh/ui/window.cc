@@ -62,7 +62,11 @@ bool AlarmModel::visible(Node* n) const {
   if (!filter)
     return true;
   auto& s = engine->state(n);
-  return filter == 1 ? s.severity > 0 || s.unack > 0 : s.unack > 0;
+  if (s.shelf.until) return false;
+  const auto visible = engine->presentation(n);
+  const int severity = n->group ? visible.severity : s.severity;
+  const int unack = n->group ? visible.unack : s.unack;
+  return filter == 1 ? severity > 0 || unack > 0 : unack > 0;
 }
 QVector<Node*> AlarmModel::children(Node* n) const {
   auto cached = childCache.constFind(n);
@@ -119,9 +123,15 @@ QVariant AlarmModel::data(const QModelIndex& i, int role) const {
   if (!n)
     return {};
   const auto& s = engine->state(n);
-  int severity = !n->group && (s.mask[Cancel] || s.mask[Disable]) ? 0 : s.severity;
-  int unack = !n->group && (s.mask[Cancel] || s.mask[Disable] || s.mask[Ack]) ? 0 : s.unack;
+  const auto shown = engine->presentation(n);
+  int severity = shown.severity;
+  int unack = shown.unack;
   if (role == Qt::ToolTipRole) {
+    if (s.shelf.until && i.column() != 4 && i.column() != 5)
+      return Engine::channelPath(n) + "\nShelved until " +
+          QDateTime::fromMSecsSinceEpoch(s.shelf.until).toString(Qt::ISODate) +
+          "\nReason: " + s.shelf.reason + "\nUnderlying: " + statusName(s.status) + " " +
+          severityName(s.severity) + "; unacknowledged: " + severityName(s.unack) + "\n" + s.value;
     if (i.column() == 4) {
       QStringList guidance;
       for (const auto& key : {"GUIDANCE_TEXT", "GUIDANCE"})
@@ -176,7 +186,8 @@ QVariant AlarmModel::data(const QModelIndex& i, int role) const {
   case 1:
     return code(severity);
   case 2:
-    return n->label();
+    return n->label() + (s.shelf.until ? " [Shelved]" :
+        shown.shelved ? QString(" [%1 shelved]").arg(shown.shelved) : QString());
   case 3:
     return n->group && std::any_of(n->children.begin(), n->children.end(),
                                    [](const auto& c) { return c->group; })
@@ -205,11 +216,11 @@ QVariant AlarmModel::data(const QModelIndex& i, int role) const {
       return QString();
     if (n->group)
       return QString("(%1,%2,%3,%4,%5)")
-          .arg(s.counts[4])
-          .arg(s.counts[3])
-          .arg(s.counts[2])
-          .arg(s.counts[1])
-          .arg(s.counts[0]);
+          .arg(shown.counts[4])
+          .arg(shown.counts[3])
+          .arg(shown.counts[2])
+          .arg(shown.counts[1])
+          .arg(shown.counts[0]);
     return QString("<%1,%2>").arg(statusName(s.status), severityName(severity)) +
            (unack ? QString(",<%1>").arg(severityName(unack)) : QString());
   }
@@ -369,6 +380,8 @@ Window::~Window() {
   beepTimer.stop();
   if (sound)
     sound->stop();
+  if (analytics) analytics->detach();
+  if (notifications) notifications->detach();
   engine.reset();
   ca.reset();
   delete runtime;
@@ -378,6 +391,8 @@ void Window::setupEngine() {
   debugLog(options.debug, "config", QString("load %1: %2 nodes, %3 channels")
       .arg(doc.filename).arg(doc.nodes().size()).arg(doc.channels().size()));
   heartbeatTimer.stop();
+  if (analytics) analytics->detach();
+  if (notifications) notifications->detach();
   engine.reset();
   ca.reset();
 
@@ -411,6 +426,13 @@ void Window::setupEngine() {
     engine->acknowledgement = [this](Node* n) { logging->acknowledgement(n); };
     engine->alarmLog = [this](Node* n, const State& s, qint64 t) { logging->alarm(n, s, t); };
     engine->operation = [this](Node* n, const QString& s) { logging->operation(n, s); };
+  }
+  if (!options.editor) {
+    if (!notifications) notifications = std::make_unique<NotificationService>();
+    notifications->operation = [this](const QString& text) { if (logging) logging->operation(nullptr, text); };
+    notifications->attach(engine.get(), doc.channels(), doc.filename);
+    if (!analytics) analytics = std::make_unique<AnalyticsService>();
+    analytics->attach(engine.get(), doc.filename);
   }
   engine->command = [this](QString command) {
     debugLog(options.debug, "command", "requested " + command);
@@ -523,6 +545,11 @@ void Window::buildUi() {
   disabledForceLabel = new QLabel;
   disabledForceLabel->setObjectName("disabledForcePvCount");
   statusRow->addWidget(disabledForceLabel);
+  shelvedLabel = new QLabel;
+  shelvedLabel->setObjectName("shelvedCount");
+  shelvedLabel->setTextFormat(Qt::RichText);
+  statusRow->addWidget(shelvedLabel);
+  connect(shelvedLabel, &QLabel::linkActivated, this, [this] { showShelvedAlarms(); });
   info->addLayout(statusRow);
   QWidget* legend = nullptr;
   auto legendLayout = info;
@@ -704,6 +731,7 @@ void Window::refresh() {
   disabledForceLabel->setText(disabledForces ? QString("Disabled forcePVs: %1").arg(disabledForces)
                                             : QString());
   refreshStatus();
+  refreshShelfList();
   if (historyText) {
     QStringList rows;
     if (!legacyAppearance())
@@ -750,7 +778,10 @@ void Window::refreshStatus() {
     currentBox->setChecked(engine->silenceCurrent);
   }
   auto& s = engine->state(doc.root.get());
-  int color = s.unack ? ((engine->now() / 1000) % 2 ? s.unack : 0) : s.severity;
+  const auto shown = engine->presentation(doc.root.get());
+  shelvedLabel->setText(shown.shelved ? QString("<a href='shelves'>Shelved: %1</a>").arg(shown.shelved) : QString());
+  shelvedLabel->setVisible(!options.editor && shown.shelved > 0);
+  int color = shown.unack ? ((engine->now() / 1000) % 2 ? shown.unack : 0) : shown.severity;
   auto button = static_cast<MotifButton*>(runtimeButton);
   const auto background = severityColor(color);
   if (button->background != background) {
@@ -761,7 +792,8 @@ void Window::refreshStatus() {
   for (int bit = 0; bit < 5; ++bit)
     if (s.maskCounts[bit])
       mask[bit] = QString("CDATL")[bit];
-  runtimeButton->setText(doc.root->label() + (mask == "-----" ? QString() : "  <" + mask + ">"));
+  runtimeButton->setText(doc.root->label() + (mask == "-----" ? QString() : "  <" + mask + ">") +
+      (shown.shelved ? QString("  [Shelved: %1]").arg(shown.shelved) : QString()));
   if (!legacyAppearance()) {
     auto desired = runtime->sizeHint().expandedTo(QSize(220, 35));
     if (runtime->width() < desired.width() || runtime->height() < desired.height()) runtime->resize(desired);
@@ -934,6 +966,8 @@ void Window::menus() {
     action(a, "Force Mask...", [this] { masks(true); });
     action(a, "Modify Mask Settings...", [this] { masks(); });
     action(a, "Beep Severity...", [this] { beepSeverity(false); });
+    action(a, "Shelve Alarms...", [this] { shelveDialog(selection); });
+    action(a, "Unshelve Alarms", [this] { engine->unshelve(selection); refresh(); });
     action(a, "NoAck for One Hour", [this] {
       engine->noAck(selection, !engine->state(selection).noAckUntil);
       refresh();
@@ -946,6 +980,10 @@ void Window::menus() {
     }
   }
   auto view = menuBar()->addMenu("&View");
+  if (!options.editor) {
+    action(view, "Shelved Alarms...", [this] { showShelvedAlarms(); });
+    action(view, "Alarm Analytics...", [this] { showAnalytics(); });
+  }
   action(
       view, "Expand One Level", [this] { treeView->expand(treeView->currentIndex()); },
       QKeySequence("+"));
@@ -970,6 +1008,7 @@ void Window::menus() {
   action(view, "Properties Window", [this] { properties(); });
   if (!options.editor) {
     auto setup = menuBar()->addMenu("&Setup");
+    action(setup, "Notifications...", [this] { showNotifications(); });
     auto filterMenu = setup->addMenu("Display Filter...");
     auto filterGroup = new QActionGroup(filterMenu);
     const QStringList filters = {"No filter", "Active Alarms Only", "Unacknowledged Alarms Only"};
@@ -1079,6 +1118,19 @@ void Window::menus() {
   });
 }
 void Window::replace(Document d, bool snapshot) {
+  const bool sameRuntime = !options.editor && !snapshot &&
+      QFileInfo(d.filename).absoluteFilePath() == QFileInfo(doc.filename).absoluteFilePath();
+  const auto savedShelves = sameRuntime ? engine->shelves() : QVector<ShelfSnapshot>();
+  QHash<QString, int> savedNotificationAcks;
+  if (sameRuntime && notifications) {
+    const auto active = notifications->policy.activeChannels();
+    QHash<QString, int> counts;
+    for (auto n : doc.channels()) ++counts[Engine::nodeIdentity(n)];
+    for (auto n : doc.channels()) {
+      auto id = Engine::nodeIdentity(n);
+      if (counts[id] == 1 && active.contains(id)) savedNotificationAcks[id] = engine->state(n).unack;
+    }
+  }
   debugLog(options.debug, "config", snapshot ? "apply editor change" : "reload configuration");
   // Serialization emits channels before groups. Track the ordinal within each
   // kind so that a mixed child list cannot redirect an open Properties dialog.
@@ -1109,10 +1161,14 @@ void Window::replace(Document d, bool snapshot) {
   }
   treeView->setModel(nullptr);
   groupView->setModel(nullptr);
+  if (analytics) analytics->detach();
+  if (notifications) notifications->detach();
   engine.reset();
   ca.reset();
   doc = std::move(d);
   setupEngine();
+  engine->restoreShelves(savedShelves);
+  engine->restoreLocalAcknowledgements(savedNotificationAcks);
   treeModel->reset(&doc, engine.get());
   groupModel->reset(&doc, engine.get());
   treeView->setModel(treeModel);

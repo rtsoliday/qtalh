@@ -4,6 +4,8 @@
 #include "services/channel_access.h"
 #include "services/logging.h"
 #include "services/options.h"
+#include "services/notifications.h"
+#include "services/analytics.h"
 #include <QAbstractItemModel>
 #include <QCheckBox>
 #include <QDialog>
@@ -58,6 +60,7 @@ public:
   Engine& alarmEngine() {
     return *engine;
   }
+  AnalyticsService* alarmAnalytics() { return analytics.get(); }
   void addNode(bool group, const QString& name);
   void undoEdit();
   void redoEdit();
@@ -75,10 +78,12 @@ private:
   std::unique_ptr<ChannelAccess> ca;
   std::unique_ptr<Engine> engine;
   std::unique_ptr<Logging> logging;
+  std::unique_ptr<NotificationService> notifications;
+  std::unique_ptr<AnalyticsService> analytics;
   AlarmModel *treeModel = nullptr, *groupModel = nullptr;
   QTreeView *treeView = nullptr, *groupView = nullptr;
   QLabel *execution = nullptr, *filename = nullptr, *messageArea = nullptr, *beepLabel = nullptr,
-         *silenceForeverLabel = nullptr, *disabledForceLabel = nullptr;
+         *silenceForeverLabel = nullptr, *disabledForceLabel = nullptr, *shelvedLabel = nullptr;
   QWidget* runtime = nullptr;
   QPushButton* runtimeButton = nullptr;
   QCheckBox *silenceBox = nullptr, *currentBox = nullptr;
@@ -89,7 +94,7 @@ private:
   QStringList undo, redo;
   std::shared_ptr<Node> clipboard;
   QAction *undoAction = nullptr, *redoAction = nullptr;
-  QPointer<QDialog> historyDialog;
+  QPointer<QDialog> historyDialog, shelfListDialog, notificationDialog, analyticsDialog;
   QPointer<QMessageBox> errorPopup, exitPopup;
   QPointer<QPlainTextEdit> historyText;
   struct SelectionDialog {
@@ -109,6 +114,11 @@ private:
   QString selectionState() const;
   void activateRuntime();
   void showLogBrowser(bool alarm);
+  void shelveDialog(Node*, bool change = false);
+  void showShelvedAlarms();
+  void showNotifications();
+  void showAnalytics();
+  void refreshShelfList();
   void setupEngine();
   void scheduleHeartbeat();
   void buildUi();

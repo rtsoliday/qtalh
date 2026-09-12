@@ -10,6 +10,7 @@
 using namespace alh;
 class UiTests : public QObject {
   Q_OBJECT
+  QTemporaryDir notificationConfig;
   Options options(bool editor) {
     Options o;
     o.editor = editor;
@@ -27,6 +28,8 @@ class UiTests : public QObject {
   }
 private slots:
   void initTestCase() {
+    qputenv("XDG_CONFIG_HOME", notificationConfig.path().toUtf8());
+    QCoreApplication::setApplicationName("qtalh-ui-tests-" + QString::number(QCoreApplication::applicationPid()));
     initializeAppearance(qEnvironmentVariable("QTALH_TEST_STYLE"));
   }
 #ifdef Q_OS_WIN
@@ -74,6 +77,242 @@ private slots:
     QCOMPARE(w->document().root->option("COMMAND"), command);
   }
 #endif
+
+  void analyticsWorkflow() {
+    auto w = std::make_unique<Window>(sample(), options(false), false); w->show();
+    auto service = w->alarmAnalytics(); QVERIFY(service);
+    qint64 now = 0; service->monotonicNow = [&] { return now; };
+    service->utcNow = [&] { return 1700000000000 + now; }; service->reset();
+    auto& engine = w->alarmEngine(); const auto nodes = w->document().channels();
+    for (auto n : nodes) engine.event(n, {0,0,0,1,"0"});
+    for (int i=0;i<5;++i) {
+      now += 1000; engine.event(nodes[0], {3,2,2,1,"20"});
+      now += 100; engine.acknowledge(nodes[0]);
+      now += 100; engine.event(nodes[0], {0,0,0,1,"0"});
+    }
+    now += 1000; engine.event(nodes[1], {3,2,2,1,"20"});
+    engine.shelve(nodes[1],1,"Analytics screenshot");
+    now += 2000;
+    for (auto action:w->findChildren<QAction*>()) if(action->text()=="Alarm Analytics...") action->trigger();
+    auto dialog=w->findChild<QDialog*>("analyticsDialog"); QVERIFY(dialog);
+    auto tabs=dialog->findChild<QTabWidget*>("analyticsTabs"); QCOMPARE(tabs->count(),4);
+    auto table=dialog->findChild<QTableView*>("analyticsTable0"); QVERIFY(table);
+    QTRY_COMPARE(table->model()->rowCount(),3);
+    QCOMPARE(table->model()->index(0,1).data().toString(),QString("5"));
+    QCOMPARE(dialog->findChild<QComboBox*>("analyticsRange")->currentIndex(),1);
+    QDir().mkpath(TEST_OUTPUT);
+    for(int t=0;t<4;++t){tabs->setCurrentIndex(t);QCoreApplication::processEvents();
+      QVERIFY(dialog->grab().save(QString(TEST_OUTPUT)+(legacyAppearance()?"/classic-analytics-":"/fusion-analytics-")+QString::number(t)+".png"));}
+    tabs->setCurrentIndex(0);table->setCurrentIndex(table->model()->index(0,0));
+    dialog->findChild<QPushButton*>("analyticsDetails")->click();
+    QVERIFY(dialog->findChild<QDialog*>("analyticsChannelDetails"));
+    QTemporaryDir dir; auto output=dir.filePath("analytics.csv");
+    QTimer::singleShot(0,dialog,[dialog,output] {
+      auto file=dialog->findChild<QDialog*>("fileSelectionDialog"); QVERIFY(file);
+      if(auto native=qobject_cast<QFileDialog*>(file)){native->selectFile(output);QMetaObject::invokeMethod(native,"accept");}
+      else {auto selection=file->findChild<QLineEdit*>("fileSelection"); QVERIFY(selection);selection->setText(output);QMetaObject::invokeMethod(selection,"returnPressed");}
+    });
+    dialog->findChild<QPushButton*>("analyticsExportTable")->click();
+    QFile csv(output);QVERIFY(csv.open(QIODevice::ReadOnly));QVERIFY(csv.readAll().contains("activation_share_percent"));
+    auto search=dialog->findChild<QLineEdit*>("analyticsSearch");search->setText("timing");
+    now+=1000;QTRY_COMPARE(table->model()->rowCount(),1);
+    dialog->findChild<QPushButton*>("analyticsReset")->click();
+    now+=1000;QTRY_COMPARE(table->model()->rowCount(),1);
+    QCOMPARE(table->model()->index(0,1).data().toString(),QString("0"));
+    auto editor=std::make_unique<Window>(sample(),options(true),false);QVERIFY(!editor->alarmAnalytics());
+  }
+  void analyticsLargeDashboard() {
+    QString config="GROUP NULL large\n"; for(int i=0;i<10000;++i)config+=QString("CHANNEL large pv%1\n").arg(i);
+    auto w=std::make_unique<Window>(parseConfig(config),options(false),false);
+    auto& e=w->alarmEngine(); for(auto n:w->document().channels()){e.event(n,{0,0,0,1,"0"});e.event(n,{3,2,2,1,"20"});}
+    for(auto action:w->findChildren<QAction*>())if(action->text()=="Alarm Analytics...")action->trigger();
+    auto dialog=w->findChild<QDialog*>("analyticsDialog");QVERIFY(dialog);
+    auto table=dialog->findChild<QTableView*>("analyticsTable0");QElapsedTimer time;time.start();
+    QTRY_COMPARE_WITH_TIMEOUT(table->model()->rowCount(),10000,10000);
+    qInfo()<<"10,000-channel analytics dashboard first result, ms:"<<time.elapsed();
+    QElapsedTimer reaction;reaction.start();table->setCurrentIndex(table->model()->index(9999,0));QCoreApplication::processEvents();
+    QVERIFY(reaction.elapsed()<1000);
+  }
+
+  void notificationWorkflow() {
+    QTemporaryDir dir;
+    auto document = sample(); document.filename = dir.filePath("alarms.alh");
+    NotificationSettings settings;
+    NotificationDestination destination;
+    destination.id = "ops"; destination.name = "Operators";
+    destination.kind = "webhook"; destination.url = "http://127.0.0.1:1/test";
+    settings.destinations << destination;
+    NotificationSubscription subscription;
+    subscription.id = "rule"; subscription.name = "Power supply alarms";
+    subscription.configuration = notificationConfiguration(document.filename);
+    subscription.wildcard = "test:power";
+    subscription.stages = {{"initial", 60, {"ops"}}, {"escalate", 600, {"ops"}}};
+    settings.subscriptions << subscription;
+    NotificationStore store; store.load(); store.save(settings);
+    auto open = [](Window* w) {
+      for (auto action : w->findChildren<QAction*>())
+        if (action->text() == "Notifications...") action->trigger();
+      return w->findChild<QDialog*>("notificationsDialog");
+    };
+    auto w = std::make_unique<Window>(std::move(document), options(false), false);
+    w->show();
+    auto dialog = open(w.get()); QVERIFY(dialog);
+    auto enable = dialog->findChild<QCheckBox*>("notificationsEnabled");
+    QVERIFY(enable); QVERIFY(!enable->isChecked());
+    auto rules = dialog->findChild<QListWidget*>("notificationSubscriptions");
+    auto destinations = dialog->findChild<QListWidget*>("notificationDestinations");
+    QCOMPARE(rules->count(), 1); QCOMPARE(destinations->count(), 1);
+    rules->setCurrentRow(0);
+    QTimer::singleShot(0, dialog, [dialog] {
+      auto editor = dialog->findChild<QDialog*>("notificationSubscriptionEditor");
+      QVERIFY(editor);
+      QCOMPARE(editor->findChild<QLabel*>("subscriptionMatchCount")->text(),
+               QString("Matches 1 channels in this configuration"));
+      QDir().mkpath(TEST_OUTPUT);
+      QVERIFY(editor->grab().save(QString(TEST_OUTPUT) +
+          (legacyAppearance() ? "/classic-notification-subscription.png" : "/fusion-notification-subscription.png")));
+      editor->findChild<QLineEdit*>("subscriptionName")->setText("Updated subscription");
+      editor->accept();
+    });
+    auto page = dialog->findChild<QTabWidget*>()->widget(0);
+    for (auto button : page->findChildren<QPushButton*>())
+      if (button->text() == "Edit") button->click();
+    QVERIFY(!dialog->findChild<QPushButton*>("testNotification")->isEnabled());
+    dialog->findChild<QPushButton*>("saveNotifications")->click();
+    QCOMPARE(store.load().subscriptions.first().name, QString("Updated subscription"));
+    enable->setChecked(true);
+    QTest::qWait(550);
+    QVERIFY(dialog->findChild<QLabel*>("notificationStatus")->text().contains("enabled"));
+    QDir().mkpath(TEST_OUTPUT);
+    QVERIFY(dialog->grab().save(QString(TEST_OUTPUT) +
+        (legacyAppearance() ? "/classic-notifications.png" : "/fusion-notifications.png")));
+    auto freshDocument = sample(); freshDocument.filename = dir.filePath("alarms.alh");
+    auto fresh = std::make_unique<Window>(std::move(freshDocument), options(false), false);
+    auto freshDialog = open(fresh.get()); QVERIFY(freshDialog);
+    QVERIFY(!freshDialog->findChild<QCheckBox*>("notificationsEnabled")->isChecked());
+    store.save(NotificationSettings{});
+  }
+  void notificationsUnavailableInEditor() {
+    auto w = std::make_unique<Window>(sample(), options(true), false);
+    for (auto action : w->findChildren<QAction*>())
+      QVERIFY(action->text() != "Notifications...");
+  }
+
+  void shelvingWorkflow() {
+    auto w = std::make_unique<Window>(sample(), options(false), false);
+    w->show();
+    auto& e = w->alarmEngine();
+    const qint64 startTime = QDateTime(QDate(2026, 9, 11), QTime(12, 0)).toMSecsSinceEpoch();
+    qint64 time = startTime; e.now = [&] { return time; };
+    const auto channels = w->document().channels();
+    for (auto n : channels) e.event(n, {3, 2, 2, 1, "99"});
+    e.shelve(channels[0], 15, "Individual maintenance");
+    QAction *shelve = nullptr, *list = nullptr;
+    for (auto a : w->findChildren<QAction*>()) {
+      if (a->text() == "Shelve Alarms...") shelve = a;
+      if (a->text() == "Shelved Alarms...") list = a;
+    }
+    QVERIFY(shelve && list); shelve->trigger();
+    auto dialog = w->findChild<QDialog*>("shelveDialog"); QVERIFY(dialog);
+    auto reason = dialog->findChild<QLineEdit*>("shelfReason");
+    auto duration = dialog->findChild<QComboBox*>("shelfDuration");
+    auto custom = dialog->findChild<QSpinBox*>("shelfCustomMinutes");
+    auto apply = dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok);
+    QVERIFY(!apply->isEnabled()); QCOMPARE(duration->currentData().toInt(), 60);
+    QVERIFY(dialog->findChild<QLabel*>("shelfScope")->text().contains("2 channels"));
+    reason->setText("  "); QVERIFY(!apply->isEnabled());
+    reason->setText("Vacuum maintenance"); QVERIFY(apply->isEnabled());
+    duration->setCurrentIndex(5); QVERIFY(custom->isEnabled()); custom->setValue(2);
+    auto tree = w->findChild<QTreeView*>("alarmTree");
+    tree->setCurrentIndex(tree->model()->index(0, 0, tree->model()->index(0, 0)));
+    QCOMPARE(dialog->findChild<QLabel*>("shelfTarget")->text(), QString("/BOOSTER"));
+    const auto name = legacyAppearance() ? "/classic" : "/fusion";
+    QDir().mkpath(QString(TEST_OUTPUT));
+    QVERIFY(dialog->grab().save(QString(TEST_OUTPUT) + name + "-shelve-dialog.png"));
+    apply->click(); QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QCOMPARE(e.presentation(w->document().root.get()).shelved, 3);
+    QCOMPARE(e.state(channels[0]).shelf.until, startTime + 900000);
+    QCOMPARE(e.state(channels[1]).shelf.until, startTime + 120000);
+    QVERIFY(w->findChild<QLabel*>("shelvedCount")->text().contains("Shelved: 3"));
+    QVERIFY(w->grab().save(QString(TEST_OUTPUT) + name + "-shelved-main.png"));
+    list->trigger();
+    auto browser = w->findChild<QDialog*>("shelvedAlarmsDialog"); QVERIFY(browser);
+    auto table = browser->findChild<QTableWidget*>("shelvedAlarmsTable");
+    QCOMPARE(table->rowCount(), 3);
+    QCOMPARE(table->item(0, 0)->text(), QString("/BOOSTER/Power_Supplies/test:power"));
+    QCOMPARE(table->item(0, 5)->text(), QString("Individual maintenance"));
+    QVERIFY(browser->grab().save(QString(TEST_OUTPUT) + name + "-shelved-list.png"));
+    table->selectRow(0); browser->findChild<QPushButton*>("changeShelf")->click();
+    dialog = w->findChild<QDialog*>("shelveDialog"); QVERIFY(dialog);
+    QCOMPARE(dialog->findChild<QLineEdit*>("shelfReason")->text(), QString("Individual maintenance"));
+    dialog->findChild<QLineEdit*>("shelfReason")->setText("Extended maintenance");
+    dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->click();
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QCOMPARE(e.state(channels[0]).shelf.until, startTime + 3600000);
+    const auto remaining = table->item(0, 4)->text();
+    time += 1000;
+    QTRY_VERIFY(table->item(0, 4)->text() != remaining);
+    QCOMPARE(table->selectionModel()->selectedRows().size(), 1);
+    browser->findChild<QPushButton*>("unshelveSelected")->click();
+    QCOMPARE(table->rowCount(), 2); QCOMPARE(e.state(channels[0]).shelf.until, qint64(0));
+    time = startTime + 120000; e.tick();
+    QTRY_COMPARE(table->rowCount(), 0);
+    QCOMPARE(e.presentation(w->document().root.get()).unack, 2);
+    QVERIFY(!w->findChild<QLabel*>("shelvedCount")->isVisible());
+  }
+  void shelvingFiltersAndIndicators() {
+    auto d = sample(); Engine e(d); qint64 time = 1000; e.now = [&] { return time; };
+    for (auto n : d.channels()) e.event(n, {});
+    auto n = d.channels()[0]; e.event(n, {3, 2, 2, 1, "99"});
+    AlarmModel tree(&d, &e, true), group(&d, &e, false); group.setGroup(n->parent);
+    e.shelve(n, 1, "check filters");
+    for (int filter : {1, 2}) {
+      tree.setFilter(filter); group.setFilter(filter);
+      QCOMPARE(tree.rowCount(), 0); QCOMPARE(group.rowCount(), 0);
+    }
+    tree.setFilter(0); group.setFilter(0);
+    QCOMPARE(tree.index(0, 1).data().toString(), QString(" "));
+    QVERIFY(tree.index(0, 2).data().toString().contains("1 shelved"));
+    QVERIFY(group.index(0, 2).data().toString().contains("[Shelved]"));
+    QVERIFY(group.index(0, 2).data(Qt::ToolTipRole).toString().contains("check filters"));
+    QCOMPARE(group.index(0, 6).data().toString(), QString("<----->"));
+    e.event(n, {}); time += 60000; e.tick();
+    for (int filter : {1, 2}) {
+      tree.setFilter(filter); group.setFilter(filter);
+      QCOMPARE(tree.rowCount(), 1); QCOMPARE(group.rowCount(), 1);
+    }
+  }
+  void shelvingReloadAndSave() {
+    QTemporaryDir dir;
+    auto o = options(false); o.broadcast = true; o.configDir = dir.path();
+    o.config = dir.filePath("config");
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root one\nCHANNEL root two\n");
+    saveConfig(d, o.config); d.filename = o.config;
+    auto w = std::make_unique<Window>(d, o, false);
+    auto old = w->document().channels()[0];
+    w->alarmEngine().event(old, {3, 2, 2, 1, "99"}); w->alarmEngine().event(old, {});
+    w->alarmEngine().shelve(old, 60, "Preserve across reload");
+    const auto deadline = w->alarmEngine().state(old).shelf.until;
+    const auto copy = dir.filePath("saved"); w->saveTo(copy);
+    QCOMPARE(w->alarmEngine().state(old).shelf.until, deadline);
+    QCOMPARE(writeConfig(loadConfig(copy)), writeConfig(d));
+    for (auto a : w->findChildren<QAction*>()) if (a->text() == "Shelve Alarms...") a->trigger();
+    QPointer<QDialog> pending = w->findChild<QDialog*>("shelveDialog"); QVERIFY(pending);
+    saveConfig(parseConfig("GROUP NULL root\nCHANNEL root two\nCHANNEL root added\nCHANNEL root one\n"), o.config);
+    Logging sender(o, "root"); QVERIFY(sender.sendBroadcast("reload", 0, true));
+    QTRY_COMPARE_WITH_TIMEOUT(w->document().channels().size(), 3, 5000);
+    QVERIFY(!pending || !pending->isEnabled());
+    auto n = w->document().channels()[2]; QCOMPARE(n->name, QString("one"));
+    QCOMPARE(w->alarmEngine().state(n).shelf.until, deadline);
+    QCOMPARE(w->alarmEngine().state(n).shelf.reason, QString("Preserve across reload"));
+    w->alarmEngine().event(n, {});
+    QCOMPARE(w->alarmEngine().state(n).unack, 2);
+    QCOMPARE(w->alarmEngine().state(w->document().channels()[1]).shelf.until, qint64(0));
+    auto fresh = std::make_unique<Window>(loadConfig(o.config), o, false);
+    QCOMPARE(fresh->alarmEngine().presentation(fresh->document().root.get()).shelved, 0);
+    QCOMPARE(w->alarmEngine().presentation(w->document().root.get()).shelved, 1);
+  }
+
   void reloadPreservesSilence_data() {
     QTest::addColumn<bool>("startupSilent");
     QTest::newRow("operator-enabled-sound") << true;
@@ -142,6 +381,8 @@ private slots:
     auto w = std::make_unique<Window>(d, o, false);
     auto n = w->document().channels()[0];
     w->alarmEngine().event(n, {3, 2, 2, 1, "99"});
+    w->alarmEngine().shelve(n, 60, "Preserve after failed reload");
+    const auto deadline = w->alarmEngine().state(n).shelf.until;
     QFile file(o.config);
     QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
     file.write("GROUP NULL replacement\n$FORCEPV CALC -D--- 1 NE\n");
@@ -159,6 +400,7 @@ private slots:
     QCOMPARE(w->document().root->name, QString("root"));
     QCOMPARE(w->document().channels()[0], n);
     QCOMPARE(w->alarmEngine().state(n).unack, 2);
+    QCOMPARE(w->alarmEngine().state(n).shelf.until, deadline);
   }
   void heartbeatUsesIndependentTimer() {
     // No IOC is needed: observe scheduling with a unique, unavailable output PV.
