@@ -282,7 +282,7 @@ private slots:
     Engine e(doc, {true}, &driver);
     auto n = doc.channels()[0];
     qint64 now = 0;
-    e.now = [&] { return now; };
+    e.now = e.monotonicNow = [&] { return now; };
     AlarmAnalytics a;
     a.reconcile({e.channelUpdate(n)}, now, now);
     ObservationCause cause{};
@@ -329,7 +329,7 @@ private slots:
     Engine e(doc);
     auto n = doc.channels()[0];
     qint64 now = 0;
-    e.now = [&] { return now; };
+    e.now = e.monotonicNow = [&] { return now; };
     AlarmAnalytics a;
     a.reconcile({e.channelUpdate(n)}, 0, 0);
     auto observer = e.observe([&](const AlarmObservation& o) { a.observe(o, now, now); });
@@ -358,6 +358,24 @@ private slots:
       QVERIFY(r.rows[0].channel.standingUnknown);
     }
   }
+  void filteredTransientGapEndsOnRecovery() {
+    auto doc = parseConfig("GROUP NULL root\nCHANNEL root pv\n$ALARMCOUNTFILTER 0 1\n");
+    Engine e(doc, {true}); auto n = doc.channels()[0];
+    qint64 now = 0; e.now = e.monotonicNow = [&] { return now; };
+    AlarmAnalytics a;
+    a.reconcile({e.channelUpdate(n)}, now, now);
+    auto observer = e.observe([&](const AlarmObservation& o) { a.observe(o, now, now); });
+    e.event(n, {3, 2, 2, 1, "alarm"});
+    now = 1000; e.event(n, {0, 0, 2, 1, "clear"});
+    now = 2000; e.tick();
+    now = 3000; e.event(n, {22, 4, 0, -1, "error"});
+    now = 3100; e.event(n, {0, 0, 2, 1, "recovered"});
+    auto r = report(a, 5000);
+    QCOMPARE(r.rows[0].stats.gaps, qint64(1));
+    QCOMPARE(r.rows[0].stats.observedMs, qint64(4900));
+    QCOMPARE(r.rows[0].stats.ackCount, qint64(0));
+    QVERIFY(e.channelUpdate(n).available);
+  }
   void cancelAwaitsFreshObservation_data() {
     QTest::addColumn<bool>("global");
     QTest::addColumn<bool>("filtered");
@@ -374,7 +392,7 @@ private slots:
     Engine e(doc, {global});
     auto n = doc.channels()[0];
     qint64 now = 0;
-    e.now = [&] { return now; };
+    e.now = e.monotonicNow = [&] { return now; };
     AlarmAnalytics a;
     a.reconcile({e.channelUpdate(n)}, 0, 0);
     auto observer = e.observe([&](const AlarmObservation& o) { a.observe(o, now, now); });

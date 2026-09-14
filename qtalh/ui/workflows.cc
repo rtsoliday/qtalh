@@ -6,18 +6,15 @@
 #include <QtWidgets>
 namespace alh {
 namespace {
-class LogSearchJob final : public QThread {
+class LiveLogJob final : public QThread {
 public:
-  LogSearchJob(LogSearch search, QObject* parent) : QThread(parent), request(std::move(search)) {}
-  ~LogSearchJob() override {
-    requestInterruption();
-    wait();
-  }
-  LogSearchResult result;
+  LiveLogJob(LiveLogCursor cursor, QString path) : cursor(std::move(cursor)), path(std::move(path)) {}
+  LiveLogUpdate result;
 private:
-  LogSearch request;
+  LiveLogCursor cursor;
+  QString path;
   void run() override {
-    result = searchLogs(request, [this] { return isInterruptionRequested(); });
+    result = readLiveLog(cursor, path, [this] { return isInterruptionRequested(); });
   }
 };
 }
@@ -40,6 +37,94 @@ void Window::activateRuntime() {
   } catch (const std::exception& e) {
     error(e.what());
   }
+}
+void Window::showLiveLog(bool alarm) {
+  if (!logging) return;
+  auto dialog = new QDialog(this);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  dialog->setObjectName(alarm ? "liveAlarmLog" : "liveOperationLog");
+  dialog->setWindowTitle(alarm ? "Alarm Log" : "Operation Log");
+  dialog->resize(800, 400);
+  auto layout = dialogColumn(dialog);
+  auto filename = new QLabel;
+  filename->setObjectName("liveLogPath");
+  filename->setTextFormat(Qt::PlainText);
+  filename->setWordWrap(true);
+  layout->addWidget(filename);
+  auto text = new QPlainTextEdit;
+  text->setObjectName("liveLogText"); text->setReadOnly(true);
+  text->setLineWrapMode(QPlainTextEdit::NoWrap);
+  if (legacyAppearance()) text->setFont(font());
+  else setPresentationFont(text, contentFont());
+  text->setMaximumBlockCount(LiveLogMaximumRecords);
+  layout->addWidget(text);
+  auto status = new QLabel;
+  status->setObjectName("liveLogStatus"); status->setWordWrap(true);
+  layout->addWidget(status);
+  const QString limit = "Live view: latest 1,000 records, up to 256 KiB. Use the log browser for older records.";
+  auto row = dialogRow(layout);
+  row->addWidget(new QLabel("Search:"));
+  auto search = new QLineEdit; row->addWidget(search, 1);
+  for (bool reverse : {false, true}) {
+    auto button = new QPushButton(reverse ? "Reverse" : "Forward"); row->addWidget(button);
+    connect(button, &QPushButton::clicked, dialog, [=] {
+      auto flags = reverse ? QTextDocument::FindBackward : QTextDocument::FindFlags();
+      if (!text->find(search->text(), flags)) {
+        text->moveCursor(reverse ? QTextCursor::End : QTextCursor::Start);
+        text->find(search->text(), flags);
+      }
+    });
+  }
+  struct ViewState {
+    LiveLogCursor cursor;
+    QString path;
+    QStringList rows;
+    int bytes = 0;
+    QPointer<LiveLogJob> running;
+  };
+  auto state = std::make_shared<ViewState>();
+  auto destination = [this, alarm] { return alarm ? logging->alarmPath() : logging->opmodPath(); };
+  auto poll = [=] {
+    const auto path = destination();
+    if (path != state->path) {
+      state->path = path; state->cursor = {}; state->rows.clear(); state->bytes = 0;
+      text->clear(); filename->setText("File: " + path); status->setText("Loading… " + limit);
+      if (state->running) state->running->requestInterruption();
+    }
+    if (state->running) return;
+    auto job = new LiveLogJob(state->cursor, path); state->running = job;
+    // Closing a viewer cancels the read without waiting on filesystem I/O in
+    // the alarm thread. The worker owns its lifetime until it finishes.
+    connect(dialog, &QObject::destroyed, job, [job] { job->requestInterruption(); });
+    connect(job, &QThread::finished, job, &QObject::deleteLater);
+    connect(job, &QThread::finished, dialog, [=] {
+      state->running = nullptr;
+      const auto& result = job->result;
+      if (path != destination() || path != state->path || result.retry) return;
+      if (!result.error.isEmpty()) { status->setText(result.error + "\n" + limit); return; }
+      state->cursor = result.cursor;
+      auto scroll = text->verticalScrollBar();
+      const int position = scroll->value();
+      const bool bottom = position == scroll->maximum();
+      if (result.reset) { state->rows.clear(); state->bytes = 0; }
+      for (const auto& line : result.lines) {
+        state->rows << line; state->bytes += line.toUtf8().size() + 1;
+      }
+      int removed = 0;
+      while (state->rows.size() > LiveLogMaximumRecords || state->bytes > LiveLogMaximumBytes) {
+        state->bytes -= state->rows.front().toUtf8().size() + 1; state->rows.removeFirst(); ++removed;
+      }
+      if (result.reset || removed) text->setPlainText(state->rows.join('\n'));
+      else if (!result.lines.isEmpty()) text->appendPlainText(result.lines.join('\n'));
+      scroll->setValue(bottom ? scroll->maximum() : qMax(0, position - removed));
+      status->setText((result.limited ? QString("Older records omitted. ") : QString()) + limit);
+    });
+    job->start();
+  };
+  auto timer = new QTimer(dialog); timer->setObjectName("liveLogTimer"); timer->setInterval(1000);
+  connect(timer, &QTimer::timeout, dialog, poll); timer->start();
+  dialogActions(layout, dialog, QDialogButtonBox::Close);
+  dialog->show(); poll();
 }
 void Window::showLogBrowser(bool alarm) {
   if (!logging) return;
@@ -108,7 +193,7 @@ void Window::showLogBrowser(bool alarm) {
       }
     });
   }
-  auto running = std::make_shared<QPointer<LogSearchJob>>();
+  auto running = std::make_shared<QPointer<QThread>>();
   connect(search, &QPushButton::clicked, dialog, [=] {
     if (*running) return;
     LogSearch request;
@@ -120,12 +205,9 @@ void Window::showLogBrowser(bool alarm) {
       status->setText("Choose a log file and a From time no later than To.");
       return;
     }
-    auto job = new LogSearchJob(request, dialog);
-    *running = job;
     search->setEnabled(false); stop->setEnabled(true);
     status->setText("Searching current and dated log files...");
-    connect(job, &QThread::finished, dialog, [=] {
-      const auto& result = job->result;
+    *running = startLogSearch(dialog, request, [=](const LogSearchResult& result) {
       text->setPlainText(result.text);
       QString summary = QString("%1 matching records").arg(result.records);
       if (result.truncated) summary += "; result limit reached — narrow the search";
@@ -135,9 +217,7 @@ void Window::showLogBrowser(bool alarm) {
       status->setText(summary);
       *running = nullptr;
       search->setEnabled(true); stop->setEnabled(false);
-      job->deleteLater();
     });
-    job->start();
   });
   connect(stop, &QPushButton::clicked, dialog, [running] {
     if (*running) (*running)->requestInterruption();

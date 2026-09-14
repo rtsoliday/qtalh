@@ -13,8 +13,10 @@
 #include <QPrinter>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QScopedValueRollback>
 #include <QTextDocument>
 #include <QtWidgets>
+#include <cmath>
 namespace alh {
 namespace {
 QColor severityColor(int s) {
@@ -51,6 +53,57 @@ QString commandPreview(const QString& command) {
   for (int i = 0; i + 1 < entries.size(); i += 2)
     choices << entries[i].trimmed() + ":\n" + preview(entries[i + 1].trimmed());
   return choices.join("\n\n");
+}
+// Dialog fields have independent defaults; whitespace must never shift a later
+// field into an earlier argument. Keep file-format compatibility in the parser.
+QString forceDirective(QString name, QString mask, QString force, QString reset) {
+  name = name.trimmed(); force = force.trimmed(); reset = reset.trimmed();
+  if (name.contains(QRegularExpression("\\s")))
+    throw ParseError("Force PV name must be a single token");
+  auto number = [](const QString& text, double fallback) {
+    if (text.isEmpty()) return QString::number(fallback);
+    bool ok = false;
+    const double value = text.toDouble(&ok);
+    if (!ok || !std::isfinite(value)) throw ParseError("Invalid Force PV value: " + text);
+    return QString::number(value, 'g', 17);
+  };
+  return name + ' ' + Mask::parse(mask).text() + ' ' + number(force, 1) + ' ' +
+      (reset.compare("NE", Qt::CaseInsensitive) == 0 ? QString("NE") : number(reset, 0));
+}
+void applyInitialGeometry(QWidget* window, const QString& geometry) {
+  // X geometry permits dimensions, position only, and negative edge offsets.
+  static const QRegularExpression syntax(R"(^=?(?:(\d+)?(?:x(\d+))?)?([+-]\d+)?([+-]\d+)?$)");
+  const auto match = syntax.match(geometry);
+  if (!match.hasMatch() || geometry.isEmpty()) return;
+  QSize size = window->size();
+  for (int field = 1; field <= 2; ++field) {
+    if (match.captured(field).isEmpty()) continue;
+    bool ok = false;
+    int value = match.captured(field).toInt(&ok);
+    if (!ok || value <= 0) return;
+    if (field == 1) size.setWidth(value);
+    else size.setHeight(value);
+  }
+  int offsets[2]{};
+  for (int axis = 0; axis < 2; ++axis) {
+    if (match.captured(axis + 3).isEmpty()) continue;
+    bool ok = false;
+    offsets[axis] = match.captured(axis + 3).toInt(&ok);
+    if (!ok) return;
+  }
+  window->resize(size);
+  const auto screen = window->screen();
+  if (!screen) return;
+  const auto available = screen->availableGeometry();
+  const auto frame = window->frameGeometry();
+  QPoint position = frame.topLeft();
+  if (!match.captured(3).isEmpty())
+    position.setX(match.captured(3).startsWith('-')
+        ? available.right() + 1 - frame.width() + offsets[0] : available.left() + offsets[0]);
+  if (!match.captured(4).isEmpty())
+    position.setY(match.captured(4).startsWith('-')
+        ? available.bottom() + 1 - frame.height() + offsets[1] : available.top() + offsets[1]);
+  window->move(position);
 }
 QString code(int s) {
   return QString(" YRVE").mid(qBound(0, s, 4), 1);
@@ -210,7 +263,7 @@ QVariant AlarmModel::data(const QModelIndex& i, int role) const {
     return '<' + m + '>';
   }
   case 7:
-    return s.beepThreshold > 1 ? code(s.beepThreshold) : QString();
+    return s.highestBeepThreshold > 1 ? code(s.highestBeepThreshold) : QString();
   case 8:
     if (!severity && !unack)
       return QString();
@@ -265,14 +318,41 @@ void AlarmModel::setFilter(int f) {
   endResetModel();
 }
 void AlarmModel::refresh() {
-  // Filter membership can change as alarms arrive. Unfiltered views retain selection.
-  if (filter) {
-    beginResetModel();
-    childCache.clear();
-    endResetModel();
-    return;
-  }
   std::function<void(QModelIndex)> visit = [&](QModelIndex p) {
+    if (filter) {
+      // Preserve persistent indexes for rows that remain visible: a full reset
+      // discards pressed acknowledgement buttons and delayed expansion clicks.
+      // Remove/insert only changed membership, so disappearing targets still
+      // invalidate safely and cannot redirect an action to a replacement row.
+      auto key = node(p);
+      auto previous = children(key);
+      childCache.remove(key);
+      const auto desired = children(key);
+      childCache[key] = previous;
+      QSet<Node*> retained;
+      for (auto n : desired) retained.insert(n);
+      for (int last = previous.size() - 1; last >= 0;) {
+        if (retained.contains(previous[last])) { --last; continue; }
+        int first = last;
+        while (first > 0 && !retained.contains(previous[first - 1])) --first;
+        beginRemoveRows(p, first, last);
+        previous.remove(first, last - first + 1);
+        childCache[key] = previous;
+        endRemoveRows();
+        last = first - 1;
+      }
+      for (int first = 0; first < desired.size();) {
+        if (first < previous.size() && previous[first] == desired[first]) { ++first; continue; }
+        int last = first;
+        while (last + 1 < desired.size() &&
+               (first == previous.size() || desired[last + 1] != previous[first])) ++last;
+        beginInsertRows(p, first, last);
+        for (int i = first; i <= last; ++i) previous.insert(i, desired[i]);
+        childCache[key] = previous;
+        endInsertRows();
+        first = last + 1;
+      }
+    }
     int count = rowCount(p);
     if (count)
       emit dataChanged(index(0, 0, p), index(count - 1, 8, p));
@@ -284,6 +364,8 @@ void AlarmModel::refresh() {
 }
 Window::Window(Document d, Options o, bool connections)
     : doc(std::move(d)), options(o), connectPv(connections) {
+  // Runtime alarm filters have no useful meaning without live editor alarms.
+  if (options.editor) options.filter = 0;
   setAttribute(Qt::WA_DeleteOnClose);
   setWindowIcon(QIcon(":/qtalh/alh.xbm"));
   connect(qApp, &QCoreApplication::aboutToQuit, this, [this] { delete this; });
@@ -296,17 +378,9 @@ Window::Window(Document d, Options o, bool connections)
   setupEngine();
   buildUi();
   menus();
-  setWindowTitle((options.editor ? "Alarm Configuration Tool: " : "Alarm Handler: ") +
-                 doc.root->name);
+  if (!doc.filename.isEmpty())
+    logging->operation(nullptr, "Setup Config File : " + doc.filename);
   resize(1000, 600);
-  if (!options.geometry.isEmpty()) {
-    auto m = QRegularExpression("^(\\d+)x(\\d+)([+-]\\d+)?([+-]\\d+)?$").match(options.geometry);
-    if (m.hasMatch()) {
-      resize(m.captured(1).toInt(), m.captured(2).toInt());
-      if (!m.captured(3).isEmpty())
-        move(m.captured(3).toInt(), m.captured(4).toInt());
-    }
-  }
   heartbeatTimer.setParent(this);
   heartbeatTimer.setObjectName("heartbeatTimer");
   heartbeatTimer.setSingleShot(true);
@@ -318,18 +392,30 @@ Window::Window(Document d, Options o, bool connections)
   refreshTimer.setInterval(200);
   connect(&refreshTimer, &QTimer::timeout, this, [this] {
     engine->tick();
+    // Unavailable heartbeat PVs suspend the precise timer. The ordinary refresh
+    // resumes it after CA reports connection/write access, without a retry storm.
+    if (!heartbeatTimer.isActive()) scheduleHeartbeat();
     if (dirty) {
       refresh();
       dirty = false;
     }
   });
   refreshTimer.start();
+  beepTimer.setParent(this);
+  beepTimer.setObjectName("alarmBeepTimer");
   beepTimer.setInterval(1000);
   connect(&beepTimer, &QTimer::timeout, this, [this] {
+    // Possible inherited Linux ALH bug, deferred: becoming inaudible prevents
+    // new playback but does not stop an already playing custom sound. Silence,
+    // acknowledgement, or suppression can therefore leave a long clip playing
+    // to completion, as with ALH's background play process. Stop active audio
+    // when it is no longer wanted in a later change; retain behavior for now.
     if (engine->audible()) {
-      if (options.sound.isEmpty())
-        QApplication::beep();
-      else if (sound && sound->error() == QMediaPlayer::NoError) {
+      // A bad custom file or media backend must not silence future alarms.
+      // Keep the error diagnostic, but fall back to the ordinary system bell.
+      if (options.sound.isEmpty() || !sound || sound->error() != QMediaPlayer::NoError)
+        systemBeep();
+      else {
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
         const bool playing = sound->playbackState() == QMediaPlayer::PlayingState;
 #else
@@ -375,6 +461,9 @@ void Window::scheduleHeartbeat() {
   if (delay >= 0)
     heartbeatTimer.start(delay);
 }
+void Window::systemBeep() {
+  QApplication::beep();
+}
 Window::~Window() {
   debugLog(options.debug, "window", "close " + doc.filename);
   heartbeatTimer.stop();
@@ -401,14 +490,13 @@ void Window::setupEngine() {
   if (connectPv && !options.editor) {
     ca = std::make_unique<ChannelAccess>(options.engine);
     ca->error = [this](const QString& s) { error(s); };
-    for (auto n : doc.channels())
-      ca->setInitialAckT(n->name, !n->mask[AckT]);
+    ca->configureInitialAckT(doc);
   }
   engine = std::make_unique<Engine>(doc, options.engine, ca.get());
   engine->silenceForever = options.silent;
   engine->error = [this](const QString& s) { error(s); };
   engine->changed = [this] { dirty = true; };
-  if (!options.editor && !logging) {
+  if (!logging) {
     logging = std::make_unique<Logging>(options, doc.root->name);
     logging->error = [this](const QString& s) { error(s); };
     logging->message = [this](const QString& s) { showText("Broadcast Message", s); };
@@ -416,18 +504,23 @@ void Window::setupEngine() {
       QTimer::singleShot(0, this, [this] {
         try {
           replace(loadConfig(doc.filename, options.configDir), false);
+          // Audit only a validated reload, never editor snapshots or a rejected file.
+          logging->operation(nullptr, "Setup Config File : " + doc.filename);
         } catch (const std::exception& e) {
           error(e.what());
         }
       });
     };
-    engine->alarmLog = [this](Node* n, const State& s, qint64 t) { logging->alarm(n, s, t); };
-    engine->operation = [this](Node* n, const QString& s) { logging->operation(n, s); };
   }
-  if (logging) {
+  // setupEngine runs only after the replacement document has validated.
+  logging->setFacility(doc.root->name, doc.root->label());
+  // Root edits, undo/redo and reloads all replace the document through here.
+  setWindowTitle((options.editor ? "Alarm Configuration Tool: " : "Alarm Handler: ") +
+                 doc.root->name);
+  if (!options.editor) {
     engine->acknowledgement = [this](Node* n) { logging->acknowledgement(n); };
     engine->alarmLog = [this](Node* n, const State& s, qint64 t) { logging->alarm(n, s, t); };
-    engine->operation = [this](Node* n, const QString& s) { logging->operation(n, s); };
+    engine->operation = [this](Node* n, const QString& s, OperationKind kind) { logging->operation(n, s, kind); };
   }
   if (!options.editor) {
     if (!notifications) notifications = std::make_unique<NotificationService>();
@@ -666,10 +759,10 @@ void Window::buildUi() {
   }
   layout->addWidget(footer);
   connect(silenceBox, &QCheckBox::toggled, this, [this](bool yes) {
-    engine->silenceUntil = yes ? engine->now() + silenceMinutes * 60000 : 0;
+    engine->setSilenceUntil(yes ? engine->monotonicNow() + silenceMinutes * 60000 : 0);
   });
   connect(currentBox, &QCheckBox::toggled, this,
-          [this](bool yes) { engine->silenceCurrent = yes; });
+          [this](bool yes) { engine->setSilenceCurrent(yes); });
   messageArea = new QLabel;
   messageArea->setWordWrap(true);
   messageArea->hide();
@@ -722,8 +815,17 @@ void Window::showInitial() {
     show();
   if (!options.editor)
     runtime->show();
+  // Apply after showing, when native frame dimensions are known. Default
+  // runtime launches position the compact window; -mainwindow selects the main view.
+  applyInitialGeometry(options.editor || options.mainWindow ? this : runtime, options.geometry);
 }
 void Window::error(const QString& s) {
+  // Logging failures also arrive here. Audit once without recursively trying
+  // to write the diagnostic for an unavailable operation log.
+  if (logging && !auditingError) {
+    QScopedValueRollback<bool> guard(auditingError, true);
+    logging->operation(nullptr, s);
+  }
   qWarning("QtALH: %s", qPrintable(s));
   if (messageArea) {
     messageArea->setText(s);
@@ -741,8 +843,8 @@ void Window::error(const QString& s) {
 }
 void Window::refresh() {
   dirty = false;
-  // A filtered reset invalidates QModelIndex values. Keep node identity and
-  // expansion independent of that reset so new alarms do not move the operator.
+  // Keep expansion and action targets synchronized as filtered rows appear or
+  // disappear. Surviving rows retain their indexes through incremental updates.
   QSet<Node*> expanded;
   Node* currentTree = treeModel->node(treeView->currentIndex());
   Node* currentGroup = groupModel->node(groupView->currentIndex());
@@ -773,6 +875,7 @@ void Window::refresh() {
         groupView->setCurrentIndex(index);
     }
   }
+  if (options.filter) restoreVisibleSelection();
   int disabledForces = 0;
   for (auto node : doc.nodes())
     if (engine->state(node).forceDisabled) ++disabledForces;
@@ -811,7 +914,7 @@ void Window::refreshStatus() {
       QString("Execution Status: %1 %2%3")
           .arg(options.engine.global ? "Global" : "Local",
                options.engine.passive ? "Passive" : "Active",
-               logging && options.lock ? (logging->isMaster() ? " — Master" : " — Slave") : ""));
+               !options.editor && logging && options.lock ? (logging->isMaster() ? " — Master" : " — Slave") : ""));
   filename->setText("Filename:  " + doc.filename + (modified ? " *" : ""));
   filename->setToolTip(doc.filename);
   silenceForeverLabel->setText(
@@ -831,7 +934,7 @@ void Window::refreshStatus() {
       .arg(notifications && notifications->policy.enabled() ? "YES" : "NO"));
   {
     QSignalBlocker b(silenceBox);
-    silenceBox->setChecked(engine->silenceUntil > engine->now());
+    silenceBox->setChecked(engine->silenceUntil > engine->monotonicNow());
   }
   {
     QSignalBlocker b(currentBox);
@@ -857,6 +960,24 @@ void Window::refreshStatus() {
   if (!legacyAppearance()) {
     auto desired = runtime->sizeHint().expandedTo(QSize(220, 35));
     if (runtime->width() < desired.width() || runtime->height() < desired.height()) runtime->resize(desired);
+  }
+  scheduleDialogSync();
+}
+void Window::restoreVisibleSelection() {
+  const QSignalBlocker treeSignals(treeView->selectionModel());
+  const QSignalBlocker groupSignals(groupView->selectionModel());
+  QModelIndex groupIndex;
+  for (int row = 0; selection && row < groupModel->rowCount(); ++row) {
+    const auto index = groupModel->index(row, 2);
+    if (groupModel->node(index) == selection) { groupIndex = index; break; }
+  }
+  const auto treeSelection = selection && selection->group ? treeIndex(selection) : QModelIndex();
+  if (groupIndex.isValid()) groupView->setCurrentIndex(groupIndex);
+  else if (treeSelection.isValid()) treeView->setCurrentIndex(treeSelection);
+  else {
+    selection = nullptr;
+    treeView->setCurrentIndex({});
+    groupView->setCurrentIndex({});
   }
   scheduleDialogSync();
 }
@@ -937,6 +1058,36 @@ void Window::expandBranch(const QModelIndex& i) {
   treeView->expand(row);
   for (int child = 0; child < treeModel->rowCount(row); ++child)
     expandBranch(treeModel->index(child, 0, row));
+}
+void Window::selectLogFile(bool alarm) {
+  const auto base = alarm ? logging->alarmBasePath() : logging->opmodBasePath();
+  auto path = chooseFile(this, alarm ? "Alarm Log File" : "Operation Log File",
+                         base, "All files (*)", true);
+  if (path.isEmpty()) return;
+  // ALH appends the daily suffix even when given an already dated filename.
+  // Prefill the basename, and resolve ambiguous existing files at the UI
+  // boundary. Never silently strip a legitimate date from a configured/new
+  // basename; Logging's setters always take the operator's chosen basename.
+  const auto suffix = path.right(11);
+  if (options.dated && QFileInfo(path).absoluteFilePath() != QFileInfo(base).absoluteFilePath() &&
+      QFileInfo(path).isFile() && suffix.startsWith('.') &&
+      QDate::fromString(suffix.mid(1), "yyyy-MM-dd").isValid()) {
+    QMessageBox choice(QMessageBox::Question, "Dated Log File",
+        "This file ends in a date. Use its log series, or keep the date as part of the basename?",
+        QMessageBox::Cancel, this);
+    choice.setInformativeText("Log series: " + path.left(path.size() - 11) +
+                               "\nBasename: " + path);
+    auto series = choice.addButton("Use Log Series", QMessageBox::AcceptRole);
+    auto basename = choice.addButton("Use as Basename", QMessageBox::ActionRole);
+    choice.setDefaultButton(series);
+    choice.exec();
+    if (choice.clickedButton() == series)
+      path.chop(11);
+    else if (choice.clickedButton() != basename)
+      return;
+  }
+  if (alarm) logging->setAlarmFile(path);
+  else logging->setOpmodFile(path);
 }
 void Window::menus() {
   auto action = [this](QMenu* m, QString name, std::function<void()> fn,
@@ -1034,7 +1185,7 @@ void Window::menus() {
   } else {
     auto a = menuBar()->addMenu("&Action");
     action(a, "Acknowledge Alarm", [this] {
-      engine->acknowledge(selection);
+      if (selection) engine->acknowledge(selection);
       refresh();
     });
     action(a, "Display Guidance", [this] { guidance(); });
@@ -1046,7 +1197,7 @@ void Window::menus() {
     action(a, "Shelve Alarms...", [this] { shelveDialog(selection); });
     action(a, "Unshelve Alarms", [this] { engine->unshelve(selection); refresh(); });
     action(a, "NoAck for One Hour", [this] {
-      engine->noAck(selection, !engine->state(selection).noAckUntil);
+      if (selection) engine->noAck(selection, !engine->state(selection).noAckUntil);
       refresh();
     });
     if (options.broadcast) {
@@ -1077,11 +1228,11 @@ void Window::menus() {
     action(view, "Current Alarm History", [this] { showHistory(); });
     action(view, "Configuration File",
            [this] { showText("Configuration File", writeConfig(doc)); });
-    action(view, "Alarm Log File", [this] { showText("Alarm Log", logging->alarmPath(), true); });
+    action(view, "Alarm Log File", [this] { showLiveLog(true); });
     action(view, "Browser for Alarm Log",
            [this] { showLogBrowser(true); });
     action(view, "Operation Log File",
-           [this] { showText("Operation Log", logging->opmodPath(), true); });
+           [this] { showLiveLog(false); });
     action(view, "Browser for Operation Log",
            [this] { showLogBrowser(false); });
   }
@@ -1097,11 +1248,17 @@ void Window::menus() {
       item->setCheckable(true); item->setChecked(options.filter == i);
       filterGroup->addAction(item);
       connect(item, &QAction::triggered, this, [this, i] {
+        const QSignalBlocker treeSignals(treeView->selectionModel());
+        const QSignalBlocker groupSignals(groupView->selectionModel());
         options.filter = i; treeModel->setFilter(i); groupModel->setFilter(i);
         treeView->expandAll();
+        restoreVisibleSelection();
       });
     }
     auto beepMenu = setup->addMenu("ALH Beep Severity...");
+    // TODO: Possible inherited ALH bug, deferred: global beep threshold changes
+    // have no operation audit entry, unlike per-node changes in Engine::setBeep.
+    // Raising this threshold can silence alarms without a trace; address later.
     auto beepGroup = new QActionGroup(beepMenu);
     for (int i = 1; i < 5; ++i) {
       auto item = beepMenu->addAction(severityName(i));
@@ -1120,10 +1277,13 @@ void Window::menus() {
       item->setChecked(minutes == silenceMinutes);
       intervalActions->addAction(item);
       connect(item, &QAction::triggered, this, [this, minutes] {
+        // ALH ends active timed silence when a different interval is selected.
+        // Selecting the same interval must not restart the existing countdown.
+        if (silenceMinutes != minutes) engine->setSilenceUntil(0);
         silenceMinutes = minutes;
         silenceBox->setText(QString("Silence %1 minutes").arg(minutes));
-        if (engine->silenceUntil > engine->now())
-          engine->silenceUntil = engine->now() + minutes * 60000;
+        if (logging) logging->operation(nullptr, minutes == 60 ? "Silence interval set to 1 hour"
+            : QString("Silence interval set to %1 minutes").arg(minutes));
         refresh();
       });
     }
@@ -1132,18 +1292,14 @@ void Window::menus() {
     silenceForeverAction->setChecked(engine->silenceForever);
     connect(silenceForeverAction, &QAction::toggled, this, [this](bool yes) {
       options.silent = yes;
-      engine->silenceForever = yes;
+      engine->setSilenceForever(yes);
       refresh();
     });
     action(setup, "New Alarm Log File...", [this] {
-      auto p = chooseFile(this, "Alarm Log File", logging->alarmPath(), "All files (*)", true);
-      if (!p.isEmpty())
-        logging->setAlarmFile(p);
+      selectLogFile(true);
     });
     action(setup, "New Operation Modification Log File...", [this] {
-      auto p = chooseFile(this, "Operation Log File", logging->opmodPath(), "All files (*)", true);
-      if (!p.isEmpty())
-        logging->setOpmodFile(p);
+      selectLogFile(false);
     });
   }
   if (!options.editor) {
@@ -1211,6 +1367,17 @@ void Window::replace(Document d, bool snapshot) {
       if (counts[id] == 1 && active.contains(id)) savedNotificationAcks[id] = engine->state(n).unack;
     }
   }
+  Node* runtimeSelection = nullptr;
+  if (sameRuntime && selection) {
+    const auto id = Engine::nodeIdentity(selection);
+    int oldMatches = 0, newMatches = 0;
+    for (auto n : doc.nodes()) if (Engine::nodeIdentity(n) == id) ++oldMatches;
+    for (auto n : d.nodes()) if (Engine::nodeIdentity(n) == id) {
+      runtimeSelection = n;
+      ++newMatches;
+    }
+    if (oldMatches != 1 || newMatches != 1) runtimeSelection = nullptr;
+  }
   debugLog(options.debug, "config", snapshot ? "apply editor change" : "reload configuration");
   // Serialization emits channels before groups. Track the ordinal within each
   // kind so that a mixed child list cannot redirect an open Properties dialog.
@@ -1265,7 +1432,8 @@ void Window::replace(Document d, bool snapshot) {
             scheduleDialogSync();
           });
   auto restored = doc.root.get();
-  for (const auto& step : selectedPath) {
+  if (sameRuntime) restored = runtimeSelection;
+  for (const auto& step : sameRuntime ? QVector<QPair<bool, int>>() : selectedPath) {
     Node* next = nullptr;
     int ordinal = 0;
     for (const auto& child : restored->children)
@@ -1276,8 +1444,26 @@ void Window::replace(Document d, bool snapshot) {
     if (!next) break;
     restored = next;
   }
-  select(restored->group ? restored : restored->parent);
+  select(restored ? (restored->group ? restored : restored->parent) : doc.root.get());
   selection = restored;
+  if (!restored) {
+    for (const auto& key : selectionDialogs.keys()) {
+      auto dialog = selectionDialogs.value(key).window;
+      if (dialog) dialog->close();
+    }
+    messageArea->setText("The selected alarm was removed or is ambiguous after reload. Select an alarm to continue.");
+    messageArea->show();
+  } else {
+    // Restore the visible highlight as well as the action target.
+    const QSignalBlocker treeSignals(treeView->selectionModel());
+    const QSignalBlocker groupSignals(groupView->selectionModel());
+    treeView->setCurrentIndex(treeIndex(restored->group ? restored : restored->parent));
+    if (!restored->group)
+      for (int row = 0; row < groupModel->rowCount(); ++row) {
+        auto index = groupModel->index(row, 2);
+        if (groupModel->node(index) == restored) groupView->setCurrentIndex(index);
+      }
+  }
   treeView->expandAll();
   if (!options.editor)
     engine->start();
@@ -1285,6 +1471,10 @@ void Window::replace(Document d, bool snapshot) {
   refresh();
 }
 void Window::open(bool insert) {
+  if (insert && !selection) {
+    error("Select a destination group before inserting a configuration.");
+    return;
+  }
   auto path = chooseFile(this, "Alarm Configuration File", options.configDir,
                          "Alarm configurations (*.alhConfig);;All files (*)");
   if (path.isEmpty())
@@ -1292,6 +1482,10 @@ void Window::open(bool insert) {
   try {
     auto d = loadConfig(path, options.configDir);
     if (insert) {
+      if (!selection) {
+        error("Select a destination group before inserting a configuration.");
+        return;
+      }
       auto parent = selection->group ? selection : selection->parent;
       auto previous = writeConfig(doc);
       auto c = cloneNode(*d.root, parent);
@@ -1332,6 +1526,7 @@ void Window::saveTo(const QString& p) {
         copies[i]->mask = engine->state(originals[i]).mask;
   }
   saveConfig(saved, p);
+  logging->operation(nullptr, "Setup Save New Config: " + p);
   // Runtime Save As exports the current masks, as legacy ALH does. Keep the
   // monitored facility bound to its original reload, broadcast and lock files.
   if (options.editor)
@@ -1383,15 +1578,30 @@ void Window::redoEdit() {
 void Window::cut(bool remove) {
   if (!selection)
     return;
-  clipboard = cloneNode(*selection);
+  auto candidate = cloneNode(*selection);
   Document copied;
   copied.root = std::make_shared<Node>();
   copied.root->group = true;
   copied.root->name = "__QTALH_CLIPBOARD__";
   copied.root->children.push_back(cloneNode(*selection, copied.root.get()));
+  QSet<QString> names;
+  for (auto node : copied.nodes())
+    if (node != copied.root.get() && node->group) names.insert(node->name);
+  for (int suffix = 1; names.contains(copied.root->name); ++suffix)
+    copied.root->name = "__QTALH_CLIPBOARD__" + QString::number(suffix);
+  const auto serialized = writeConfig(copied);
+  try {
+    // Check the actual cross-window payload before publishing it or deleting
+    // the source of a Cut. Invalid data must leave both clipboards intact.
+    parseConfig(serialized);
+  } catch (const std::exception& e) {
+    error(e.what());
+    return;
+  }
+  clipboard = std::move(candidate);
   auto mime = new QMimeData;
   mime->setText(selection->name);
-  mime->setData("application/x-qtalh-config", writeConfig(copied).toUtf8());
+  mime->setData("application/x-qtalh-config", serialized.toUtf8());
   QApplication::clipboard()->setMimeData(mime);
   if (remove)
     clearNode();
@@ -1414,6 +1624,10 @@ void Window::clearNode() {
   replace(std::move(d));
 }
 void Window::paste() {
+  if (!selection) {
+    error("Select a destination group before pasting.");
+    return;
+  }
   auto mime = QApplication::clipboard()->mimeData();
   if (mime && mime->hasFormat("application/x-qtalh-config")) {
     try {
@@ -1515,6 +1729,18 @@ void Window::rebuildSelectionDialog(const QString& key) {
   }
 }
 void Window::scheduleDialogSync() {
+  const QStringList selectedActions = {"Acknowledge Alarm", "Display Guidance", "Start Related Process",
+      "Force Process Variable...", "Force Mask...", "Modify Mask Settings...", "Beep Severity...",
+      "Shelve Alarms...", "Unshelve Alarms", "NoAck for One Hour", "Properties Window"};
+  for (auto action : findChildren<QAction*>())
+    if (selectedActions.contains(action->text())) action->setEnabled(selection != nullptr);
+  if (!selection) {
+    for (const auto& key : selectionDialogs.keys()) {
+      const auto dialog = selectionDialogs.value(key).window;
+      if (dialog) dialog->close();
+    }
+    return;
+  }
   if (dialogSyncPending || selectionDialogs.isEmpty()) return;
   dialogSyncPending = true;
   // Rebuild after the current input callback returns; its controls may be replaced.
@@ -1526,7 +1752,7 @@ void Window::scheduleDialogSync() {
       if (!entry.window) continue;
       auto modal = QApplication::activeModalWidget();
       if (modal && (modal == entry.window || entry.window->isAncestorOf(modal))) continue;
-      if (entry.node == selection) {
+      if (selection && entry.node == selection) {
         if (auto summary = entry.window->findChild<QLabel*>("currentMaskSummary")) {
           const auto& current = engine->state(selection);
           QString mask = current.mask.text();
@@ -1731,14 +1957,15 @@ void Window::properties() {
                               "FORCEPV_CALC_D", "FORCEPV_CALC_E", "FORCEPV_CALC_F"})
         n->setOption(key, edits[key]->text());
       if (!forceName->text().trimmed().isEmpty()) {
-        QString force = forceName->text().trimmed();
-        for (int i = 1; i <= 3; ++i) force += ' ' + edits["FORCE_" + QString::number(i)]->text();
-        n->setOption("FORCEPV", force);
+        n->setOption("FORCEPV", forceDirective(forceName->text(), edits["FORCE_1"]->text(),
+            edits["FORCE_2"]->text(), edits["FORCE_3"]->text()));
       }
       if (!n->group) {
         n->setOption("ACKPV", edits["ACKPV"]->text());
         if (!count->text().isEmpty() || !seconds->text().isEmpty())
-          n->setOption("ALARMCOUNTFILTER", count->text() + ' ' + seconds->text());
+          n->setOption("ALARMCOUNTFILTER",
+              (count->text().trimmed().isEmpty() ? QString("1") : count->text().trimmed()) + ' ' +
+              (seconds->text().trimmed().isEmpty() ? QString("1") : seconds->text().trimmed()));
       }
       if (!n->parent) n->setOption("HEARTBEATPV", edits["HEARTBEATPV"]->text());
       for (auto item : {qMakePair(severity, QString("SEVRCOMMAND")),
@@ -1798,6 +2025,7 @@ void Window::masks(bool forced) {
     connect(buttons->button(QDialogButtonBox::Apply), &QPushButton::clicked, dialog, [=] {
       engine->cancelNoAckTimer(n);
       engine->setMask(n, Mask::parse(selectedMask(choices)));
+      engine->setSilenceCurrent(false);
       current->setText("Current Mask Summary: " + summary());
       dialog->setProperty("pendingEdits", false);
       refresh();
@@ -1805,6 +2033,7 @@ void Window::masks(bool forced) {
     connect(buttons->button(QDialogButtonBox::Reset), &QPushButton::clicked, dialog, [=] {
       engine->cancelNoAckTimer(n);
       engine->resetMask(n);
+      engine->setSilenceCurrent(false);
       auto mask = summary();
       for (int i = 0; i < choices.size(); ++i) choices[i]->setChecked(mask[i] != '-');
       current->setText("Current Mask Summary: " + mask);
@@ -1828,16 +2057,9 @@ void Window::masks(bool forced) {
         grid->addWidget(button, bit, choice + 1);
         connect(button, &QPushButton::clicked, dialog, [this, n, bit, choice] {
           if (bit == Ack) engine->cancelNoAckTimer(n);
-          std::function<void(Node*)> apply = [&](Node* c) {
-            if (c->group) {
-              for (auto& child : c->children) apply(child.get());
-            } else {
-              auto mask = engine->state(c).mask;
-              mask[bit] = choice == 2 ? c->mask[bit] : choice == 1;
-              engine->setMask(c, mask);
-            }
-          };
-          apply(n); refresh();
+          engine->modifyMask(n, bit, choice);
+          engine->setSilenceCurrent(false);
+          refresh();
         });
       }
     }
@@ -1931,14 +2153,14 @@ void Window::forceDialog() {
     try {
       QString text = "GROUP NULL check\n";
       if (!pvName->text().trimmed().isEmpty())
-        text += "$FORCEPV " + pvName->text().trimmed() + " " + selectedMask(choices) + " " +
-                force->text() + " " + reset->text() + "\n";
-      if (pvName->text().trimmed() == "CALC") {
+        text += "$FORCEPV " + forceDirective(pvName->text(), selectedMask(choices),
+            force->text(), reset->text()) + "\n";
+      // Preserve editable CALC settings even while a scalar PV is selected.
+      if (!expression->text().trimmed().isEmpty())
         text += "$FORCEPV_CALC " + expression->text() + "\n";
-        for (int i = 0; i < 6; ++i)
-          if (!inputs[i]->text().isEmpty())
-            text += "$FORCEPV_CALC_" + QString(QChar('A' + i)) + " " + inputs[i]->text() + "\n";
-      }
+      for (int i = 0; i < 6; ++i)
+        if (!inputs[i]->text().trimmed().isEmpty())
+          text += "$FORCEPV_CALC_" + QString(QChar('A' + i)) + " " + inputs[i]->text() + "\n";
       auto checked = parseConfig(text);
       engine->configureForce(n, checked.root->directives, disabled->isChecked());
       dialog->setProperty("pendingEdits", false);
@@ -1977,6 +2199,8 @@ void Window::beepSeverity(bool global) {
       if (options.editor) {
         undo.push_back(writeConfig(doc)); redo.clear(); modified = true;
       }
+      // Global changes retain the deferred audit gap documented at the ALH
+      // Beep Severity menu; per-node changes are audited by Engine::setBeep.
       if (global) doc.beepSeverity = severity;
       else engine->setBeep(n, severity);
       refresh();
@@ -1989,6 +2213,7 @@ void Window::beepSeverity(bool global) {
 }
 void Window::guidance(Node* target) {
   if (!target) target = selection;
+  if (!target) return;
   auto url = target->option("GUIDANCE");
   if (!url.isEmpty()) {
     QUrl u =
@@ -2001,6 +2226,7 @@ void Window::guidance(Node* target) {
 }
 void Window::related(Node* target) {
   if (!target) target = selection;
+  if (!target) return;
   auto text = target->option("COMMAND");
   if (text.isEmpty())
     return;
@@ -2023,40 +2249,18 @@ void Window::related(Node* target) {
   } else
     engine->command(entries.front().trimmed());
 }
-void Window::showText(const QString& title, const QString& content, bool fromFile) {
+void Window::showText(const QString& title, const QString& content) {
   auto dialog = new QDialog(this);
   dialog->setAttribute(Qt::WA_DeleteOnClose);
   dialog->setWindowTitle(title);
-  dialog->resize(fromFile ? 800 : 600, fromFile ? 400 : 300);
+  dialog->resize(600, 300);
   auto l = dialogColumn(dialog);
-  if (fromFile) l->addWidget(new QLabel("File: " + content));
   auto text = new QPlainTextEdit;
   text->setReadOnly(true);
   if (legacyAppearance()) text->setFont(font());
-  else if (fromFile) setPresentationFont(text, contentFont());
-  text->setLineWrapMode(!legacyAppearance() && !fromFile ? QPlainTextEdit::WidgetWidth : QPlainTextEdit::NoWrap);
+  text->setLineWrapMode(legacyAppearance() ? QPlainTextEdit::NoWrap : QPlainTextEdit::WidgetWidth);
+  text->setPlainText(content);
   l->addWidget(text);
-  auto update = [text, content, fromFile] {
-    QString body = content;
-    if (fromFile) {
-      QFile f(content);
-      body = f.open(QIODevice::ReadOnly) ? QString::fromLocal8Bit(f.readAll()) : f.errorString();
-    }
-    if (body != text->toPlainText()) {
-      auto scroll = text->verticalScrollBar();
-      int value = scroll->value();
-      bool bottom = value == scroll->maximum();
-      text->setPlainText(body);
-      scroll->setValue(bottom ? scroll->maximum() : value);
-    }
-  };
-  update();
-  if (fromFile) {
-    auto t = new QTimer(dialog);
-    t->setInterval(1000);
-    connect(t, &QTimer::timeout, dialog, update);
-    t->start();
-  }
   auto row = new QHBoxLayout;
   row->addWidget(new QLabel("Search:"));
   auto search = new QLineEdit;
@@ -2164,6 +2368,14 @@ bool Window::eventFilter(QObject* object, QEvent* event) {
   return QMainWindow::eventFilter(object, event);
 }
 void Window::closeEvent(QCloseEvent* event) {
+  // ALH prevents sender exit while a broadcast is being delivered. Otherwise
+  // the last window can end the event loop before peers see Reload/Stop Logging.
+  if (logging && logging->broadcastPending() && quitting) {
+    error("A broadcast is still being delivered. Wait up to one minute before exiting.");
+    quitting = false;
+    event->ignore();
+    return;
+  }
   if (!options.editor && !quitting) {
     hide();
     event->ignore();
@@ -2189,6 +2401,8 @@ void Window::closeEvent(QCloseEvent* event) {
   }
   if (runtime)
     runtime->hide();
+  // Hiding the main display, cancelling, or deferring exit is not an exit.
+  logging->operation(nullptr, "Setup---Exit");
   event->accept();
 }
 } // namespace alh

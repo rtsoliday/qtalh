@@ -343,16 +343,18 @@ void NotificationPolicy::observe(const ChannelUpdate& s, qint64 now) {
     bool eligible = s.initialized && !s.suppressed && s.unack >= r->minimumSeverity;
     if (it != episodes.end()) {
       it->state = s;
-      // Global disconnect/access errors carry ACKS=0. Keep the episode and
-      // its escalation clock, but wait for a fresh state before dispatching.
-      if (!s.initialized || (!s.available && !s.suppressed && s.unack == 0)) {
+      // Global communication errors now have a local acknowledgement latch.
+      // Keep the episode and its clock paused across a gap even when unack is
+      // nonzero; only a fresh IOC observation may resume delivery.
+      if (!s.initialized || (!s.available && !s.suppressed &&
+                            (s.unack == 0 || s.communicationError))) {
         it->waiting = true;
         continue;
       }
       it->waiting = false;
       if (!eligible)
         end(*it, s.available && !s.suppressed && s.unack == 0);
-    } else if (eligible) {
+    } else if (eligible && !s.communicationError) {
       Episode e;
       e.id = notificationId();
       e.subscription = id;

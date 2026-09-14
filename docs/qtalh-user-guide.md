@@ -43,6 +43,19 @@ to open the main tree and group contents. Closing the main runtime window hides
 it while monitoring continues. Closing the compact window or using File
 Exit/Close asks for confirmation before stopping that runtime.
 
+### Selection and alarm silence
+
+Changing the display filter preserves the selected alarm when it remains visible.
+If filtering removes it, the selection clears, selection dialogs close, and
+selection-dependent actions stay disabled until you select another visible row.
+This also applies when an alarm clears while a filter is active.
+
+Changing **Setup → Silence Time Interval** to a different duration ends any
+active timed silence, matching ALH. Enable the silence checkbox again to start
+that duration. Choosing the same interval leaves the countdown unchanged.
+Timed silence, Silence Current, Silence Forever, interval changes, and timed
+silence expiry are recorded in the operation log when file logging is enabled.
+
 ### Preview guidance and commands
 
 Hover over a **G** button to read the configured guidance text. A configured URL
@@ -108,6 +121,10 @@ Syntax: `qtalh [OPTIONS] [configfile]`. One configuration is supported per
 invocation; the UI can open additional windows. A missing runtime filename
 means `ALH-default.alhConfig`. If it does not exist, interactive startup opens
 a file chooser. The headless validator instead reports the missing file.
+Configuration filenames and `-a`/`-o` arguments beginning with `./` or `../`
+resolve against the working directory, overriding `-f`, `-l`, and `ALARMHANDLER`.
+Absolute paths also override those directories; bare filenames use them.
+INCLUDE paths retain their separate configuration-directory rule.
 
 | Option | Meaning and default |
 | --- | --- |
@@ -120,12 +137,12 @@ a file chooser. The headless validator instead reports the missing file.
 | `-p file` | Play a local audio file instead of the system beep. Formats depend on the installed Qt Multimedia backend; the suite exercises Ogg/Vorbis. |
 | `-f dir` | Configuration and INCLUDE directory. Default: `ALARMHANDLER`, or the working directory (`.`). |
 | `-l dir` | Log directory. Default: the configuration directory. Create it before starting. |
-| `-a file` | Alarm filename, relative to the log directory unless absolute. Default: `ALH-default.alhAlarm`. |
-| `-o file` | Operation filename, relative to the log directory unless absolute. Default: `ALH-default.alhOpmod`. |
-| `-m count` | Alarm retention in records; default 2000. `0` means unlimited. Does not bound the operation log. |
+| `-a file` | Alarm filename, relative to the log directory unless absolute or explicitly prefixed with `./` or `../`. Default: `ALH-default.alhAlarm`. |
+| `-o file` | Operation filename, relative to the log directory unless absolute or explicitly prefixed with `./` or `../`. Default: `ALH-default.alhOpmod`. |
+| `-m count` | Alarm retention in records; default 2000, or unlimited with `-L`. An explicit `-m` overrides either default; `0` means unlimited. Does not bound the operation log. |
 | `-T` | Append `.yyyy-MM-dd` to each log filename, using local dates. The alarm record limit still applies. |
 | `-xml` | Write legacy XML-like entry records; these are not a complete XML document. |
-| `-L` | Coordinate master/slave alarm logging with a lock. |
+| `-L` | Coordinate master/slave alarm logging with a lock. Alarm retention defaults to unlimited unless `-m` is supplied. |
 | `-Lfile basename` | Override the lock basename; requires `-L` to enable locking. Default: resolved configuration filename. |
 | `-B` | Enable file-based message, reload, and temporary stop-logging broadcasts. |
 | `-P key` | Send alarm records to a printer System V queue; positive decimal integer, Linux/macOS only. |
@@ -133,11 +150,11 @@ a file chooser. The headless validator instead reports the missing file.
 | `-filter no\|active\|unack` | Initial display filter; default `no`. Active includes active or unacknowledged alarms. Filtering does not stop monitoring. |
 | `-mainwindow` | Open the main runtime window at startup. |
 | `-maskcolor` | Color the mask controls. |
-| `-noerrorpopup` | Suppress error message boxes; errors still appear in the window message area and Qt diagnostic output. |
+| `-noerrorpopup` | Suppress error message boxes; errors still appear in the window message area, Qt diagnostic output, and operation log when logging is enabled. |
 | `-desc_field` | Subscribe to each channel record's `.DESC` field for descriptions. |
 | `-debug` | Timestamped startup, alarm, CA, command, logging, and broadcast diagnostics on stderr. Default: off. |
 | `-display display`, `--display display` | Set `DISPLAY` before opening the GUI (for X11). |
-| `-geometry geometry` | Initial geometry such as `1000x600+20+20`. |
+| `-geometry geometry` | Initial geometry of the compact runtime window, or the main window with `-mainwindow` or `-c`. Accepts dimensions and/or position, such as `1000x600+20+20` or `-20-20`; negative offsets measure from the available screen’s right/bottom edges. |
 | `-fn font`, `-font font` | Runtime button font; defaults to `ALHMAINFONT` when set. XLFD fonts are approximated. |
 | `-platform platform` | Qt platform selection, for example `offscreen` or `xcb`. |
 | `-style name`, `-style=name` | Appearance: `motif` (default), `fusion`, or an installed Qt Widgets style. Names are case-insensitive; the last occurrence wins. |
@@ -241,7 +258,9 @@ NoAck is an operator setting and displays `H` in the mask summary.
 Every relative include, including nested includes, resolves against `-f` or
 `ALARMHANDLER` (default `.`), not the containing include's directory. For example,
 use `qtalh -f /path/to/configs main.alhConfig`. Absolute paths are accepted.
-Include cycles and excessive nesting are errors. The C++ `loadConfig` API uses
+Within an included file, each `GROUP NULL` attaches beneath the current group,
+matching ALH; after a channel, that means its parent group. Include cycles and
+excessive nesting are errors. The C++ `loadConfig` API uses
 the top-level file's directory when no configuration directory is supplied.
 
 Directives normally apply to the preceding group/channel:
@@ -249,25 +268,56 @@ Directives normally apply to the preceding group/channel:
 | Directive | Arguments and behavior |
 | --- | --- |
 | `$ALIAS` | Display label text; the underlying PV/group name is unchanged. |
-| `$GUIDANCE` | URL or filename, opened externally. Relative guidance files resolve from the document directory. With no inline value, read text through `$END` into a guidance dialog. |
+| `$GUIDANCE` | URL or filename, opened externally. Relative guidance files resolve from the document directory. With no inline value, read text through `$END` into a guidance dialog. Multiple inline blocks on a node are combined in order. |
 | `$COMMAND` | Related command, or `label ! command ! label ! command` menu pairs. Commands starting with `medm` (including a quoted or absolute executable path) silently launch `qtedm` from `PATH` instead, preserving arguments. Configuration text is unchanged. This substitution also applies to severity/status commands. |
 | `$BEEPSEVERITY` | Facility beep threshold (default MINOR); may occur before the root. |
-| `$BEEPSEVR` | Threshold for the current node; ancestor thresholds also apply. |
+| `$BEEPSEVR` | Threshold for the current node; ancestor thresholds also apply. The last directive on a node wins. |
 | `$HEARTBEATPV` | `pv [interval_seconds [short_integer_value]]`; defaults 1 second and value 1. The first heartbeat in the facility, including includes, wins. Writes require global active mode. |
 | `$ACKPV` | `pv short_integer_value`; channel only. Written on global active acknowledgement. |
-| `$SEVRPV` | Output PV for the node's severity (0–4); disabled channels publish -1. Writes require global active mode. `-` disables this output. |
+| `$SEVRPV` | Output PV for the node's severity (0–4); disabled channels publish -1. Writes require global active mode. `-` leaves the output unset; the first real PV replaces earlier `-` placeholders and takes precedence over later directives. |
 | `$FORCEPV` | `pv mask [force_value [reset_value]]`; default force 1, reset 0. At force, apply the mask; at reset, restore configured channel masks. `NE` or a reset equal to force resets on leaving the force value. Applies to descendant channels for a group. |
 | `$FORCEPV_CALC` | EPICS CALC expression required when the FORCEPV name is `CALC`. |
 | `$FORCEPV_CALC_A` through `$FORCEPV_CALC_F` | Numeric constants or PV inputs for CALC. Unspecified inputs default to zero; all named PV inputs must become available before evaluation. |
-| `$SEVRCOMMAND` | `UP_severity command` or `DOWN_severity command`, matching direction and destination severity; `ANY` matches any change in that direction, `UP_ALARM` matches leaving NO_ALARM. Repeat to add commands. |
+| `$SEVRCOMMAND` | `UP_severity command` or `DOWN_severity command`, matching direction and destination severity; `ANY` matches any change in that direction, `UP_ALARM` matches leaving NO_ALARM. Channel startup is evaluated from ERROR, matching ALH. Repeat to add commands. |
 | `$STATCOMMAND` | `status command`; channel only, runs when entering that status. Repeat to add commands. Status names follow EPICS alarm names and the additional connection/access states in `qtalh/core/model.cc`. |
-| `$ALARMCOUNTFILTER` | `count seconds`; channel only. Legacy alarm count/time filtering: count -1 delays alarm onset, 0 also holds clearing transitions, positive counts track repeated alarm edges within the interval. Zero seconds disables filtering. Accepted count range: -1 through 1,000,000; seconds must be a nonnegative integer. |
+| `$ALARMCOUNTFILTER` | `count seconds`; channel only. Omitted count and seconds each default to 1. Legacy alarm count/time filtering: count -1 delays alarm onset, 0 also holds clearing transitions, positive counts track repeated alarm edges within the interval. Zero seconds disables filtering. Accepted count range: -1 through 1,000,000; seconds must be a nonnegative integer. |
+
+Fixed-argument directives accept trailing comments beginning with a
+whitespace-separated `#`, for example `$SEVRPV output # severity mirror`.
+Hashes within PV names remain part of the name. Commands, aliases, and guidance
+retain their complete text. `$FORCEPV_CALC A > 0 # beam inhibit` also accepts a
+trailing comment. A valid complete CALC expression takes precedence, preserving
+the `#` not-equal operator in expressions such as `A # B`.
+
+Scalar Force PV values compare at double precision; CALC force/reset values
+compare at float precision. For `NE` (or reset equal to force), Qt consistently
+uses float precision to recognize the previous forced CALC value before resetting.
+This intentionally fixes an ALH inconsistency that could leave a force mask applied
+after a rounded match. For example, force 16777216 with CALC results
+16777217 then 16777220 applies and then resets the mask.
+
+With `-global -caputackt`, if a PV occurs more than once with different configured
+T bits, ALH's startup order decides the final setting: subgroups first, then direct
+channels within each group; the last occurrence in that traversal wins. Cancelled
+channels participate. Qt sends the final setting once per PV when writable.
 
 Severities are `NO_ALARM`, `MINOR`, `MAJOR`, `INVALID`, and `ERROR` (0–4).
 Severity values also accept numbers and case-insensitive names; command direction
 prefixes `UP_` and `DOWN_` are uppercase. Heartbeat intervals must be finite,
 positive, and no greater than 2147483.647 seconds; scheduling rounds to milliseconds
 with a 1 ms minimum. Event-loop delays can delay a beat; missed beats are skipped.
+Heartbeat writes and the precise timer pause while the PV is disconnected or
+unwritable. One diagnostic is reported per outage. The ordinary refresh checks
+availability and resumes the timer within about 200 ms after CA reports recovery.
+In global mode, communication failures have a separate local ERROR acknowledgement.
+They remain audible and visible in the unacknowledged filter. Acknowledging that
+error does not write to the IOC or ACKPV; any outstanding IOC alarm remains pending.
+The error latch survives recovery when transient acknowledgement is enabled, or
+clears on recovery with NoAckT. Failed IOC acknowledgement submissions are logged
+as failures and do not trigger ACKPV or acknowledgement-success records.
+
+Severity and heartbeat outputs use the legacy short-integer CA type; ACKPV uses
+the legacy unsigned-enum type. This also preserves integer text on string PVs.
 
 Commands use `/bin/sh -c` on Linux/macOS and `cmd.exe /d /s /c` on Windows.
 Use commands appropriate to the host. A leading `MASTER_ONLY` restricts a
@@ -289,21 +339,59 @@ mkdir -p logs
 bin/Linux-x86_64/qtalh -l logs -a alarm.log -o operation.log -m 2000 -L my.alhConfig
 ```
 
-Replace `my.alhConfig` with your configuration. Alarm logs retain the most recent
-2000 records by default using a circular file; physical line order after wrapping
-is not chronological. Operation logs append without a record limit. Dated logs
-switch on the local date and keep earlier files; automatic deletion of old daily
-files is not implemented. Historical browsers search the current file and dated
+Replace `my.alhConfig` with your configuration. Without `-L`, alarm logs retain the
+most recent 2000 records by default using a circular file. With `-L`, they append
+without a record limit, matching ALH. An explicit `-m` overrides either default;
+the example above opts into 2000 records. Physical line order after wrapping is
+not chronological. Operation logs append without a record limit. Their facility prefix uses the
+root group's alias, or its name if no alias is set, and follows alias changes on
+reload. Database headers retain the underlying facility identifier. Dated logs
+route each alarm by its event's local date, so delayed alarms crossing midnight
+remain searchable on their original date. Operation logs use the current date.
+Earlier daily files are kept; automatic deletion is not implemented. Historical browsers search the current file and dated
 siblings, sort by time, and support local From/To times and case-sensitive With
-text. They report cancellation, unreadable files, and the 100,000-record/10 MiB
+text across complete records, including legacy continuation lines. For circular logs, a checkpoint matching the complete file preserves
+insertion order among equal timestamps, including when results are limited.
+Without a matching checkpoint, equal timestamps retain physical file order. They report cancellation, unreadable files, and the 100,000-record/10 MiB
 result limits. Live viewers and the ten-entry in-memory alarm history are separate.
 
-Bounded alarm logs keep a sibling `.qtalh-position` file containing two binary
-checkpoints. Keep it with the alarm log to preserve exact ring order across
-restarts, including equal timestamps. If it is missing or does not match, recovery
+Runtime errors are appended to the operation log when logging is enabled and
+the destination is writable. Failure to audit an error still leaves it visible
+in the message area and diagnostic output without recursively logging failures.
+
+Startup log-open failures appear in the message area and error dialog (unless
+`-noerrorpopup` is set). Failed destinations are retried on subsequent records
+and every two seconds; repeated identical open errors are reported once.
+Recovery preserves the other log and resumes recording new events. Events missed
+while a destination was unavailable are not replayed.
+
+**View → Alarm Log File** and **Operation Log File** show a live tail limited to
+1,000 records or 256 KiB. They follow destination changes and the current local
+date with `-T`. File reads run in the background; unchanged append-only files are
+not reread in full. The alarm viewer uses a valid checkpoint to display wrapped
+records in insertion order, including equal timestamps. Without a matching
+checkpoint, a snapshot scans all physical slots and retains the newest timestamps
+before applying the display limits. Equal timestamps retain physical order. Use
+the historical browser for older records.
+
+Bounded alarm logs keep a sibling `.qtalh-position.<identity>` file containing two
+binary checkpoints. The identity suffix keeps a renamed log and its replacement
+from sharing a checkpoint. A locator stored on the log preserves checkpoint lookup
+across renames on filesystems supporting extended attributes or NTFS streams;
+keep the checkpoint at that location. Existing `.qtalh-position` files remain
+readable and are upgraded on the next write. If it is missing or does not match, recovery
 uses timestamps, which cannot reliably order ties or out-of-order records.
 Records are flushed before checkpoint updates; the two files are separate writes
-and are not an atomic transaction or a per-record durable fsync. See the
+and are not an atomic transaction or a per-record durable fsync. New alarms arriving
+during a large recovery scan are spooled in order. If the snapshot changes or
+cannot be read, recovery retries without consuming the pending alarm. An unreadable
+or incomplete spool is also retained, with a diagnostic identifying its path and
+first unread byte; only fully consumed spools are removed. Closing a window makes a
+bounded synchronous retry; if recovery still fails, a diagnostic
+identifies the retained temporary spool, the first unread byte, and its target log.
+This spool requires manual recovery: from that byte, each entry is an 8-byte header
+(two big-endian unsigned 32-bit values: retention limit and record byte length)
+followed by the record bytes. See the
 [checkpoint details](qtalh-logging-analysis.md#implemented-changes).
 
 `-L` uses `<configuration>.LOCK` by default and checks ownership at startup and
@@ -315,7 +403,8 @@ uses native file locks without POSIX interoperability.
 
 `-B` uses `<configuration>.MESS` and `.MESSLOCK`, independently of `-Lfile`.
 Participants must use the same configuration identity and have access to those
-files. Messages are polled every two seconds, and senders hold delivery ownership
+files. Pending startup messages and reload requests are delivered after the window
+installs its handlers. Messages are polled every two seconds, and senders hold delivery ownership
 for 60 seconds; another send reports busy during that interval. Broadcast actions
 send a message, reload the named configuration, or suppress alarm logging and
 commands for 1–10 minutes. Monitoring continues. Reload preserves Silence Forever.
@@ -326,6 +415,11 @@ Linux/macOS helpers retain these positional arguments:
 qtalh_printer host tcp_port queue_key bw|bw_bold|oki_bold|hp_color
 qtalh_DB      host rpc_program_number queue_key
 ```
+
+The printer helper reports connection/write failures on stderr, retains the current
+record, and retries after one second. Connections or writes with no progress time
+out after ten seconds. Each outage is reported once, followed by a message when
+delivery resumes.
 
 Keys must match `-P`/`-O`. The database argument is an RPC program number,
 version 1/procedure 1, rather than a TCP port. Native System V queue layout is

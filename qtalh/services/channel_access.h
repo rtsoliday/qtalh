@@ -11,6 +11,12 @@ public:
   explicit ChannelAccess(EngineOptions options = {}, QObject* parent = nullptr);
   ~ChannelAccess() override;
   std::function<void(const QString&)> error;
+  // Connection timeouts are intervals, independent of event wall timestamps.
+  std::function<qint64()> monotonicNow = [] {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+  };
+  // Repeated requests for one owner/PV replace its callback and reuse its monitor.
   void monitor(const QString&, std::function<void(Event)>, const void* owner = nullptr) override;
   void text(const QString&, std::function<void(QString)>) override;
   void number(const QString&, std::function<void(double)>, const void* owner = nullptr) override;
@@ -22,6 +28,9 @@ public:
   void clear() override;
   void poll();
   void setInitialAckT(const QString&, bool);
+  // Configure before connecting. All fields of a record share ALH's
+  // subgroup-first startup precedence and one successful ACKT submission.
+  void configureInitialAckT(const Document&);
 
 private:
   struct Channel {
@@ -33,7 +42,8 @@ private:
     std::function<void(Event)> alarm;
     std::function<void(double)> numeric;
     std::function<void(QString)> text;
-    bool cancelled = false, initialAckWritten = false;
+    bool cancelled = false, prepared = false;
+    bool recheckAccess = false;
     qint64 connectionDeadline = 0;
     Event last;
     bool haveLast = false;
@@ -42,7 +52,9 @@ private:
   std::vector<std::unique_ptr<Channel>> channels;
   QHash<QString, QVector<Channel*>> channelsByName;
   QHash<int, QSocketNotifier*> sockets;
-  QHash<QString, bool> initialAckT;
+  QHash<QString, bool> initialAckT; // Keyed by record name.
+  QSet<QString> initialAckTargets; // Configured CA names, retaining their fields.
+  QSet<QString> initialAckWritten;
   QHash<QString, double> pendingSeverity;
   QTimer timer;
   bool active = false, clearing = false;

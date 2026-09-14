@@ -1,6 +1,7 @@
 // Qt Core/Network port of ALH printer.c. See ../LICENSE.
 #include "services/ipc.h"
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QTcpSocket>
 #include <QTextStream>
 #include <QTimer>
@@ -34,9 +35,43 @@ int main(int argc, char** argv) {
   timer.setInterval(50);
   QTcpSocket socket;
   QByteArray pending;
-  QObject::connect(&socket, &QTcpSocket::connected, &app, [&] { socket.write(pending); });
+  QElapsedTimer clock; clock.start();
+  qint64 retryAt = 0;
+  bool outage = false;
+  QTimer deadline; deadline.setSingleShot(true); deadline.setInterval(10000);
+  auto failed = [&](const QString& reason) {
+    deadline.stop();
+    retryAt = clock.elapsed() + 1000;
+    if (!outage)
+      QTextStream(stderr) << "Printer delivery unavailable (" << a[1] << ':' << port << "): "
+                          << reason << "; retaining current record and retrying\n";
+    outage = true;
+  };
+  QObject::connect(&socket, &QTcpSocket::errorOccurred, &app, [&](QAbstractSocket::SocketError) {
+    if (pending.isEmpty()) return;
+    failed(socket.errorString());
+    socket.abort();
+  });
+  QObject::connect(&deadline, &QTimer::timeout, &app, [&] {
+    failed("Connection or write timed out");
+    socket.abort();
+  });
+  QObject::connect(&socket, &QTcpSocket::connected, &app, [&] {
+    deadline.start();
+    const auto written = socket.write(pending);
+    if (written != pending.size()) {
+      failed(written < 0 ? socket.errorString() : QString("Incomplete write submission"));
+      socket.abort();
+    }
+  });
   QObject::connect(&socket, &QTcpSocket::bytesWritten, &app, [&](qint64) {
+    if (pending.isEmpty()) return;
+    deadline.start();
     if (socket.bytesToWrite() == 0) {
+      deadline.stop();
+      if (outage)
+        QTextStream(stderr) << "Printer delivery resumed (" << a[1] << ':' << port << ")\n";
+      outage = false;
       pending.clear();
       socket.disconnectFromHost();
     }
@@ -46,7 +81,7 @@ int main(int argc, char** argv) {
       app.quit();
       return;
     }
-    if (socket.state() != QAbstractSocket::UnconnectedState)
+    if (socket.state() != QAbstractSocket::UnconnectedState || clock.elapsed() < retryAt)
       return;
     if (pending.isEmpty()) {
       QString error;
@@ -61,6 +96,7 @@ int main(int argc, char** argv) {
         }
     }
     if (!pending.isEmpty() && socket.state() == QAbstractSocket::UnconnectedState) {
+      deadline.start();
       socket.connectToHost(a[1], port);
     }
   };

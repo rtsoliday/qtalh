@@ -5,7 +5,7 @@
 namespace alh {
 Options parseOptions(const QStringList& args) {
   Options o;
-  bool explicitLogDir = false;
+  bool explicitLogDir = false, explicitMaxRecords = false;
   o.configDir = qEnvironmentVariable("ALARMHANDLER", ".");
   o.font = qEnvironmentVariable("ALHMAINFONT");
   auto need = [&](int& i) -> QString {
@@ -76,9 +76,10 @@ Options parseOptions(const QStringList& args) {
       o.printerKey = integer(i, 1);
     else if (a == "-O")
       o.databaseKey = integer(i, 1);
-    else if (a == "-m")
+    else if (a == "-m") {
       o.maxRecords = integer(i, 0);
-    else if (a == "-display" || a == "--display")
+      explicitMaxRecords = true;
+    } else if (a == "-display" || a == "--display")
       o.display = need(i);
     else if (a == "-geometry")
       o.geometry = need(i);
@@ -115,6 +116,9 @@ Options parseOptions(const QStringList& args) {
       o.config = a;
     }
   }
+  // ALH makes locked logs unlimited. Qt permits an explicit -m override.
+  if (o.lock && !explicitMaxRecords)
+    o.maxRecords = 0;
   o.engine.debug = o.debug;
 #ifdef Q_OS_WIN
   if (o.printerKey || o.databaseKey)
@@ -124,10 +128,16 @@ Options parseOptions(const QStringList& args) {
     o.logDir = o.configDir;
   if (o.config.isEmpty() && !o.editor)
     o.config = "ALH-default.alhConfig";
+  auto resolve = [](const QString& directory, const QString& path) {
+    // ALH treats explicit relative paths as overrides of -f/-l and ALARMHANDLER.
+    const bool explicitPath = QDir::isAbsolutePath(path) || path.startsWith("./") ||
+                              path.startsWith("../");
+    return QFileInfo(explicitPath ? path : QDir(directory).filePath(path)).absoluteFilePath();
+  };
   if (!o.config.isEmpty())
-    o.config = QFileInfo(QDir(o.configDir).filePath(o.config)).absoluteFilePath();
-  o.alarmFile = QFileInfo(QDir(o.logDir).filePath(o.alarmFile)).absoluteFilePath();
-  o.opmodFile = QFileInfo(QDir(o.logDir).filePath(o.opmodFile)).absoluteFilePath();
+    o.config = resolve(o.configDir, o.config);
+  o.alarmFile = resolve(o.logDir, o.alarmFile);
+  o.opmodFile = resolve(o.logDir, o.opmodFile);
   return o;
 }
 QString usage() {
@@ -139,7 +149,7 @@ QString usage() {
   -caputackt         Write configured ACKT settings at startup (global, active)
   -a file -o file    Alarm and operation log filenames
   -f dir -l dir      Configuration and log directories
-  -m count           Maximum alarm records (0 means unlimited)
+  -m count           Maximum alarm records (0 unlimited; default 2000, or 0 with -L)
   -T -xml            Dated logs / XML-ish log format
   -L -Lfile file     Master/slave logging lock / alternate lock basename
   -B                 Message broadcast using configuration .MESS files

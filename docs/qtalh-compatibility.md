@@ -45,8 +45,14 @@ Failed acknowledgements remain visible, and passive mode never writes them.
 Failed operator ACKT writes retain the previous displayed mask bit; reapplying
 the setting retries the write. Group mask changes handle write failures per
 channel, including changes that cancel or restore monitoring.
-Scalar Force PV comparisons retain double precision; CALC comparisons retain the
-legacy float behavior.
+Scalar Force PV comparisons retain double precision; CALC force and numeric-reset
+comparisons retain legacy float precision. Qt intentionally uses that same float
+comparison for the previous forced value in an `NE` reset (also selected when
+reset equals force). ALH instead compares the previous value as a double, which
+can leave a force mask applied after a rounded match. For example, with force
+16777216, CALC results 16777217 then 16777220 apply and reset the mask in Qt;
+ALH applies it but fails to reset. Qt preserves this correction, with regressions
+for channel/group forcing, explicit `NE`, equal force/reset values, and save/reload.
 Automatic Force PV ACKT writes that fail retain the latest requested bit per channel
 and retry once the target is connected and writable, including cancelled alarm
 channels. Until an actual IOC ACKT value has been observed, automatic forcing
@@ -59,6 +65,8 @@ Mask parsing follows legacy `alSetMask`: only uppercase `C`, `D`, `A`, `T`,
 and `L` set bits; other characters are ignored. `$FORCEPV` retains the legacy
 PV/mask/force/reset order and numeric parsing defaults (force 1, reset 0).
 An invalid force value stops numeric parsing; an invalid reset value becomes 0.
+Reset numbers use the complete token, extending ALH's nine-character reset field
+so decimal and scientific-notation values survive saving, reloading, and editor actions.
 Lowercase `ne` is accepted. Loaded directives are normalized to their effective
 values for runtime, editing, and saving. For example, `gate 0 1 -D---` becomes
 `gate ----- 1 0`; the misplaced mask is not moved to another field.
@@ -69,8 +77,15 @@ expression ordering remains flexible. Invalid reloads preserve the running
 configuration and alarm state.
 
 Heartbeats use a dedicated precise Qt timer, independent of the 200 ms UI refresh.
-Their deadlines retain the configured cadence; delayed callbacks skip missed beats
-without sending a catch-up burst. Intervals are rounded to milliseconds (minimum
+Heartbeat, count-filter, timed NoAck, and silence-interval deadlines use a monotonic
+clock, separate from wall-clock event timestamps and absolute shelf expirations.
+System clock corrections therefore do not extend or prematurely expire these intervals.
+Heartbeat deadlines retain the configured cadence; delayed callbacks skip missed beats
+without sending a catch-up burst.
+Unavailable heartbeat PVs suspend the precise timer and generate one diagnostic
+per outage. The ordinary refresh resumes scheduling when CA reports write access.
+Severity/heartbeat outputs use DBR_SHORT and ACKPV uses DBR_ENUM, preserving
+legacy integer-to-string conversion as well as numeric output values. Intervals are rounded to milliseconds (minimum
 1 ms) and must be finite, positive, and fit Qt's millisecond timer range. Timing
 still depends on event-loop availability. Broadcast reloads preserve the operator's
 current Silence Forever setting and its menu state.
@@ -81,9 +96,12 @@ ALH. Reloads continue to read the original configuration. Editor Save As changes
 the document filename as usual.
 
 
-Startup channel ERROR events run channel severity commands and publish severity
-outputs once, as group startup events do. Empty groups and groups containing only cancelled channels publish their initial
-severity output in global active mode. Descriptions use read-only string
+Channel startup severity commands use ALH's initial ERROR baseline: an initial
+MAJOR or NO_ALARM invokes matching DOWN commands, while an initial ERROR does
+not invoke channel severity commands. Startup severity outputs are published once;
+group startup commands retain their separate initial aggregate behavior. Empty
+groups and groups containing only cancelled channels publish their initial severity
+output in global active mode. Descriptions use read-only string
 subscriptions, preserving readable text even when global alarm writes are denied.
 Initially disabled channels publish -1
 in global active mode, including channels that are also cancelled. Startup ACKT
@@ -102,9 +120,62 @@ remain errors. Group names must not duplicate an ancestor or use the reserved
 name `NULL`; these ambiguous names are rejected transactionally during parsing
 and editing. Repeated names on separate branches remain supported.
 
+Per-node `$BEEPSEVR`, `$ACKPV`, and `$FORCEPV_CALC` use the last directive,
+while first-wins options such as ALIAS and COMMAND retain their legacy precedence.
+GROUP, CHANNEL, and INCLUDE declarations accept trailing comments beginning with
+a whitespace-separated `#`; hashes in names, commands, and guidance are preserved.
+Missing `$ALARMCOUNTFILTER` arguments default to count 1 and seconds 1 and save
+in full form. Multiple inline GUIDANCE blocks
+are combined in order, preserving blank lines through display, editing and saving.
+
 All relative INCLUDE paths use the configured directory (`-f` or `ALARMHANDLER`),
 including nested includes, GUI open/insert, and broadcast reload. Without an
 explicit directory, the `loadConfig` library API uses the top-level file's directory.
+
+Startup ACKT writes also apply to cancelled channels through connections without
+alarm subscriptions. A completed startup setting is tracked per PV and is not
+replayed when monitoring is later added. Global group acknowledgement follows
+ALH's group traversal and acknowledges outstanding ACKS on disabled/NoAck direct
+children; shelved channels remain excluded. Qualifying downward unacknowledged
+severity changes also reset Silence Current, matching ALH.
+
+Dated alarm records use the event's local date, including count-filter callbacks
+processed after midnight. Current log viewers and operation logs keep today's
+destination. Database operation codes are carried explicitly: channel/group mask
+changes use 7/8 and automatic forcing uses 9/10. Modify Mask retains ALH's code-7
+summary and per-channel code-8 `Group Mask ID ---` audit records; timed NoAck also
+emits these per-channel records when database logging is enabled. Free-text
+operation descriptions do not determine protocol codes.
+
+Disabled-channel startup callbacks update channel state without triggering group
+severity commands from siblings still awaiting connection. Groups containing only
+disabled or cancelled channels still publish their initial severity output.
+Combined Cancel/Disable changes follow ALH's Cancel-before-Disable ordering;
+removing Disable while Cancel remains set does not restore a local latch.
+Group beep indicators summarize the highest threshold in the group and its
+descendants, separately from the group's own audio threshold. Acknowledgement
+operation records retain the current severity after the latched severity, for
+both file and database logging.
+
+Initially cancelled and disabled channels respect ALARMCOUNTFILTER on their first
+monitor after Add/Enable; only the ordinary initial ERROR baseline bypasses filtering.
+Disabled channels start at NO_ALARM, so enabling them before their first monitor
+cannot synthesize an ERROR or run an ERROR command. The initial-connection log
+exclusion does not discard the first alarm after Add on an initially cancelled
+channel. Enable/Add of a cached active alarm records its state in the alarm log
+(unless NoLog is set) and history, and publishes its severity in global active
+mode. Changing Disable while Cancel remains set does not write the channel's
+severity output. Operator Modify Mask and Force Mask Apply/Reset clear Silence
+Current even when the audible severity is unchanged.
+
+Group mask actions process direct channels before subgroups, matching ALH even
+when declarations are interleaved. Saving and reloading therefore preserves the
+sequence of severity commands during Apply, Reset, and Modify Mask actions.
+Fixed-argument directives accept whitespace-separated trailing `#` comments;
+command, alias, and guidance text remains intact. CALC accepts trailing comments
+after a valid expression while preferring a valid full expression, so spaced
+expressions and the `#` not-equal operator remain supported. `$SEVRPV -`
+is an unset placeholder: the first subsequent real PV takes precedence.
 
 ## Operator and editor workflows
 
@@ -150,10 +221,12 @@ The following previously missing features are now implemented:
 - **Historical log browsers:** both alarm and operator-log browsers search the
   named current log and its `.yyyy-MM-dd` siblings. From/To controls use local
   time and include the entire final minute. With performs a case-sensitive
-  substring filter. Modern ALH, legacy ctime, and XML-ish timestamps are
+  substring filter over complete records, including legacy continuation lines. Modern ALH, legacy ctime, and XML-ish timestamps are
   recognized, and results are sorted chronologically. Searches run in a worker
-  thread with Stop support. Results are limited to 100,000 records or 10 MiB;
-  truncation, unreadable files, and unrecognized timestamp lines are reported.
+  thread with Stop support. Closing a browser or reloading requests cancellation
+  without waiting for filesystem I/O; workers release themselves when reads finish.
+  Results are limited to 100,000 records or 10 MiB;
+  truncation, unreadable files, and records without recognizable timestamps are reported.
   The ordinary live log-file viewers remain available separately.
 - **Persistent selection dialogs:** Properties, Force PV, Modify Mask, Force
   Mask, and Beep Severity follow the selected group/channel and refresh when
@@ -259,6 +332,10 @@ format is; cross-endian/cross-word-size communication is not claimed.
 For mixed deployments Qt sending is limited to `250 - sizeof(long)` text bytes
 to fit the legacy receiver. Oversized records are reported and not queued;
 file logging is unaffected. Qt receiving allocates an 8192-byte payload buffer.
+Global alarm records retain ALH's `ackT`/`noackT` tokens in text, XML, and forwarded
+bodies. Database headers identify the effective OS user and supply nonempty
+fallbacks for missing identity fields, including `unknown_display` when `DISPLAY`
+is unset. Header whitespace is normalized to keep field positions intact.
 Printer output retains source offsets and source color-mode behavior, including
 legacy quirks, rather than silently changing the wire output.
 
@@ -266,20 +343,26 @@ Tests cover Qt-sender to each legacy helper and each Qt helper against local
 TCP/RPC endpoints, plus a legacy-layout sender received by the Qt queue decoder.
 All four printer color modes are covered. Both Qt helpers continue draining
 queued records immediately after processing a record; the 50 ms poll delay is
-used while idle (and for printer connection retries). Ordered bursts (100 records
-on Linux, 32 on macOS to fit its default queue limits)
+used while idle. Printer connection/write failures retain the current record and
+retry after one second; connection or write inactivity times out after ten seconds.
+The printer reports each outage once on stderr and reports when delivery resumes.
+Ordered bursts (100 records on Linux, 32 on macOS to fit its default queue limits)
 are tested against local TCP and RPC endpoints. The printer test collects each
 TCP stream in connection acceptance order; callback order across independent
 sockets does not determine record order. With database logging enabled,
 acknowledgements emit the legacy code-6 `Ack Channel---` record for each affected
 channel, including channels acknowledged through a parent group.
 Physical printers and production RPC services are intentionally not used.
-Alarm logs are registered under their canonical path after creation, so windows
-opening the same new log through directory or file symlinks share one writer and
+Alarm logs are registered under their canonical path after creation. Before
+truncating a newly opened path, its native file identity is compared with active
+writers, so directory symlinks, file symlinks, and hard links share one writer and
 circular cursor. Opening another window preserves existing records in both
 unlocked and locked modes.
+The `-L` command-line option defaults to unlimited alarm retention, matching ALH;
+QtALH permits an explicit `-m` override in either argument order. Without `-L`,
+the default remains 2000 records.
 Bounded alarm logs save their circular write position in a sibling
-`.qtalh-position` file, kept open by the shared log writer. The file contains two
+`.qtalh-position.<identity>` file, kept open by the shared log writer. The file contains two
 96-byte binary checkpoints. Each contains the format marker, a sequence number,
 record count, next slot, an incremental ring fingerprint, and a SHA-256 checksum
 of the checkpoint. Position updates alternate between slots using `pwrite` on Unix or
@@ -301,6 +384,17 @@ in the log. Short/interrupted checkpoint writes are retried where possible.
 
 Log timestamps are cached within their existing one-second precision, with older
 filter-event timestamps and clock reversals handled by changing the cache key.
+
+Startup log-open diagnostics are delivered after the caller installs its error
+handler. Failed files are retried independently on records and the two-second
+service timer; a failed operation log cannot reopen or truncate the healthy alarm
+log. Pending startup broadcasts are consumed after message/reload handlers are
+installed, while master-lock acquisition remains immediate.
+
+Explicit `./` and `../` configuration and log filenames override the configured
+directories, as in ALH. Geometry supports position-only forms and negative edge
+offsets, including `-0`; it targets the compact runtime by default and the main
+window with `-mainwindow` or `-c`.
 
 Changing an alarm or operation log destination opens the new file before
 replacing the current destination. Failed opens preserve the working log and
@@ -378,7 +472,10 @@ The event-loop implementation follows the non-preemptive callback guidance in
 [EPICS CA](https://docs.epics-controls.org/en/latest/ca-ref/function-call-interface-general-guidelines.html)
 and [Qt QSocketNotifier](https://doc.qt.io/qt-6/qsocketnotifier.html). Callbacks
 are serialized on the GUI thread; polling is guarded against reentrancy and
-subscriptions are cancelled before model destruction.
+subscriptions are cancelled before model destruction. Reconfiguring Force PVs
+also releases obsolete numeric CA channels and their callbacks immediately.
+Connections explicitly prepared for output writes remain available, and other
+owners monitoring the same PV are unaffected.
 
 ## QtALH personal notification extension
 
@@ -398,3 +495,268 @@ hooks, logging, acknowledgement, shelving, or output PV behavior. Analytics and
 notifications use independent engine observers. No external analytics service,
 historical log import, or database dependency is added. See the
 [analytics guide](site/operate/analytics.md).
+
+## Selection, silence, and historical-order follow-up
+
+Display-filter changes preserve visible action targets and clear targets removed
+by filtering, including subsequent alarm updates. Selection dialogs close and
+selection-dependent actions disable when their target disappears. Timed silence
+ends when a different interval is selected; reselecting the current interval
+does not restart the countdown. Silence controls, interval changes, timed expiry,
+and automatic current-silence resets write operation-log records.
+
+Historical searches validate both circular-log checkpoint slots against the full
+file and use the newest matching slot to preserve insertion order for timestamp
+ties. Filtering and result limits follow that circular order. Missing, damaged,
+or stale checkpoints fall back to physical order for ties. Validation streams
+bounded lines with cancellation checks. Regression tests cover plain/XML logs,
+result limits, filtering, and stale/corrupt checkpoint slots, as well as selection
+and silence workflows in both appearances.
+
+
+## Acknowledgement ordering and log recovery follow-up
+
+Group acknowledgement processes direct channels before subgroups, preserving
+ACKPV write order across configuration save/reload. Repeated monitor requests
+for the same owner and PV reuse the subscription, including when a constant
+startup Force PV adds a channel before the normal startup traversal reaches it.
+Other owners monitoring the same PV retain independent subscriptions.
+
+Log readers locate checkpoints beside the canonical log path, matching the writer
+when a file symlink is used. Live recovery checks both checkpoint slots against
+the file and uses the newest matching slot. Subsequent incremental delivery uses
+the sequence of that matched slot, rather than a newer stale checkpoint.
+Regression coverage includes shared ACKPV ordering, real IOC callback counts,
+plain/XML log aliases, both recovery slots, and updates after recovery.
+
+
+## Combined masks, timed NoAck, and editor filters
+
+Combined mask changes retain the legacy Enable/NoAck side effects before applying
+ACKT and NoLog. Enabling a disabled channel with a cleared global transient sends
+ACKS and ACKPV even when the same request sets NoAck; failed acknowledgements keep
+the latch and passive mode sends no writes. Cached alarms exposed by Enable are
+logged using the prior ACKT/NoLog settings.
+
+Timed NoAck processes direct channels before subgroups on application, reset,
+and expiration. Independent descendant timers still protect their channels from
+an ancestor reset. Shared ACKPV write order remains stable across save/reload.
+The editor ignores runtime display filters, and Paste/Insert reject a missing
+destination selection instead of dereferencing it.
+
+## Included hierarchy and Add/Disable compatibility
+
+Inside INCLUDE files, repeated `GROUP NULL` declarations attach to the current
+group, including after channels and nested includes. Regression coverage checks
+the resulting hierarchy, save/reload, inherited beep thresholds and Force PV scope.
+
+A channel can retain an alarm through `D → CD → C`. Changing that channel from
+`C` to `D` now applies Add before Disable, exposing the cached alarm with the
+previous settings before suppressing it again. Alarm/history records, channel
+and group severity commands, and the channel's severity output are preserved.
+Core regressions cover local/global, passive/active, channel/group, automatic/manual,
+and NoLog combinations, with balanced aggregates and no fresh observation inferred
+from the cached state.
+
+## Timer ordering and group severity outputs
+
+When several count-filter or timed NoAck deadlines expire before a refresh, they
+run in deadline order. This preserves intermediate group severity commands and
+output values. An earlier callback can cancel a later pending timeout. Alarm
+records retain the original event timestamps; shelving retains its separate
+absolute wall-clock expiration.
+
+Channel Access connection deadlines use monotonic time for startup, Add after
+Cancel, and numeric Force PV inputs. System-clock adjustments cannot delay the
+missing-PV ERROR latch or cause these intervals to expire early.
+
+Cancel and Disable update group severity and execute group severity commands
+without writing group SEVRPVs, matching ALH. Disabled channels still publish -1
+where required. Add/Enable of cached active alarms and subsequent monitor
+transitions continue to publish channel and group severity outputs.
+
+
+## Guidance terminators, filter integers, and logging compatibility
+
+Inline guidance uses ALH's `$END` prefix recognition, including trailing comments.
+Subsequent channel declarations remain configuration rather than guidance text.
+Count-filter integers retain ALH's decimal, octal, and hexadecimal interpretation
+and are normalized to decimal when saved; range validation remains in effect.
+
+Stop Logging suppression, broadcast delivery locks, and master-lock polling use
+monotonic deadlines. Wall-clock corrections do not extend or shorten these
+intervals; log timestamps and broadcast IDs continue to use wall time.
+XML printer/database messages include the legacy `<date>` and `<time>` fields,
+matching the timestamp representation in the log file.
+
+
+## Repeated PV startup settings and operation labels
+
+With `-global -caputackt`, repeated PVs take the final configured ACKT value in
+ALH's startup traversal: recursively visit subgroups before each group's direct
+channels, retaining order within each list. This includes cancelled channels and
+is independent of interleaved declarations and save/reload ordering. Qt writes
+that final value once per PV when writable; later IOC/operator settings are not
+replaced by another duplicate subscription. Conflicting settings remain accepted
+with this legacy precedence.
+
+Operation records use the root group's ALIAS when present, falling back to its
+name. The label is refreshed when reloading, including when an alias is removed.
+Channel/group identifiers within the record and the database facility identifier
+remain the underlying names. Text/XML file and database queue regressions cover
+these distinct fields, and UI regressions verify alias changes through reload.
+
+
+## Communication errors and acknowledgement submission
+
+Qt corrects two inherited ALH bugs in global mode. Connection/read-access/write-access
+failures latch a local ERROR acknowledgement instead of replacing outstanding IOC
+ACKS with the synthetic event's zero. The local latch keeps ERROR audible and visible
+under the unacknowledged filter. Acknowledging it performs no IOC or ACKPV write;
+outstanding IOC acknowledgements remain pending. The latch survives recovery when
+transient acknowledgement is enabled and clears on recovery with NoAckT. Cancel,
+Disable, NoAck, shelving, and passive acknowledgement restrictions still apply.
+Notification escalation remains paused during the communication gap.
+
+Failed ACKS submissions emit a failure operation rather than acknowledgement-success
+records or ACKPV writes. Group acknowledgement continues with other channels. An
+accepted submission still waits for the IOC monitor to confirm its acknowledgement.
+
+Read-access loss, disconnection, and Cancel invalidate cached CA alarm events. Recovery
+waits for fresh monitored data, avoiding replay of stale alarms and their commands or
+severity outputs. Write-only access loss retains readable, current observations.
+
+Repeated `GROUP NULL` declarations attach to the current group in both top-level and
+included configuration files, matching ALH. Saves normalize these parent references.
+The Force PV `-999` initialization sentinel is intentionally retained: a first or
+reinitialized sample of `-999` is treated as unchanged, including when configured as
+the force value.
+
+
+## Filtered recovery and duplicate CALC inputs
+
+When a channel is at NO_ALARM with outstanding ACKS, count filtering still
+suppresses unregistered transient alarms as in ALH. Fresh normal samples now
+refresh the value and restore observation coverage after a short filtered
+communication outage, without adding alarm/history records, acknowledgements,
+commands, or severity writes. Analytics therefore ends the gap on recovery.
+
+Force PV CALC callbacks skip unchanged input values, matching ALH. Stateful
+expressions no longer advance on duplicate or alarm-only input callbacks. An
+unavailable input still blocks calculation, and its first valid sample after
+recovery is processed even when the value matches the one before the outage.
+
+
+## Force PV edits, queue recovery, and reload identity
+
+Unchanged Force PV Apply is a no-op, preserving live calculation variables,
+subscriptions and pending automatic ACKT writes. Mask/force/reset and enabled
+settings reuse the last valid result without advancing stateful expressions.
+Changed inputs replace only their own subscriptions; unchanged inputs and CALC
+variables survive. Changed expressions evaluate once when all required inputs
+are available. Edits made during an input outage wait for valid data. This
+avoids both the former Qt variable reset and ALH's gratuitous evaluation on
+unchanged Apply; the existing -999 value sentinel remains unchanged.
+
+Printer/database delivery tracks lost original records separately by destination
+and facility identity. A compact legacy code-4 summary (printer code 5) reports
+the exact count and first/last failure times as millisecond Unix epochs. The
+ordinary two-second timer retries pending summaries even without new alarms.
+Failed summary attempts neither increase the loss count nor block smaller
+ordinary records. Queue writes remain nonblocking and limited to the legacy
+receive-buffer size. Diagnostic header tokens alone may be shortened with a
+trailing `~` to keep a summary bounded; ordinary record identifiers are intact.
+
+Successful reloads update both the database facility identifier (root name) and
+operator label (alias or name). Failed reloads retain both. Files, master locks,
+broadcast identity and pending loss intervals survive metadata updates; older
+loss summaries keep their original facility attribution. This corrects ALH's
+one-time database application-name initialization.
+
+## Shared ACKT requests and stateful CALC inputs
+
+Deferred automatic ACKT writes belong to the target PV, independently of the
+number of display rows monitoring it. A newer eligible mask request through any
+row supersedes the pending request, including a no-op or a failed manual request.
+Manual failures still require explicit retry. Pending writes retain their force
+source and request order, so editing/disabling an older source cannot cancel a
+newer source's request, and group reset keeps its direct-channel-before-subgroup
+precedence. Successful writes are removed; other monitored rows update through
+IOC confirmations. Passive restrictions and startup ACKT precedence are unchanged.
+
+Force CALC retains received input values separately from its mutable calculation
+variables. Assignments to A through F can no longer make an unchanged callback
+advance the expression or make a genuine input change look unchanged. Only the
+changed/recovered input slot is replaced; other calculation variables survive
+callbacks and expression edits. Unavailable inputs block evaluation and cached
+result replay, and the first valid sample after recovery is processed even when
+its value matches the previous observation. Numeric Force subscriptions use
+DBE_VALUE; alarm-only changes do not advance calculations. This fixes ALH's shared
+input/workspace comparison bug while preserving Qt's existing edit, recovery,
+rounded comparison, and NE-reset behavior, including the retained -999 sentinel.
+
+## Broadcast recovery and multiline alarm records
+
+Broadcast readers wait for the legacy message, date and sender lines before
+remembering a message ID. A partial file can therefore be completed and retried
+without losing its reload or stop-logging action. Failed `.MESSLOCK` opens report
+the path and system error, then retry on the service timer and on Send. Recovery
+uses the existing shared descriptor registry and preserves delivery ownership.
+
+New log records escape embedded LF/CR as `\n`/`\r` in text and `&#10;`/`&#13;` in
+XML, including the records sent to printer/database queues. Ordinary single-line
+records keep their existing format. On bounded-log recovery, older multiline
+records are joined at recognizable timestamp/entry headers before checkpoint
+validation and retention. Surviving records are rewritten with escaped line
+breaks. A matching original checkpoint still determines order, including equal
+timestamps. Without one, the existing timestamp fallback applies. Legacy text
+has no unambiguous framing when a continuation itself looks like a record header.
+
+
+## Replaced log paths and legacy timestamp recovery
+
+Selecting an alarm-log path opens the current file before sharing a writer by
+native file identity. After a log is renamed and replaced, selecting the same
+path writes to the replacement; ordinary aliases still share their live writer.
+Circular-log recovery uses the same timestamp parser as the browsers, including
+legacy ctime dates with space-padded days. Without a matching checkpoint, these
+logs retain their newest records in circular order instead of physical file order.
+
+
+## Renamed logs and independent checkpoints
+
+Live recovery scans a duplicate of the open log handle, including asynchronous
+scans, so replacing the pathname before the first alarm or during recovery does
+not redirect or discard records. Content-change checks use the original handle.
+Explicitly selecting a replacement still switches the writer to that file.
+
+Checkpoint names include the log's native identity. A versioned, identity-bound
+locator on the log preserves the original checkpoint location across renames;
+a replacement at the old pathname gets a separate checkpoint. The live writer
+registry supplies the locator when filesystem attributes are unavailable, while
+persistent lookup across processes requires xattrs or NTFS streams. Legacy
+unsuffixed checkpoints remain readable and are validated before migration.
+Regression coverage includes rotation before the first alarm, rotation during a
+large background scan, different retention limits through a renamed alias, and
+live/search ordering of equal-timestamp records with two active replacement logs.
+
+
+## Recovery retries, runtime errors, and clipboard names
+
+A failed pre-write alarm recovery retains the pending FIFO entry and retries a
+fresh snapshot. Write/checkpoint failures are distinguished from recovery errors
+so a record already committed is not replayed. Shutdown retries synchronously;
+persistent recovery failures preserve the temporary spool with a diagnostic
+identifying its path, unread offset, and destination. Regressions change a large
+log while it is scanned and verify ordered, single delivery both in the event
+loop and at window teardown.
+
+Window errors are audited to the operation log, matching ALH's `errMsg` path,
+including with `-noerrorpopup`. A recursion guard prevents operation-log failures
+from auditing themselves indefinitely. Tests cover enabled/disabled logging and
+an unwritable operation-log device.
+
+Clipboard serialization chooses a wrapper group name absent from the selected
+subtree and validates the payload before changing the clipboard or removing a
+Cut selection. Cross-window Cut/Paste and undo/redo cover groups named
+`__QTALH_CLIPBOARD__` and `__QTALH_CLIPBOARD__1`.

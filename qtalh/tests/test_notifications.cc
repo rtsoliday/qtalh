@@ -623,19 +623,24 @@ private slots:
     p.tick(81000);
     QVERIFY(!p.take(e, 81000));
     QCOMPARE(p.activeChannels().size(), 1);
-    now = 82000;
+    QCOMPARE(engine.state(n).unack, 4);
+    p.tick(600000); p.tick(610000);
+    QVERIFY(!p.take(e, 610000)); // ERROR must not bypass the access-gap pause.
+    now = 611000;
     engine.event(n, {3, 2, 2, 1, "still in alarm"});
     // Recovery resumes the original escalation schedule, not a new episode.
-    p.tick(600000);
-    p.tick(610000);
-    QVERIFY(p.take(e, 610000));
-    QCOMPARE(e.stage, QString("escalate"));
-    p.completed(e, true);
-    now = 611000;
-    engine.event(n, {3, 2, 0, 1, "acknowledged"});
     p.tick(611000);
     p.tick(621000);
     QVERIFY(p.take(e, 621000));
+    QCOMPARE(e.stage, QString("escalate"));
+    p.completed(e, true);
+    now = 622000;
+    engine.event(n, {3, 2, 0, 1, "acknowledged"});
+    p.tick(622000); p.tick(632000);
+    QVERIFY(!p.take(e, 632000)); // The separate communication error is still unacknowledged.
+    now = 633000; engine.acknowledge(n);
+    p.tick(633000); p.tick(643000);
+    QVERIFY(p.take(e, 643000));
     QCOMPARE(e.kind, QString("resolution"));
   }
   void resolutionSuppressedBeforeDelivery_data() {

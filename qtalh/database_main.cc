@@ -59,6 +59,11 @@ int main(int argc, char** argv) {
       return;
     }
     QString error;
+    // Known issue inherited from ALH: receiveQueue removes the record before
+    // RPC delivery. A clnt_create or clnt_call failure below loses that record.
+    // A future delivery change should retain pending records and define how to
+    // handle ambiguous timeouts (the server may already have accepted them);
+    // blindly retrying could duplicate database entries. Behavior is unchanged.
     auto record = alh::receiveQueue(id, &error);
     if (!error.isEmpty())
       QTextStream(stderr) << error << '\n';

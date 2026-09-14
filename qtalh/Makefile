@@ -60,7 +60,7 @@ $(OBJ_DIR)/test_ui.moc: tests/test_ui.cc
 	@mkdir -p $(OBJ_DIR)
 	$(MOC) $(INCLUDES) $(QT_CFLAGS) $< -o $@
 $(OBJ_DIR)/tests/test_ui.o: $(OBJ_DIR)/test_ui.moc
-$(OBJ_DIR)/tests/test_ui.o: CPPFLAGS += -DTEST_OUTPUT='"$(abspath $(OBJ_DIR)/test-artifacts)"'
+$(OBJ_DIR)/tests/test_ui.o: CPPFLAGS += -DTEST_OUTPUT='"$(abspath $(OBJ_DIR)/test-artifacts)"' -DEPICS_TEST_BIN='"$(EPICS_BASE)/bin/$(EPICS_HOST_ARCH)"'
 $(OBJ_DIR)/test_ui: $(filter-out $(OBJ_DIR)/main.o,$(OBJECTS)) $(OBJ_DIR)/tests/test_ui.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(call qt_libs,Test)
 test-ui: $(OBJ_DIR)/qtalh $(OBJ_DIR)/test_ui
@@ -80,7 +80,7 @@ $(OBJ_DIR)/test_helpers.moc: tests/test_helpers.cc
 	$(MOC) $(INCLUDES) $(QT_CFLAGS) $< -o $@
 $(OBJ_DIR)/tests/test_helpers.o: $(OBJ_DIR)/test_helpers.moc
 $(OBJ_DIR)/tests/test_helpers.o: CPPFLAGS += $(RPC_CFLAGS) -DTEST_BIN_DIR='"$(abspath $(BIN_DIR))"'
-$(OBJ_DIR)/test_helpers: $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o)) $(OBJ_DIR)/services/logging.o $(OBJ_DIR)/services/ipc.o $(OBJ_DIR)/tests/test_helpers.o
+$(OBJ_DIR)/test_helpers: $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o)) $(OBJ_DIR)/services/options.o $(OBJ_DIR)/services/logging.o $(OBJ_DIR)/services/ipc.o $(OBJ_DIR)/tests/test_helpers.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(call qt_libs,Test Core Network) $(RPC_LIBS)
 test-helpers: all $(OBJ_DIR)/test_helpers
 	$(OBJ_DIR)/test_helpers

@@ -70,6 +70,7 @@ public:
 protected:
   void closeEvent(QCloseEvent*) override;
   bool eventFilter(QObject*, QEvent*) override;
+  virtual void systemBeep();
 
 private:
   Document doc;
@@ -106,7 +107,7 @@ private:
   };
   QMap<QString, SelectionDialog> selectionDialogs;
   QString rebuildingDialog;
-  bool dialogSyncPending = false;
+  bool dialogSyncPending = false, auditingError = false;
   QDialog* beginSelectionDialog(const QString&, const QString&, std::function<void()>);
   void finishSelectionDialog(QDialog*);
   void clearDialogContent(QDialog*);
@@ -126,6 +127,7 @@ private:
   void menus();
   void refresh();
   void refreshStatus();
+  void restoreVisibleSelection();
   void click(const QModelIndex&, AlarmModel*);
   void select(Node*);
   void error(const QString&);
@@ -138,7 +140,9 @@ private:
   void related(Node* target = nullptr);
   void masks(bool forced = false);
   void beepSeverity(bool global);
-  void showText(const QString&, const QString&, bool fromFile = false);
+  void showText(const QString&, const QString&);
+  void showLiveLog(bool alarm);
+  void selectLogFile(bool alarm);
   void showHistory();
   void broadcast(int mode);
   void cut(bool remove);

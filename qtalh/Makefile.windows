@@ -38,7 +38,7 @@ OBJECTS = $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.obj) $(SERVICES:.cc=.obj) $(GUI:.c
 # MSVC does not emit GCC-style .d files. Rebuild on project header changes.
 HEADERS = $(wildcard core/*.h services/*.h ui/*.h)
 BUILD_FILES = Makefile Makefile.windows ../Makefile.rules
-LIBS = $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(LDLIBS)
+LIBS = advapi32.lib $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(LDLIBS)
 
 .PHONY: all clean distclean test test-core test-ui test-ioc test-helpers test-visual benchmark-cpu FORCE
 all: $(BIN_DIR)/qtalh.exe

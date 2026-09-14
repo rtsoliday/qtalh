@@ -41,6 +41,14 @@ public:
         continue;
       auto w = words(line);
       const QString key = w[0];
+      // Handle declaration comments without stripping hashes from names.
+      // Directive comments are handled separately according to argument type.
+      if (key == "GROUP" || key == "CHANNEL" || key == "INCLUDE")
+        for (int j = 3; j < w.size(); ++j)
+          if (w[j].startsWith('#')) {
+            w = w.mid(0, j);
+            break;
+          }
       auto fail = [&](const QString& msg) {
         throw ParseError(QString("Line %1: %2 [%3]").arg(i + 1).arg(msg, line));
       };
@@ -65,10 +73,12 @@ public:
         if (w[1] == "NULL") {
           if (!n->group)
             fail("A channel needs a parent group");
-          if (attach)
-            n->parent = attach;
-          else if (doc.root)
-            fail("Multiple root groups");
+          if (current) {
+            // ALH resolves subsequent NULL parents against the current group,
+            // both in the top-level file and in INCLUDE files, including after
+            // a channel or nested include. Only the first group is the root.
+            n->parent = current->group ? current : current->parent;
+          }
         } else
           n->parent = findParent(w[1]);
         if (n->group && n->name == "NULL")
@@ -101,12 +111,31 @@ public:
           fail("Cannot open include: " + path);
         stack.insert(canonical);
         // ALH resolves every INCLUDE against the configured directory.
+        // Possible inherited ALH bug, deferred: readAll() can return a valid
+        // prefix after an I/O error. Check QFile::error() in a future change so
+        // a partial include cannot silently remove alarms during reload.
         read(QString::fromLocal8Bit(f.readAll()), base, parent, depth + 1);
         stack.remove(canonical);
         current = parent;
       } else if (key.startsWith('$')) {
         QString name = key.mid(1);
         QString value = line.mid(key.size()).trimmed();
+        // Fixed-argument ALH directives ignore trailing comments. Free-form
+        // commands, aliases and guidance retain their text. CALC is handled below.
+        const bool pvFirst = name == "HEARTBEATPV" || name == "ACKPV" ||
+                             name == "FORCEPV" || name == "SEVRPV" ||
+                             QRegularExpression("^FORCEPV_CALC_[A-F]$").match(name).hasMatch();
+        if (pvFirst || name == "BEEPSEVERITY" || name == "BEEPSEVR" ||
+            name == "ALARMCOUNTFILTER") {
+          auto args = words(value);
+          // A PV's first token may itself start with '#'. Only subsequent
+          // whitespace-separated hashes introduce a trailing comment.
+          for (int j = pvFirst ? 1 : 0; j < args.size(); ++j)
+            if (args[j].startsWith('#')) {
+              value = args.mid(0, j).join(' ');
+              break;
+            }
+        }
         if (name == "BEEPSEVERITY") {
           doc.beepSeverity = severityValue(value);
           continue;
@@ -144,7 +173,9 @@ public:
           QStringList body;
           bool ended = false;
           while (++i < lines.size()) {
-            if (lines[i].trimmed().compare("$END", Qt::CaseInsensitive) == 0) {
+            // ALH recognizes the terminator by prefix, including trailing comments.
+            // An exact match can swallow subsequent channel declarations.
+            if (lines[i].trimmed().startsWith("$END", Qt::CaseInsensitive)) {
               ended = true;
               break;
             }
@@ -152,11 +183,30 @@ public:
           }
           if (!ended)
             fail("Unterminated guidance");
+          // ALH appends every inline block to the node's guidance list.
+          if (body.isEmpty())
+            continue;
           name = "GUIDANCE_TEXT";
           value = body.join('\n');
-        } else if (value.isEmpty())
+          bool appended = false;
+          for (auto& directive : current->directives)
+            if (directive.key == name) {
+              directive.value += '\n' + value;
+              appended = true;
+              break;
+            }
+          if (appended)
+            continue;
+        } else if (value.isEmpty() && name != "ALARMCOUNTFILTER")
           fail("Missing directive value");
         const auto args = words(value);
+        if (name == "SEVRPV" ||
+            QRegularExpression("^FORCEPV_CALC_[A-F]$").match(name).hasMatch()) {
+          // ALH reads one token for these directives and ignores the remainder.
+          // Normalize before storage so runtime, editor and save/reload never
+          // treat trailing arguments as part of a PV name (or numeric constant).
+          value = args[0];
+        }
         if (name == "ACKPV" || name == "ALARMCOUNTFILTER" || name == "STATCOMMAND")
           if (current->group)
             fail(name + " applies to channels");
@@ -175,37 +225,63 @@ public:
           // reset defaults to zero. Normalize once so runtime and editor use
           // the same effective values, without guessing a different order.
           double forced = 1, reset = 0;
-          char resetText[10] = {};
+          int consumed = 0;
           const auto tail = args.mid(2).join(' ').toLocal8Bit();
           double parsed = 0;
-          const int count = std::sscanf(tail.constData(), "%lf%9s", &parsed, resetText);
+          const int count = std::sscanf(tail.constData(), "%lf%n", &parsed, &consumed);
+          // Intentionally fix ALH's pre-existing nine-character reset-token
+          // truncation bug: read the complete value and retain full precision
+          // when saving. Legacy ALH may misread these saved values by truncating
+          // their exponents; reproducing that bug is not a compatibility goal.
+          const auto resetText = count == 1 ? tail.mid(consumed).trimmed().split(' ').value(0)
+                                           : QByteArray();
           if (count >= 1)
             forced = parsed;
-          const bool ne = count == 2 &&
-                          (QString::fromLatin1(resetText).startsWith("NE") ||
-                           QString::fromLatin1(resetText).startsWith("ne"));
-          if (count == 2 && !ne && std::sscanf(resetText, "%lf", &reset) != 1)
+          const bool ne = resetText.startsWith("NE") || resetText.startsWith("ne");
+          if (!resetText.isEmpty() && !ne && std::sscanf(resetText.constData(), "%lf", &reset) != 1)
             reset = 0;
+          // Possible inherited ALH bug, deferred: sscanf accepts NaN/Inf and
+          // overflow, unlike the editor's finite-value checks. A NaN reset can
+          // leave a force mask applied indefinitely; a nonfinite scalar force
+          // value cannot match Qt's finite samples. Add load-time validation later;
+          // preserve the currently accepted configuration values for now.
           value = args[0] + " " + Mask::parse(args.value(1)).text() + " " +
                   QString::number(forced, 'g', 17) + " " +
                   (ne ? QString("NE") : QString::number(reset, 'g', 17));
         }
         if (name == "FORCEPV_CALC") {
-          QByteArray encoded = value.toLocal8Bit(),
-                     compiled(INFIX_TO_POSTFIX_SIZE(encoded.size() + 1), 0);
-          short error = 0;
-          if (postfix(encoded.constData(), compiled.data(), &error))
-            fail("Invalid CALC expression");
+          auto valid = [](const QString& expression) {
+            QByteArray encoded = expression.toLocal8Bit(),
+                       compiled(INFIX_TO_POSTFIX_SIZE(encoded.size() + 1), 0);
+            short error = 0;
+            return postfix(encoded.constData(), compiled.data(), &error) == 0;
+          };
+          // Intentionally fix ALH's pre-existing single-token CALC parsing:
+          // accept and preserve complete expressions containing whitespace,
+          // including on save, even though legacy ALH reads only the first token.
+          // Accept trailing hash comments while retaining CALC's # (not-equal)
+          // operator. Prefer a valid full expression, then the longest valid
+          // expression before a whitespace-separated hash.
+          const QRegularExpression comment("\\s+#");
+          while (!valid(value)) {
+            const int start = value.lastIndexOf(comment);
+            if (start < 0)
+              fail("Invalid CALC expression");
+            value = value.left(start).trimmed();
+          }
         }
         if (name == "ALARMCOUNTFILTER") {
-          bool a = false, b = false;
-          int count = 0, seconds = 0;
-          if (args.size() == 2) {
-            count = args[0].toInt(&a);
-            seconds = args[1].toInt(&b);
-          }
-          if (!a || !b || count < -1 || count > 1000000 || seconds < 0)
+          // ALH's %i conversions accept decimal, octal and hexadecimal integers.
+          // Omitted arguments use its one-count, one-second defaults.
+          bool a = true, b = true;
+          int count = 1, seconds = 1;
+          if (!args.isEmpty())
+            count = args[0].toInt(&a, 0);
+          if (args.size() > 1)
+            seconds = args[1].toInt(&b, 0);
+          if (args.size() > 2 || !a || !b || count < -1 || count > 1000000 || seconds < 0)
             fail("Invalid count filter");
+          value = QString("%1 %2").arg(count).arg(seconds);
         }
         if (name == "SEVRCOMMAND" || name == "STATCOMMAND") {
           if (args.size() < 2)
@@ -215,6 +291,10 @@ public:
             if (!trigger.startsWith("UP_") && !trigger.startsWith("DOWN_"))
               fail("Severity trigger must start UP_ or DOWN_");
             trigger = trigger.mid(trigger.startsWith("DOWN_") ? 5 : 3);
+            // Possible inherited ALH bug, deferred: DOWN_ALARM is accepted
+            // here but cannot match the dispatcher, which only implements
+            // UP_ALARM. Reject it with guidance to use DOWN_NO_ALARM or
+            // DOWN_ANY in a later validation change; retain acceptance now.
             if (trigger != "ANY" && trigger != "ALARM") {
               const auto canonical = severityName(severityValue(trigger));
               value = (args[0].startsWith("DOWN_") ? "DOWN_" : "UP_") + canonical +
@@ -228,7 +308,17 @@ public:
               fail("Unknown status command trigger");
           }
         }
-        current->directives.push_back({name, value});
+        // These ALH setters replace earlier values; ALIAS/COMMAND and the
+        // other first-wins directives retain their existing precedence.
+        if (name == "SEVRPV") {
+          // '-' is ALH's unset sentinel, so a later real PV may replace it.
+          // Once a real PV is selected, subsequent directives are ignored.
+          if (current->option(name, "-") == "-")
+            current->setOption(name, value);
+        } else if (name == "BEEPSEVR" || name == "ACKPV" || name == "FORCEPV_CALC")
+          current->setOption(name, value);
+        else
+          current->directives.push_back({name, value});
       } else
         fail("Unknown statement");
     }
@@ -268,6 +358,10 @@ Document loadConfig(const QString& path, const QString& configDir) {
     throw ParseError("Cannot open " + path + ": " + f.errorString());
   Parser p;
   p.stack.insert(QFileInfo(path).canonicalFilePath());
+  // Possible inherited ALH bug, deferred: a read failure after a complete
+  // declaration can be accepted as a smaller valid configuration. ALH also
+  // omits its final ferror() check. Later, reject QFile::error() after readAll()
+  // and preserve the running document; leave the existing behavior unchanged now.
   p.read(QString::fromLocal8Bit(f.readAll()),
          configDir.isEmpty() ? QFileInfo(path).absolutePath() : configDir);
   p.validate();

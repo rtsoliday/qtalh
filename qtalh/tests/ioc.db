@@ -28,3 +28,30 @@ record(ao, "$(P)readprotected") {
   field(ASG, "dynamicRead")
   field(VAL, "0")
 }
+
+record(ai, "$(P)typeAlarm") {
+  field(VAL, "0")
+  field(PREC, "2")
+  field(HIHI, "10")
+  field(HHSV, "MAJOR")
+  field(ACKT, "YES")
+}
+record(stringout, "$(P)severityString") { field(VAL, "initial") }
+record(stringout, "$(P)ackString") { field(VAL, "initial") }
+record(stringout, "$(P)heartbeatString") { field(VAL, "initial") }
+
+# Separate control record writes internally while CA read access is denied.
+record(ai, "$(P)readAlarm") {
+  field(ASG, "dynamicRead")
+  field(HIHI, "10")
+  field(HHSV, "MAJOR")
+}
+record(ao, "$(P)readAlarmSet") { field(OUT, "$(P)readAlarm PP") }
+
+# Dedicated Force CALC input: status changes independently of its numeric value.
+record(ai, "$(P)statefulInput") {
+  field(ASG, "dynamicRead")
+  field(VAL, "5")
+  field(HIGH, "10")
+  field(HSV, "MINOR")
+}

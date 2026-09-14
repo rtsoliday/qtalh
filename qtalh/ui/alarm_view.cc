@@ -176,6 +176,8 @@ void AlarmView::setModel(QAbstractItemModel* next) {
   for (int column = 1; column < 9; ++column)
     hideColumn(column);
   connect(next, &QAbstractItemModel::modelReset, this, [this] { scheduleExtent(); });
+  connect(next, &QAbstractItemModel::rowsInserted, this, [this] { scheduleExtent(); });
+  connect(next, &QAbstractItemModel::rowsRemoved, this, [this] { scheduleExtent(); });
   connect(next, &QAbstractItemModel::dataChanged, this, [this] { scheduleExtent(); });
   updateExtent();
 }
@@ -333,11 +335,6 @@ void AlarmView::mousePressEvent(QMouseEvent* event) {
     }
   } else if (event->button() == Qt::LeftButton) {
     mouseTarget = index;
-    // Row controls act on their own target without moving the selected name.
-    if (index.isValid() && (index.column() == 2 || index.column() == 6 || index.column() == 7)) {
-      setFocus(Qt::MouseFocusReason);
-      setCurrentIndex(index);
-    }
   }
   event->accept();
 }
@@ -347,6 +344,12 @@ void AlarmView::mouseReleaseEvent(QMouseEvent* event) {
     const auto index = mouseTarget;
     mouseTarget = QModelIndex();
     if (index.isValid() && index == indexAt(event->pos())) {
+      // Commit selection only on release over the pressed cell, as in ALH.
+      // Row controls act on their own target without moving the selected name.
+      if (index.column() == 2 || index.column() == 6 || index.column() == 7) {
+        setFocus(Qt::MouseFocusReason);
+        setCurrentIndex(index);
+      }
       if (index.column() == 3) {
         // Defer the toggle so a double-click only expands the branch.
         if (pendingArrow.isValid() && pendingArrow != index) {

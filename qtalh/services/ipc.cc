@@ -28,29 +28,32 @@ QByteArray decodeQueue(const QByteArray& bytes, int payloadSize) {
     result.truncate(end);
   return result;
 }
-bool sendQueue(int key, const QByteArray& record, QString* error) {
+QueueSendResult sendQueueResult(int key, const QByteArray& record) {
 #ifdef Q_OS_WIN
   Q_UNUSED(key);
   Q_UNUSED(record);
-  if (error)
-    *error = "System V printer/database queues are unavailable on Windows";
-  return false;
+  return {QueueSendStatus::Failed, "System V printer/database queues are unavailable on Windows"};
 #else
+  if (record.size() > 250 - int(sizeof(long)))
+    return {QueueSendStatus::Oversized, "ALH queue record must fit the legacy 250-byte receive buffer"};
   try {
     auto bytes = encodeQueue(record);
     int id = msgget(key, 0600 | IPC_CREAT);
     if (id < 0 || msgsnd(id, bytes.constData(), record.size(), IPC_NOWAIT) < 0) {
-      if (error)
-        *error = QString::fromLocal8Bit(strerror(errno));
-      return false;
+      const int failure = errno;
+      return {failure == EAGAIN ? QueueSendStatus::Full : QueueSendStatus::Failed,
+              QString::fromLocal8Bit(strerror(failure))};
     }
-    return true;
+    return {};
   } catch (const std::exception& e) {
-    if (error)
-      *error = e.what();
-    return false;
+    return {QueueSendStatus::Failed, QString::fromLocal8Bit(e.what())};
   }
 #endif
+}
+bool sendQueue(int key, const QByteArray& record, QString* error) {
+  const auto result = sendQueueResult(key, record);
+  if (error) *error = result.error;
+  return result.status == QueueSendStatus::Sent;
 }
 QByteArray receiveQueue(int id, QString* error) {
 #ifdef Q_OS_WIN
@@ -76,6 +79,11 @@ QByteArray receiveQueue(int id, QString* error) {
 }
 QByteArray printerRecord(const QByteArray& record, const QString& color) {
   // printer.c receives "1 <type> <timestamp> ..." and skips the first two bytes.
+  // Possible inherited ALH protocol bug, deferred: Logging::alarm sends code 1
+  // as printer type 2, but this decoder recognizes only type 1 as a normal
+  // alarm. Normal records therefore get MAJOR styling and no appended newline.
+  // Reconcile record types, field offsets and line termination in a future
+  // change, including mixed legacy/Qt senders and helpers. Preserve bytes now.
   QByteArray msg = record.mid(2);
   int type = msg.left(msg.indexOf(' ')).toInt();
   if (type == 0)
