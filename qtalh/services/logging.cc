@@ -690,7 +690,7 @@ Logging::~Logging() {
     const auto owner = sharedLocks.constFind(broadcastFd);
     if (owner != sharedLocks.cend() && owner->broadcaster == this)
       retainBroadcast(broadcastFd, options.config + ".MESS",
-                      int(qBound<qint64>(1, broadcastUnlock - clock.monotonic(), 60000)));
+                      int(qBound(qint64(1), broadcastUnlock - clock.monotonic(), qint64(60000))));
     broadcastUnlock = 0;
   } else finishBroadcast();
   if (options.lock && !options.editor)

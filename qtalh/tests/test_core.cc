@@ -1046,8 +1046,9 @@ private slots:
       d = parseConfig(writeConfig(d));
     }
     for (const auto& bad : {"0xF4241 1", "-0x2 1", "1 -01", "1 0x80000000", "0x 1"}) {
-      QVERIFY_EXCEPTION_THROWN(parseConfig("GROUP NULL root\nCHANNEL root pv\n$ALARMCOUNTFILTER " +
-                                          QString(bad) + '\n'), ParseError);
+      QVERIFY_THROWS_EXCEPTION(ParseError,
+                               parseConfig("GROUP NULL root\nCHANNEL root pv\n$ALARMCOUNTFILTER " +
+                                           QString(bad) + '\n'));
     }
   }
 

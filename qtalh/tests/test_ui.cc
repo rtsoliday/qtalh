@@ -368,7 +368,7 @@ private slots:
     w->setAttribute(Qt::WA_DeleteOnClose, false);
     auto records = [&] { QFile f(o.opmodFile); return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray(); };
     QCOMPARE(records().count("Setup Config File : " + o.config.toLocal8Bit()), noLog ? 0 : 1);
-    QVERIFY_EXCEPTION_THROWN(w->saveTo(dir.filePath("missing/copy")), ParseError);
+    QVERIFY_THROWS_EXCEPTION(ParseError, w->saveTo(dir.filePath("missing/copy")));
     QVERIFY(!records().contains("Setup Save New Config"));
     const auto saved = dir.filePath("copy"); w->saveTo(saved);
     QCOMPARE(records().count("Setup Save New Config: " + saved.toLocal8Bit()), noLog ? 0 : 1);
@@ -3018,7 +3018,8 @@ private slots:
     auto drag = [&](QModelIndex index, Qt::MouseButton button) {
       const auto point = view.visualRect(index).center();
       QTest::mousePress(view.viewport(), button, Qt::NoModifier, point);
-      QMouseEvent move(QEvent::MouseMove, point + QPoint(QApplication::startDragDistance() + 2, 0),
+      const auto movePoint = point + QPoint(QApplication::startDragDistance() + 2, 0);
+      QMouseEvent move(QEvent::MouseMove, movePoint, view.viewport()->mapToGlobal(movePoint),
                        Qt::NoButton, button, Qt::NoModifier);
       QApplication::sendEvent(view.viewport(), &move);
       QTest::mouseRelease(view.viewport(), button, Qt::NoModifier, point);
@@ -3042,7 +3043,9 @@ private slots:
     // A reset invalidates an armed drag or delayed arrow; no old node may be used.
     QTest::mousePress(view.viewport(), Qt::MiddleButton, Qt::NoModifier, view.visualRect(second).center());
     model.reset(&d, &engine);
-    QMouseEvent move(QEvent::MouseMove, QPoint(500, 100), Qt::NoButton, Qt::MiddleButton, Qt::NoModifier);
+    const QPoint movePoint(500, 100);
+    QMouseEvent move(QEvent::MouseMove, movePoint, view.viewport()->mapToGlobal(movePoint),
+                     Qt::NoButton, Qt::MiddleButton, Qt::NoModifier);
     QApplication::sendEvent(view.viewport(), &move);
     QCOMPARE(view.dragged.size(), 1);
   }
