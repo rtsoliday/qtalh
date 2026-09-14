@@ -1,193 +1,151 @@
 # QtALH CPU benchmarks
 
-The [persistent logging checkpoint implementation](qtalh-logging-analysis.md#implemented-changes)
-addresses the logging cost below. Earlier measurements remain historical baselines.
+The current comparison, measured on 2026-09-14, runs ALH 1.2.35 and QtALH against
+the same private IOC with X11 rendering. QtALH uses less CPU while idle and during
+updates without logging; ALH uses less CPU when file logging is enabled.
 
-Measured on 2026-09-10 using an Intel Core i7-4770 (3.40 GHz), Linux x86-64,
-Qt 5.15.3, EPICS Base 7.0.8, and the normal `-O2` build. Values below are
-median process CPU percentages from three 10-second trials. **100% means one
-fully occupied CPU core**, not the entire machine. Startup is excluded.
+## Results
 
-## Engine and UI workloads
+Values are medians of five alternating trials per application and workload.
+**100% means one fully occupied CPU core.** Application CPU includes its threads
+and excludes the IOC, X server, CA repeater, and validation monitor.
 
-`tests/benchmark_cpu.cc` constructs 10,000 channels in 100 groups and runs the
-actual Window and Engine event loops with Qt's offscreen platform. The update
-workloads deliver 100 transitions every 50 ms, alternating normal/MAJOR for each
-channel. Every trial delivered 20,000 transitions and verified each channel's
-final severity and the root's aggregate counts. File logging and audible sound
-are disabled in both versions; Channel Access is measured separately below.
+| Workload | Trial duration | ALH CPU | QtALH CPU | QtALH versus ALH |
+| --- | ---: | ---: | ---: | ---: |
+| Main window, idle | 10 s | 0.9999% | 0.5000% | 50.0% lower |
+| Updates, logging disabled | 10 s | 3.6998% | 2.4998% | 32.4% lower |
+| Updates, logging enabled | 30 s | 3.2666% | 4.7666% | 45.9% higher |
 
-| Workload | Before CPU | After CPU | Reduction |
-| --- | ---: | ---: | ---: |
-| Main window, idle | 0.8517% | 0.0255% | 97.0% |
-| Main window, 2,000 transitions/second | 8.1621% | 5.6344% | 31.0% |
-| Active-alarm filter, 2,000 transitions/second | 5.9555% | 4.5215% | 24.1% |
-| Runtime window only, idle | 0.6561% | 0.0262% | 96.0% |
+| Workload | ALH range | QtALH range |
+| --- | ---: | ---: |
+| Idle | 0.8999–1.0999% | 0.4000–0.5000% |
+| Updates, logging disabled | 3.1998–3.8998% | 2.3999–2.6999% |
+| Updates, logging enabled | 3.1999–3.5000% | 4.5999–4.9666% |
 
-[Individual trials](benchmarks/qtalh-cpu-synthetic-2026-09-10.csv).
+Each direction holds in all five paired rounds, with non-overlapping observed
+ranges. The logged difference is 1.5000 percentage points of one core. These are
+controlled local measurements, not a formal statistical significance test or a
+performance guarantee for other installations.
 
-## Complete application with Channel Access and X11
+ALH and QtALH divide rendering work differently between the application and X11.
+Including the dedicated Xvfb process preserves the same ranking:
 
-The actual QtALH executables monitored 1,000 local `calc` records, grouped into
-10 groups, with the main window rendered through Xvfb/X11. Active records scanned
-every 0.5 seconds and alternated 0/10 across a MAJOR threshold. The logging-enabled
-runs used the default 2,000-record circular alarm log and a fresh log directory
-for every trial; both normal and MAJOR transitions were verified in the output.
+| Workload | ALH + Xvfb CPU | QtALH + Xvfb CPU |
+| --- | ---: | ---: |
+| Idle | 0.9999% | 0.5000% |
+| Updates, logging disabled | 3.7998% | 2.5999% |
+| Updates, logging enabled | 3.4333% | 4.9332% |
 
-| Workload | Before CPU | After CPU | Reduction |
-| --- | ---: | ---: | ---: |
-| Idle | 0.5994% | 0.2997% | 50.0% |
-| 2,000 transitions/second, file logging off | 5.2948% | 3.0982% | 41.5% |
-| 2,000 transitions/second, file logging on | 32.0682% | 29.3802% | 8.4% |
+These are medians of per-trial totals, not sums of separate medians. The raw CSV
+also records Xvfb CPU separately. Small or zero readings are limited by Linux
+clock-tick resolution; this virtual display does not measure a desktop compositor
+or GPU-backed rendering. Workloads use different trial durations, so comparisons
+between rows do not isolate the marginal cost of enabling logging.
+[Raw trials](benchmarks/alh-vs-qtalh-current-2026-09-14.csv).
 
-[Individual trials](benchmarks/qtalh-cpu-ioc-2026-09-10.csv).
-At that checkpoint, the logged workload remained dominated by per-record
-file/position writes;
-those writes and their durability were preserved. An exploratory run that
-reused log paths was excluded from the logged results in favor of matched
-initial files. These full-application figures are more representative of a
-connected installation than the isolated engine/UI figures above.
+## Workload and environment
 
-## Legacy ALH comparison (2026-09-11)
+- 1,000 channels in ten groups; active records alternate normal/MAJOR every
+  0.5 seconds, nominally 2,000 transitions/second.
+- Global acknowledgement mode, muted sound, default legacy appearance, and
+  1000×600 main windows. QtALH also displays its default 220×35 runtime indicator;
+  ALH does not display an equivalent separate runtime window with `-mainwindow`.
+- Three-second warmup before timing. Each trial starts a fresh application;
+  logged trials use fresh directories and the default 2,000-record circular log.
+  Printer/database helpers are not configured.
+- Private 1600×1000×24 Xvfb display, isolated Qt settings, and loopback-only CA
+  discovery. IOC records use `PINI=YES`, idle `CALC=0`, and active `CALC=10-VAL`.
+- Intel Core i7-12700, Linux x86-64, GCC 11.5.0, Qt 5.15.9, EPICS Base 7.0.8,
+  the existing powersave governor, ALH `-O2 -g -Wall -std=gnu99`, and QtALH
+  `-O2 -g -Wall -Wextra -std=c++17 -fPIC` builds.
+- The application uses logical CPU 2, IOC CPU 6, Xvfb CPU 10, and repeater/monitor
+  CPU 14. These map to physical cores 1, 3, 5, and 7 on this host. Affinity is
+  set before launch, inherited by new threads, and checked on the main thread
+  after warmup. The cores are not exclusively reserved; other host activity
+  and CPU frequency are not fixed.
 
-Both legacy ALH and the QtALH executable after the engine/UI optimization
-(but before the logging checkpoint optimization) were rerun through the same
-complete-application IOC benchmark described above: 1,000 channels, 10 groups,
-three 10-second trials after three seconds of warmup, and a private 1600x1000
-Xvfb/X11 display. The same local IOC supplied both applications. Execution order
-alternated, sound was muted, and each logging trial used a fresh directory and
-the default 2,000-record ring. CPU percentages exclude the IOC and X server.
-No application code was changed for this comparison.
+Idle, updates, and logged updates run in that order. Trials 1/3/5 run ALH first;
+trials 2/4 run QtALH first. No builds, test suites, or profilers run alongside
+timing. Window inspection runs after the CPU measurement endpoints. Linux process accounting has about 0.1 percentage-point resolution over
+ten seconds and 0.033 over thirty seconds.
 
-| Workload | ALH CPU | QtALH CPU | QtALH relative to ALH |
-| --- | ---: | ---: | ---: |
-| Idle | 0.9990% | 0.2997% | 70.0% lower |
-| 2,000 transitions/second, file logging off | 4.2956% | 2.8970% | 32.6% lower |
-| 2,000 transitions/second, file logging on | 2.8970% | 30.2713% | 10.45 times ALH |
-
-[Individual trials](benchmarks/alh-vs-qtalh-cpu-2026-09-11.csv).
-That QtALH version used less CPU while idle and with file logging disabled, but
-substantially more CPU with circular logging enabled. The later
-[checkpoint measurements](qtalh-logging-analysis.md#measured-result) supersede
-this circular-logging result for the current implementation. Every logged trial
-passed the normal/MAJOR
-transition check; inspected ring files contained all 1,000 distinct PV names.
-
-The [follow-up logging investigation](qtalh-logging-analysis.md) confirms that
-alarm payloads match and attributes 74% of circular-logging CPU samples to
-position-file persistence.
-
-Source inspection of that version showed additional per-record work:
-it hashed changed records and atomically replaced a position-metadata file on
-each write (`AlarmLogFile::savePosition` in `qtalh/services/logging.cc`). Legacy
-`filePrintf` in `alh/alLog.c` writes and flushes the alarm record directly, with
-its fixed-length ring cursor kept in memory. This difference is a likely
-contributor to the logging gap; this comparison does not separately profile
-how much CPU each logging operation consumes.
-
-The earlier 10,000-channel in-process benchmark uses QtALH's Window/Engine APIs
-and cannot directly run legacy ALH. The common IOC benchmark above provides the
-comparison using both real applications. To reproduce it with the existing
-benchmark script, its `before` column represents ALH and `after` represents QtALH:
-
-```sh
-DISPLAY=:97 QT_QPA_PLATFORM=xcb python3 qtalh/tests/benchmark_ioc.py \
-  bin/Linux-x86_64/alh bin/Linux-x86_64/qtalh \
-  --epics-bin /path/to/base/bin/linux-x86_64 \
-  --channels 1000 --seconds 10 --trials 3
-```
-
-Executable SHA-256 values for this comparison:
-
-```text
-ALH:   8c06b7930dbbbb1eb92ced665ea107409e60c545985c99e656caa4fcee8312da
-QtALH: 70f56a05261089abdc15de6cd9befd34d3e09e7b703f82476d823ddcde81e23d
-```
-
-## Implementation
-
-`perf` samples identified recurring document traversal/state lookup in idle
-`Engine::tick()`, view refresh work, and repeated local-time conversion in alarm
-history during bursts. The changes are:
-
-- Track the earliest alarm-filter or NoAck deadline. Keep the existing 200 ms
-  tick, expiry traversal order, deferred write retries, and separate heartbeat
-  timer; scan alarm states only when a deadline can have elapsed. Callers that
-  obtain mutable state retain the conservative scan behavior.
-- Separate one-second status/blink updates from full model refreshes. Alarm
-  changes still schedule the existing 200 ms UI refresh. Operation and description
-  changes explicitly notify the UI. Logging ownership, silence expiry, live
-  dialogs, and the runtime alarm indicator continue updating while idle.
-- Reuse the history timestamp within its existing one-second precision, including
-  clock reversals and delayed filter events. Every history entry and alarm/log
-  callback is still processed.
-- Repaint the runtime button only when its color changes, and replace history
-  text only when its contents change.
-
-No Channel Access polling interval, alarm transition processing, log durability,
-command execution, audible alarm behavior, or display content was removed or
-throttled. These measurements describe controlled local workloads; CPU use with
-other group layouts, IOC traffic, logging modes, fonts, and display servers will
-vary. The very small idle values are especially sensitive to timer alignment
-and measurement noise.
-
-## Reproduction
-
-Build and run the engine/UI workloads:
-
-```sh
-make -C qtalh QT_VERSION=5 benchmark-cpu
-# Individual workload: CHANNEL_COUNT MODE DURATION_SECONDS
-QT_QPA_PLATFORM=offscreen qtalh/O.Linux-x86_64-qt5/benchmark_cpu 10000 updates 10
-```
-
-Keep a copy of the application/benchmark executables before applying changes to
-compare versions. The standalone benchmark modes are `idle`, `updates`,
-`filtered`, and `runtime`. Repeat each mode at least three times.
-
-For complete applications on Linux, `qtalh/tests/benchmark_ioc.py` starts a
-private soft IOC,
-uses unique PV names and loopback-only CA addresses, warms up each application
-for three seconds, and samples its process CPU time from `/proc`. It alternates
-version order between trials, checks the logged transitions, and terminates its
-own processes. Point `DISPLAY` at a private Xvfb server to include X11 widget
-rendering, or use `QT_QPA_PLATFORM=offscreen`.
-
-```sh
-DISPLAY=:97 QT_QPA_PLATFORM=xcb python3 qtalh/tests/benchmark_ioc.py \
-  /path/to/before/qtalh bin/Linux-x86_64/qtalh \
-  --epics-bin /path/to/base/bin/linux-x86_64 \
-  --channels 1000 --seconds 10 --trials 3
-```
-
-The IOC script requires Linux `/proc`, Python 3, and `softIoc`, `caRepeater`,
-and `caget` in `--epics-bin`. Replace the example Base path above; the script's
-default is `/usr/local/oag/base/bin/linux-x86_64` and does not use Make's Base
-discovery. `DISPLAY=:97` assumes an X server is already running there. For an
-ALH comparison, use X11; the Qt-only offscreen platform cannot render Motif.
-`--modes idle updates logged-updates` selects workloads (all three by default).
-The script writes trial CSV to stdout and removes temporary logs on exit;
-redirect stdout to retain a new measurement. The specialized checkpoint,
-content, and syscall investigations have retained data in `docs/benchmarks/`,
-but their custom capture harnesses are not checked in. The script above does
-not reproduce those specialized experiments by itself.
-
-The IOC and X server CPU are excluded from application CPU. CA workloads with
-0.5-second scans nominally produce 2,000 transitions/second; the standalone
-engine/UI benchmark additionally counts and verifies delivered events.
+QtALH analytics remains attached, with no open analytics dashboard or configured
+notification subscriptions. Other layouts, channel counts, fonts, filtering
+modes, operator interactions, and deployment platforms can change CPU use.
+The logged comparison retains each application's existing persistence behavior;
+see [logging implementation](qtalh-logging-analysis.md).
 
 ## Validation
 
-At the 2026-09-10 engine/UI optimization checkpoint, all 221 checks passed:
-92 core, 43 UI, 29 IOC, 53 helper, and 4 visual checks
-(including suite setup/cleanup). These suites cover alarm processing, acknowledgements,
-force masks, reconnection, logging, editor actions, persistent dialogs, sound,
-and appearance. Added regressions exercise earlier/later timer deadlines,
-nested NoAck expiry, retained mutable state, timestamp boundaries and clock
-reversals, idle filtered-model stability, history updates, runtime blinking,
-and silence expiry. The heartbeat interval and deferred-write retry paths retain
-their existing dedicated coverage.
+All 30 measured runs passed. Every active trial produced both normal and MAJOR
+root-severity outputs during timing: 20 changes per unlogged trial and 60 per
+logged trial. Each logged run retained exactly 2,000 lines containing both
+states for every one of the 1,000 channels. Logging-disabled runs produced no
+alarm or operation files. Application diagnostic logs were empty.
 
-A focused Valgrind run of the new UI regression reported no memory-access errors
-and no definite or indirect leaks. Its 448-byte possible-loss report originates
-in EPICS thread-priority initialization/TLS allocation before `main`.
+These checks verify aggregate processing and retained per-channel states; they
+do not count every callback or prove zero event loss. Startup, graceful shutdown,
+and crash-recovery durability are outside the timed workload. The applications
+are terminated with SIGTERM after measurement. The same QtALH build also passed
+98 IOC integration checks; see the [test guide](../qtalh/tests/README.md) for coverage.
+
+## Measured builds
+
+The source base at measurement was `c7b67219cd451d92a8df9bb60b8d5993890a2622`.
+ALH source was unchanged. QtALH additionally included the snapshot metadata
+cache, bounded text-width cache, unused alarm-log formatting bypass, and legacy
+runtime-font fix. SHA-256 identifies the exact executables measured:
+
+```text
+alh 526082cfd1a9303c74da4baf8b393383a7ed30d0f16b765f60a43b2963d5291d
+qtalh 5cb366f78bc74ecbfb53702d7e811c65fac6b7110e9ccf571d55d7e62b2738d3
+```
+
+## Reproduction
+
+The [IOC benchmark](../qtalh/tests/benchmark_ioc.py) accepts executable paths,
+EPICS tool paths, and CPU assignments on the command line. It requires Linux
+`/proc`, Python 3, `stdbuf`, and EPICS `softIoc`, `caRepeater`, `caget`, `caput`,
+and `camonitor`. `--xvfb` additionally requires Xvfb and `xwininfo`; `--cpus`
+requires `taskset` and four allowed CPUs on distinct physical cores. Check
+`lscpu -e=CPU,CORE,SOCKET` before choosing CPUs on another host.
+
+```sh
+make -C alh EPICS_BASE=/path/to/epics/base
+make -C qtalh QT_VERSION=5 EPICS_BASE=/path/to/epics/base
+python3 qtalh/tests/benchmark_ioc.py \
+  bin/Linux-x86_64/alh bin/Linux-x86_64/qtalh --labels alh qtalh \
+  --epics-bin /path/to/epics/base/bin/linux-x86_64 \
+  --xvfb --cpus 2 6 10 14 --channels 1000 --max-records 2000 \
+  --seconds 10 --logged-seconds 30 --trials 5 \
+  --output /tmp/alh-vs-qtalh-repeat
+```
+
+Use the same options for the published workload, adjusting executable/EPICS paths
+and CPU assignments for the target host. The tool uses global mode and muted
+sound for both applications. `--modes idle updates logged-updates` selects the
+workloads, which are all enabled by default. Log capacity must allow at least
+two records per channel so every channel's normal and MAJOR states can be checked.
+
+CSV is written to stdout. `--output` must name a new directory and retains the
+CSV, configuration, executable hashes, commands, logs, window trees, and validation
+records for that run. Without it, temporary evidence is removed on exit. These
+local run artifacts do not need to be committed alongside the published CSV.
+The runner stops the processes it owns on completion, failure, or interruption.
+
+Without `--cpus`, processes inherit the caller's affinity. Without `--xvfb`, set
+`DISPLAY` or `QT_QPA_PLATFORM` yourself; X-server CPU fields are then empty
+(unavailable). Use X11 when comparing with Motif ALH. Offscreen rendering is
+suitable only for QtALH comparisons and does not reproduce the published workload.
+
+For isolated QtALH engine/UI investigations, the separate in-process harness
+supports `idle`, `updates`, `filtered`, and `runtime` workloads:
+
+```sh
+make -C qtalh QT_VERSION=5 benchmark-cpu
+QT_QPA_PLATFORM=offscreen qtalh/O.Linux-x86_64-qt5/benchmark_cpu 10000 updates 10
+```
+
+This harness verifies delivered events and final channel/root state. It does not
+include Channel Access or run ALH; use the complete-application runner for the
+published comparison.

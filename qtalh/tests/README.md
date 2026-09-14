@@ -92,9 +92,15 @@ For optional Valgrind runs, prefix a focused command with
 `valgrind --error-exitcode=99 --leak-check=full` (after any environment assignment).
 
 Performance tools are described in [CPU benchmarks](../../docs/qtalh-performance.md#reproduction).
-`benchmark-cpu` exercises the in-process engine/UI; `benchmark_ioc.py` measures
-complete applications on Linux using `/proc` and a private IOC. They are separate
-from the default regression target.
+`benchmark-cpu` exercises the in-process engine/UI. `benchmark_ioc.py` compares
+complete applications with a private loopback IOC, initialized records, and a
+root-severity processing check. `--xvfb` starts a private display and measures
+X-server CPU separately; `--cpus APP IOC XVFB MONITOR` pins the processes to
+distinct physical cores. `--logged-seconds` selects longer logged measurements,
+`--labels` names the CSV versions, and `--output` retains local evidence. Both
+normal and MAJOR log entries are verified for every channel. See `--help` and
+the benchmark page for the reproduction command. These tools are separate from
+the default regression target.
 
 ## Appearance validation
 
@@ -134,9 +140,7 @@ A temporary build of the original revision produced pixel-identical legacy
 captures for the main window, runtime/channel/editor Properties, Force PV,
 Modify Mask, Force Mask, Beep Severity, Guidance, About, and message entry.
 Editor/history differences were confined to temporary filenames and timestamps.
-The 10,000-channel smoke benchmarks completed 6,000 events in three seconds in
-both modes; measured idle CPU remained below 0.03% in both runs. These are local
-smoke-test observations, not performance guarantees.
+Current CPU results and the reproducible ALH comparison are in [CPU benchmarks](../../docs/qtalh-performance.md).
 
 The documentation build validated 29 HTML pages and their local links/assets.
 Qt 6 development modules and native macOS/Windows environments were unavailable

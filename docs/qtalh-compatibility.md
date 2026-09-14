@@ -430,8 +430,7 @@ cadence. The log-sharing follow-up rebuilt QtALH and passed all 53 helper tests,
 including six new symlink cases that failed before the fix. The printer burst
 test now validates connection acceptance order and
 passes with the unchanged printer helper. Counts include Qt Test setup/cleanup
-and data rows. The bounded-log burst regression writes 1,000 records in about
-0.15 seconds locally, compared with 27.3 seconds in the pre-fix review probe.
+and data rows. The bounded-log burst regression covers writing 1,000 records.
 Restart tests cover both checkpoint slots, equal timestamps, changed capacity,
 torn/truncated checkpoints, and stale metadata after external writes. A forced
 short-write test verifies that the alarm is retained, the other slot survives,
@@ -442,8 +441,7 @@ Motif. This is a representative differential trace, not exhaustive trace or
 pixel equivalence.
 
 The 10,000-channel core benchmark asserts final severity and acknowledgement
-counts. The offscreen 10,000-row window plus alarm burst took approximately
-0.73 seconds locally; model child lists are cached to avoid quadratic lookup.
+counts. Model child lists are cached to avoid quadratic lookup in large configurations.
 The [CPU and logging comparisons](qtalh-performance.md) cover controlled
 Motif/Qt workloads. Broader responsiveness/memory comparisons,
 complete differential alarm traces, exhaustive menu/dialog action coverage,

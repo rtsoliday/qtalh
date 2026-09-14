@@ -490,6 +490,12 @@ private slots:
     auto d = parseConfig("GROUP NULL root\n$ALIAS reloaded\n" + channels); saveConfig(d, o.config);
     Logging sender(o, "root"); QVERIFY(sender.sendBroadcast("reload", 0, true));
     QTRY_COMPARE(w->document().root->label(), QString("reloaded"));
+    for (auto n : w->document().channels()) {
+      const auto update = w->alarmEngine().channelUpdate(n);
+      QCOMPARE(update.identity, Engine::nodeIdentity(n));
+      QCOMPARE(update.path, Engine::channelPath(n));
+      QCOMPARE(update.pv, n->name);
+    }
     if (retained) {
       QTRY_VERIFY(force->findChild<QLineEdit*>("forcePvName"));
       QCOMPARE(force->findChild<QLineEdit*>("forcePvName")->text(), QString("target_gate"));
@@ -2031,13 +2037,28 @@ private slots:
   void editorUndoSave() {
     auto w = std::make_unique<Window>(sample(), options(true), false);
     w->show();
+    auto verifySnapshots = [&] {
+      for (auto n : w->document().channels()) {
+        auto update = w->alarmEngine().channelUpdate(n);
+        QCOMPARE(update.identity, Engine::nodeIdentity(n));
+        QCOMPARE(update.path, Engine::channelPath(n));
+        QCOMPARE(update.pv, n->name);
+        QStringList ancestors;
+        for (auto p = n; p; p = p->parent) ancestors << Engine::nodeIdentity(p);
+        QCOMPARE(update.ancestors, ancestors);
+      }
+    };
+    verifySnapshots();
     int count = w->document().channels().size();
     w->addNode(false, "new:pv");
     QCOMPARE(w->document().channels().size(), count + 1);
+    verifySnapshots();
     w->undoEdit();
     QCOMPARE(w->document().channels().size(), count);
+    verifySnapshots();
     w->redoEdit();
     QCOMPARE(w->document().channels().size(), count + 1);
+    verifySnapshots();
     QTemporaryDir dir;
     w->saveTo(dir.filePath("saved.alhConfig"));
     QCOMPARE(w->document().filename, dir.filePath("saved.alhConfig"));
@@ -3175,6 +3196,73 @@ private slots:
     auto current = tree->currentIndex();
     QCOMPARE(current.sibling(current.row(), 2).data().toString(), name);
   }
+  void rowTextMeasurementsFollowChanges() {
+    QStandardItemModel model(1, 9);
+    QFont font = QApplication::font(); font.setPointSize(12);
+    for (int column = 0; column < 9; ++column)
+      model.setData(model.index(0, column), font, Qt::FontRole);
+    model.setData(model.index(0, 2), "initial channel");
+    model.setData(model.index(0, 6), "<----->");
+    model.setData(model.index(0, 8), "<HIHI,MAJOR>");
+    AlarmView view(false); view.resize(800, 200); view.show();
+    QCoreApplication::processEvents(); view.setModel(&model);
+    auto verify = [&] {
+      QCoreApplication::processEvents();
+      view.horizontalScrollBar()->setValue(0);
+      // A newly created view measures this model without any retained widths.
+      AlarmView fresh(false); fresh.resize(view.size()); fresh.show();
+      QCoreApplication::processEvents(); fresh.setModel(&model);
+      QCoreApplication::processEvents();
+      QCOMPARE(view.columnWidth(0), fresh.columnWidth(0));
+      QCOMPARE(view.horizontalScrollBar()->maximum(), fresh.horizontalScrollBar()->maximum());
+      for (int column = 0; column < 9; ++column) {
+        const auto index = model.index(0, column);
+        const auto rect = view.visualRect(index);
+        QCOMPARE(rect, fresh.visualRect(index));
+        if (!rect.isEmpty() && view.viewport()->rect().contains(rect.center()))
+          QCOMPARE(view.indexAt(rect.center()), index);
+      }
+      const auto name = model.index(0, 2);
+      const int advance = QFontMetrics(name.data(Qt::FontRole).value<QFont>())
+                              .horizontalAdvance(name.data().toString());
+      QVERIFY(view.visualRect(name).width() >= advance);
+      if (legacyAppearance()) QCOMPARE(view.visualRect(name).width(), advance + 10);
+    };
+    verify(); verify(); // Warm repeated measurement must agree with fresh geometry.
+    model.setData(model.index(0, 2), QString::fromUtf8("longer renamed channel / é 中文 [Shelved]"));
+    model.setData(model.index(0, 4), "G"); model.setData(model.index(0, 5), "P");
+    model.setData(model.index(0, 6), "<CDATL>");
+    model.setData(model.index(0, 8), "(0,20000,0,0,0)");
+    verify();
+    font.setPointSize(20); font.setBold(true); font.setStretch(120);
+    for (int column = 0; column < 9; ++column)
+      model.setData(model.index(0, column), font, Qt::FontRole);
+    verify();
+    // Distinct long labels exercise bounded-cache eviction; returning to an old
+    // label must still produce exactly the same geometry.
+    const auto name = model.index(0, 2);
+    const auto retainedName = name.data().toString();
+    const auto retainedRect = view.visualRect(name);
+    for (int i = 0; i < 512; ++i) {
+      model.setData(name, QString::number(i) + QString(300, 'M'));
+      view.visualRect(name);
+    }
+    model.setData(name, retainedName); verify();
+    QCOMPARE(view.visualRect(name), retainedRect);
+    model.setData(model.index(0, 2), "short");
+    model.setData(model.index(0, 4), ""); model.setData(model.index(0, 5), "");
+    model.setData(model.index(0, 8), ""); verify();
+    for (auto type : {QEvent::FontChange, QEvent::ApplicationFontChange,
+                      QEvent::StyleChange, QEvent::ScreenChangeInternal}) {
+      QEvent event(type); QCoreApplication::sendEvent(&view, &event); verify();
+    }
+    // A reset/replacement can reuse row positions with entirely different text.
+    model.removeRows(0, model.rowCount()); model.insertRow(0);
+    for (int column = 0; column < 9; ++column)
+      model.setData(model.index(0, column), font, Qt::FontRole);
+    model.setData(model.index(0, 2), "replacement channel"); verify();
+  }
+
   void motifLayoutAndHitTargets() {
     auto d = parseConfig(
         "GROUP NULL Radiation_Monitors\nGROUP Radiation_Monitors Gamma_and_Neutron_Readings\nGROUP "
@@ -3190,7 +3278,10 @@ private slots:
       if (widget->objectName() == "runtimeWindow")
         runtime = widget;
     QVERIFY(runtime);
-    if (legacyAppearance()) QCOMPARE(runtime->size(), QSize(220, 35));
+    if (legacyAppearance()) {
+      QCOMPARE(runtime->findChild<QPushButton*>("runtimeAlarm")->font(), w->font());
+      QCOMPARE(runtime->size(), QSize(220, 35));
+    }
     else { QVERIFY(runtime->width() >= 220); QVERIFY(runtime->height() >= 35); }
     QCOMPARE(runtime->findChildren<QPushButton*>().size(), 1);
     QCOMPARE(runtime->findChild<QPushButton*>("runtimeAlarm")->text(),

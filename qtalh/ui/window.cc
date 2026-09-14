@@ -781,6 +781,9 @@ void Window::buildUi() {
   auto rlayout = new QHBoxLayout(runtime);
   rlayout->setContentsMargins(6, 5, 6, 5);
   runtimeButton = new MotifButton(doc.root->label());
+  // Native platform button fonts can override inherited fonts under a stylesheet.
+  // Keep the compact legacy button on the explicitly selected legacy font.
+  if (legacyAppearance()) runtimeButton->setFont(font());
   runtimeButton->setObjectName("runtimeAlarm");
   runtimeButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
   rlayout->addWidget(runtimeButton);

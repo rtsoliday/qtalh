@@ -162,6 +162,18 @@ private:
   struct Observer { std::weak_ptr<void> lifetime; std::function<void(const AlarmObservation&)> callback; };
   QVector<Observer> observers;
   QSet<Node*> requestedAcknowledgements;
+  // Metadata is shared by snapshots; live State and observation times are never cached.
+  // Validate the ancestry on access because Document/Node are publicly mutable.
+  struct SnapshotMetadata {
+    QString identity, path, pv;
+    QStringList ancestors;
+    const Node* parent = nullptr;
+    bool group = false;
+    quint64 revision = 0, parentRevision = 0;
+  };
+  mutable QHash<const Node*, SnapshotMetadata> snapshotMetadataCache;
+  mutable quint64 snapshotMetadataRevision = 0;
+  const SnapshotMetadata& snapshotMetadata(const Node*) const;
   ChannelUpdate snapshot(Node*, const State&) const;
   void publish(Node*, const State&, ObservationCause);
   qint64 nextStateDeadline = 0, nextShelfDeadline = 0;

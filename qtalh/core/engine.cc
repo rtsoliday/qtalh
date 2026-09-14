@@ -1073,10 +1073,40 @@ void Engine::publish(Node* n, const State& before, ObservationCause cause) {
 }
 QString Engine::nodeIdentity(const Node* n) { return identity(n); }
 ChannelUpdate Engine::channelUpdate(Node* n) const { return snapshot(n, state(n)); }
+const Engine::SnapshotMetadata& Engine::snapshotMetadata(const Node* n) const {
+  const auto* parent = n->parent ? &snapshotMetadata(n->parent) : nullptr;
+  const quint64 parentRevision = parent ? parent->revision : 0;
+  const auto found = snapshotMetadataCache.constFind(n);
+  if (found != snapshotMetadataCache.cend() && found->pv == n->name &&
+      found->group == n->group && found->parent == n->parent &&
+      found->parentRevision == parentRevision)
+    return found.value();
+
+  SnapshotMetadata metadata;
+  metadata.pv = n->name;
+  metadata.parent = n->parent;
+  metadata.group = n->group;
+  metadata.parentRevision = parentRevision;
+  metadata.revision = ++snapshotMetadataRevision;
+  metadata.identity = QString(n->group ? "G%1:%2" : "C%1:%2").arg(n->name.size()).arg(n->name);
+  QString component = n->name;
+  component.replace("\\", "\\\\");
+  component.replace("/", "\\/");
+  if (parent) {
+    metadata.identity.prepend(parent->identity);
+    metadata.path = parent->path;
+    metadata.ancestors = parent->ancestors;
+  }
+  metadata.path += "/" + component;
+  metadata.ancestors.prepend(metadata.identity);
+  // Copy parent fields before insertion, which may invalidate QHash references.
+  return snapshotMetadataCache.insert(n, std::move(metadata)).value();
+}
 ChannelUpdate Engine::snapshot(Node* n, const State& s) const {
+  const auto& metadata = snapshotMetadata(n);
   ChannelUpdate u;
-  u.identity = identity(n); u.path = channelPath(n); u.pv = n->name; u.value = s.value;
-  for (auto p = n; p; p = p->parent) u.ancestors << identity(p);
+  u.identity = metadata.identity; u.path = metadata.path; u.pv = metadata.pv;
+  u.ancestors = metadata.ancestors; u.value = s.value;
   u.severity = s.severity; u.status = s.status; u.unack = s.unack;
   u.initialized = s.initialized;
   u.suppressed = s.mask[Cancel] || s.mask[Disable] || s.mask[Ack] || s.shelf.until;

@@ -6,6 +6,8 @@ export default defineConfig({
   lang: 'en-US',
   base: process.env.DOCS_BASE || '/',
   outDir: './dist',
+  // Downloads are static evidence, not Markdown pages.
+  srcExclude: ['public/**'],
   cleanUrls: false,
   head: [['meta', { name: 'theme-color', content: '#123d52' }]],
   markdown: { lineNumbers: false },
@@ -57,9 +59,9 @@ export default defineConfig({
       { text: 'PROJECT & HISTORY', collapsed: true, items: [
         { text: 'Authors', link: '/project/authors' },
         { text: 'License', link: '/project/license' },
-        { text: 'Engineering history', link: '/history/' },
+        { text: 'Engineering reference', link: '/history/' },
         { text: 'CPU benchmarks', link: '/history/performance' },
-        { text: 'Logging investigation', link: '/history/logging' },
+        { text: 'Logging implementation', link: '/history/logging' },
         { text: 'Appearance comparisons', link: '/history/appearance' },
         { text: 'Original ALH manual', link: '/legacy/ALH.html', target: '_self' }
       ]}

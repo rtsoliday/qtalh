@@ -29,8 +29,8 @@ they do not require Qt or EPICS. See the
   and remaining acceptance work.
 - [Appearance comparison](docs/qtalh-appearance.md): Motif/Qt workflow and visual differences.
 - [CPU benchmarks](docs/qtalh-performance.md) and
-  [logging investigation](docs/qtalh-logging-analysis.md): historical measurements
-  and the subsequent checkpoint optimization.
+  [logging implementation](docs/qtalh-logging-analysis.md): current ALH/QtALH
+  results, reproducible workloads, and checkpoint behavior.
 - [Original ALH manual](alh/documentation/ALH.html): legacy operator reference;
   consult the QtALH guide and inventory for port-specific behavior.
 
@@ -222,7 +222,7 @@ make -C qtalh test-helpers       # requires legacy binaries and local rpcbind
 make -C qtalh test-visual        # requires built legacy ALH, X11, xwininfo, softIoc
 ```
 
-See [CPU benchmarks](docs/qtalh-performance.md) for measured improvements and
+See [CPU benchmarks](docs/qtalh-performance.md) for the current ALH comparison and
 reproducible engine/UI and local IOC workloads.
 
 IOC tests use repository-owned databases under `qtalh/tests/`, distinct CA

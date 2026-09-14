@@ -1,15 +1,13 @@
-# Engineering history
+# Engineering reference
 
-These records preserve the measurements, observations, and implementation decisions behind the Qt port. Read their dates and environments before applying a result to another installation.
+Current CPU measurements and implementation details accompany the compatibility and appearance records.
 
-| Record | What it establishes |
+| Reference | Contents |
 | --- | --- |
-| [CPU benchmarks](./performance) | Engine/UI and local-IOC comparisons, with raw trial data and workload descriptions. |
-| [Logging investigation](./logging) | The old circular-log overhead and its later replacement with persistent binary checkpoints. |
-| [Appearance comparisons](./appearance) | Motif/Qt reference captures, auxiliary-window work, and remaining rendering differences. |
-| [Compatibility inventory](/understand/compatibility) | Feature evidence, protocol details, and explicit acceptance gaps. |
-
-The historical circular-logging measurements describe an earlier implementation. The later [checkpoint result](./logging#measured-result) reports the optimization without reducing recorded transitions.
+| [CPU benchmarks](./performance) | Current ALH/QtALH comparison, raw results, validation, and reproduction. |
+| [Logging implementation](./logging) | Circular-log checkpoints, recovery behavior, and current logging CPU results. |
+| [Appearance comparisons](./appearance) | Motif/Qt reference captures and remaining rendering differences. |
+| [Compatibility inventory](/understand/compatibility) | Feature evidence, protocol details, and acceptance gaps. |
 
 ## Original documentation
 

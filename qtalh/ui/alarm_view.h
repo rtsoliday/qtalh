@@ -2,6 +2,7 @@
 #pragma once
 #include "appearance.h"
 #include <QCheckBox>
+#include <QCache>
 #include <QDrag>
 #include <QPushButton>
 #include <QTreeView>
@@ -52,6 +53,10 @@ private:
   QTimer arrowTimer;
   bool tree;
   bool extentPending = false;
+  // Text/font values survive model refreshes; cap retained labels and measurements.
+  mutable QCache<QPair<QFont, QString>, int> textWidths{256 * 1024};
+  int textAdvance(const QString&, const QFont&) const;
+  void invalidateTextWidths();
   std::array<QRect, 9> cells(const QModelIndex&, const QRect&) const;
   void updateExtent();
   void scheduleExtent();

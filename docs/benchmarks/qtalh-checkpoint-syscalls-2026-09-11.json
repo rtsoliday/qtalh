@@ -1,8 +1,0 @@
-{
-  "alarm_writes": 5246,
-  "checkpoint_writes": 5246,
-  "checkpoint_write_sizes": [
-    96
-  ],
-  "metadata_lifecycle_calls": 0
-}

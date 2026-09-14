@@ -138,6 +138,9 @@ def main():
     if args.clean or args.distclean:
         clean(distclean=args.distclean)
         return
+    # Rebuild linked downloads so removed sources cannot remain publicly available.
+    if (PUBLIC / 'downloads').exists():
+        shutil.rmtree(PUBLIC / 'downloads')
     guide = read('docs/qtalh-user-guide.md')
     readme = read('README.md')
     install = section(readme, 'Build and run')
@@ -159,13 +162,13 @@ def main():
     for source, route, title in [
         ('docs/qtalh-compatibility.md', '/understand/compatibility', 'Compatibility & validation'),
         ('docs/qtalh-performance.md', '/history/performance', 'CPU benchmarks'),
-        ('docs/qtalh-logging-analysis.md', '/history/logging', 'Logging investigation'),
+        ('docs/qtalh-logging-analysis.md', '/history/logging', 'Logging implementation'),
         ('docs/qtalh-appearance.md', '/history/appearance', 'Appearance comparisons'),
         ('qtalh/tests/README.md', '/develop/testing', 'Tests & contributions'),
         ('AUTHORS.md', '/project/authors', 'Authors & acknowledgements'),
     ]:
         body = read(source).split('\n', 1)[1]
-        if route.startswith('/history/'):
+        if route == '/history/appearance':
             body = ('::: info Historical engineering record\nThese measurements and observations describe the dated '
                     'workloads in this record. They are not current performance guarantees.\n:::\n\n' + body)
         if route == '/develop/testing':

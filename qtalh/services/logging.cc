@@ -782,6 +782,10 @@ void Logging::setOpmodFile(const QString& p) {
   opmodOpenError.clear();
 }
 void Logging::alarm(Node* n, const State& s, qint64 time) {
+  // -D disables files, not printer/database helpers. With no destination there
+  // is no record to format; alarm history and observers belong to the Engine.
+  if (options.noLog && !options.printerKey && !options.databaseKey)
+    return;
   QString body;
   QString transient = s.mask[AckT] ? "noackT" : "ackT";
   if (options.xml) {

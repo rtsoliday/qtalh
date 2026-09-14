@@ -421,6 +421,59 @@ private slots:
 #endif
   }
 #ifndef Q_OS_WIN
+  void alarmOutputDestinations_data() {
+    QTest::addColumn<int>("destinations"); QTest::addColumn<bool>("xml");
+    for (int destinations = 0; destinations < 8; ++destinations)
+      for (bool xml : {false, true})
+        QTest::newRow(qPrintable(QString("destinations-%1-xml-%2").arg(destinations).arg(xml)))
+            << destinations << xml;
+  }
+  void alarmOutputDestinations() {
+    QFETCH(int, destinations); QFETCH(bool, xml);
+    QTemporaryDir dir; Queue printer, database;
+    QVERIFY(dir.isValid() && printer.id >= 0 && database.id >= 0);
+    Options o; o.noLog = !(destinations & 1); o.xml = xml;
+    o.printerKey = destinations & 2 ? printer.key : 0;
+    o.databaseKey = destinations & 4 ? database.key : 0;
+    o.alarmFile = dir.filePath("alarm"); o.opmodFile = dir.filePath("operations");
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
+    Logging log(o, "root"); Engine engine(d); auto n = d.channels()[0];
+    qint64 time = 10000; engine.now = [&] { return time; };
+    engine.event(n, {0, 0, 0, 1, "0"});
+    engine.alarmLog = [&](Node* node, const State& state, qint64 t) { log.alarm(node, state, t); };
+    QVector<AlarmObservation> observations;
+    auto observer = engine.observe([&](const AlarmObservation& event) { observations << event; });
+    const auto historyCount = engine.history.size();
+    ++time; engine.event(n, {3, 2, 2, 1, "10"});
+    ++time; engine.event(n, {0, 0, 0, 1, "0"});
+    QCOMPARE(observations.size(), 2);
+    QCOMPARE(observations[0].after.severity, 2); QCOMPARE(observations[1].after.severity, 0);
+    QCOMPARE(engine.history.size(), historyCount + 2);
+    QVERIFY(engine.history.first().contains("NO_ALARM"));
+    QVERIFY(engine.history[1].contains("MAJOR"));
+    auto verifyQueue = [&](Queue& queue, bool enabled) {
+      const auto alarm = receiveQueue(queue.id), normal = receiveQueue(queue.id);
+      if (enabled) {
+        QVERIFY(alarm.contains("MAJOR") && alarm.contains("pv"));
+        QVERIFY(normal.contains("NO_ALARM") && normal.contains("pv"));
+        QCOMPARE(alarm.contains("<pv>pv</pv>"), xml);
+      } else {
+        QVERIFY(alarm.isEmpty() && normal.isEmpty());
+      }
+      QVERIFY(receiveQueue(queue.id).isEmpty());
+    };
+    verifyQueue(printer, destinations & 2); verifyQueue(database, destinations & 4);
+    QFile file(o.alarmFile);
+    if (o.noLog) {
+      QVERIFY(!file.exists() && !QFile::exists(o.opmodFile));
+    } else {
+      QVERIFY(file.open(QIODevice::ReadOnly)); const auto records = file.readAll();
+      QCOMPARE(records.count('\n'), 2);
+      QVERIFY(records.contains("MAJOR") && records.contains("NO_ALARM"));
+      QCOMPARE(records.contains("<pv>pv</pv>"), xml);
+    }
+  }
+
   void databaseHeaderIdentity_data() {
     QTest::addColumn<QByteArray>("user"); QTest::addColumn<QByteArray>("display");
     QTest::addColumn<QByteArray>("expectedDisplay");

@@ -73,6 +73,90 @@ class CoreTests : public QObject {
   Q_OBJECT
 private slots:
 
+  void snapshotMetadataTracksDocumentChanges() {
+    auto d = parseConfig("GROUP NULL root\nGROUP root first\nCHANNEL first pv\n"
+                         "GROUP root second\nCHANNEL second pv\n");
+    Engine e(d);
+    auto n = d.channels()[0], other = d.channels()[1];
+    auto first = n->parent, second = other->parent;
+    auto verify = [&](Node* node) {
+      const auto update = e.channelUpdate(node);
+      QCOMPARE(update.identity, Engine::nodeIdentity(node));
+      QCOMPARE(update.path, Engine::channelPath(node));
+      QCOMPARE(update.pv, node->name);
+      QStringList ancestors;
+      for (auto p = node; p; p = p->parent) ancestors << Engine::nodeIdentity(p);
+      QCOMPARE(update.ancestors, ancestors);
+    };
+    verify(n); verify(other);
+    auto retained = e.channelUpdate(n);
+    QVERIFY(retained.identity != e.channelUpdate(other).identity);
+    // Escaping and lengths must remain correct when any ancestor is renamed.
+    d.root->name = QString::fromUtf8("root/\\é");
+    verify(n); verify(other);
+    first->name = "renamed/group";
+    verify(n);
+    n->name = "new\\pv/value";
+    verify(n);
+    // Same Node address, new parent: metadata must follow the new ancestry.
+    auto moved = first->children.front();
+    first->children.clear(); second->children.push_back(moved); n->parent = second;
+    verify(n);
+    second->name = "destination";
+    verify(n); verify(other);
+    // Changing the node kind also changes the identity encoding.
+    n->group = true; verify(n); n->group = false; verify(n);
+    QCOMPARE(retained.path, QString("/root/first/pv"));
+    QCOMPARE(retained.identity, QString("G4:rootG5:firstC2:pv"));
+    QCOMPARE(retained.ancestors, QStringList({"G4:rootG5:firstC2:pv", "G4:rootG5:first", "G4:root"}));
+    // Returned implicitly shared values are independent of future snapshots.
+    auto changedCopy = e.channelUpdate(n); changedCopy.ancestors.clear(); changedCopy.path = "changed";
+    verify(n);
+  }
+  void snapshotMetadataPreservesEventState() {
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
+    Engine e(d); auto n = d.channels()[0]; qint64 wall = 10000;
+    e.now = [&] { return wall; };
+    e.event(n, {0, 0, 0, 1, "initial"});
+    QVector<AlarmObservation> observations;
+    QVector<ChannelUpdate> compatibility;
+    e.channelUpdated = [&](const ChannelUpdate& u) { compatibility << u; };
+    auto observer = e.observe([&](const AlarmObservation& o) { observations << o; });
+    for (int i = 0; i < 100; ++i) {
+      ++wall;
+      const int severity = i % 2 ? 0 : 2;
+      e.event(n, {severity ? 3 : 0, severity, severity, 1, QString::number(i)});
+      QCOMPARE(observations.size(), i + 1);
+      QCOMPARE(compatibility.size(), i + 1);
+      const auto& o = observations.last();
+      QCOMPARE(o.cause, ObservationCause::Processed);
+      QCOMPARE(o.before.severity, i ? (i % 2 ? 2 : 0) : 0);
+      QCOMPARE(o.before.value, i ? QString::number(i - 1) : QString("initial"));
+      QCOMPARE(o.after.severity, severity);
+      QCOMPARE(o.after.status, severity ? 3 : 0);
+      QCOMPARE(o.after.value, QString::number(i));
+      QCOMPARE(o.after.observedAt, wall);
+      QCOMPARE(o.before.observedAt, wall);
+      QCOMPARE(compatibility.last().value, o.after.value);
+      QVERIFY(o.after.initialized && o.after.available);
+      QVERIFY(!o.after.suppressed);
+    }
+    e.acknowledge(n);
+    QCOMPARE(observations.last().after.unack, 0);
+    e.shelve(n, 1, "maintenance", "tester");
+    QVERIFY(observations.last().after.shelved && observations.last().after.suppressed);
+    e.unshelve(n);
+    QVERIFY(!observations.last().after.shelved);
+    e.setMask(n, Mask::parse("D"));
+    QVERIFY(observations.last().after.disabled && observations.last().after.suppressed);
+    e.setMask(n, Mask::parse("-"));
+    QVERIFY(!observations.last().after.disabled);
+    // Previously retained observations must not acquire the latest dynamic state.
+    QCOMPARE(observations.first().after.value, QString("0"));
+    QCOMPARE(observations.first().after.severity, 2);
+    QVERIFY(!observations.first().after.shelved);
+  }
+
   void duplicatePvManualRequestSupersedesForce_data() {
     QTest::addColumn<QString>("request");
     QTest::addColumn<QString>("first"); QTest::addColumn<QString>("second");

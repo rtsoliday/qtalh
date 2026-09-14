@@ -123,6 +123,7 @@ void MotifCheckBox::paintEvent(QPaintEvent* event) {
   painter.drawText(rect().adjusted(16, 0, 0, 0), Qt::AlignLeft | Qt::AlignVCenter, text());
 }
 AlarmView::AlarmView(bool isTree, QWidget* parent) : QTreeView(parent), tree(isTree) {
+  connect(qApp, &QGuiApplication::fontDatabaseChanged, this, [this] { invalidateTextWidths(); });
   setHeaderHidden(true);
   setRootIsDecorated(false);
   setIndentation(0);
@@ -181,6 +182,22 @@ void AlarmView::setModel(QAbstractItemModel* next) {
   connect(next, &QAbstractItemModel::dataChanged, this, [this] { scheduleExtent(); });
   updateExtent();
 }
+int AlarmView::textAdvance(const QString& text, const QFont& font) const {
+  if (text.isEmpty()) return 0;
+  const auto key = qMakePair(font, text);
+  if (const auto width = textWidths.object(key)) return *width;
+  const int width = QFontMetrics(font).horizontalAdvance(text);
+  // Include the key's text storage as well as fixed per-entry overhead in the
+  // budget. Very long labels are measured normally without retaining them.
+  if (text.size() <= (textWidths.maxCost() - 128) / 2)
+    textWidths.insert(key, new int(width), 128 + 2 * int(text.size()));
+  return width;
+}
+void AlarmView::invalidateTextWidths() {
+  textWidths.clear();
+  doItemsLayout();
+  scheduleExtent();
+}
 std::array<QRect, 9> AlarmView::cells(const QModelIndex& row, const QRect& bounds) const {
   std::array<QRect, 9> result;
   int depth = 0;
@@ -198,7 +215,7 @@ std::array<QRect, 9> AlarmView::cells(const QModelIndex& row, const QRect& bound
     auto textWidth = [&](int column, bool button) {
       auto font = field(row, column, Qt::FontRole).value<QFont>();
       QFontMetrics metrics(font);
-      QSize contents(metrics.horizontalAdvance(field(row, column).toString()), metrics.height());
+      QSize contents(textAdvance(field(row, column).toString(), font), metrics.height());
       QStyleOptionButton option;
       option.initFrom(this);
       option.fontMetrics = metrics;
@@ -221,15 +238,14 @@ std::array<QRect, 9> AlarmView::cells(const QModelIndex& row, const QRect& bound
   add(0, 14);
   add(1, 14);
   auto nameFont = field(row, 2, Qt::FontRole).value<QFont>();
-  add(2, QFontMetrics(nameFont).horizontalAdvance(field(row, 2).toString()) + 10);
+  add(2, textAdvance(field(row, 2).toString(), nameFont) + 10);
   for (int column : {3, 4, 5})
     if (!field(row, column).toString().isEmpty())
       add(column, 14);
   auto font = field(row, 6, Qt::FontRole).value<QFont>();
-  QFontMetrics metrics(font);
-  add(6, metrics.horizontalAdvance(field(row, 6).toString()) + 4);
+  add(6, textAdvance(field(row, 6).toString(), font) + 4);
   add(7, 10);
-  add(8, metrics.horizontalAdvance(field(row, 8).toString()) + 4);
+  add(8, textAdvance(field(row, 8).toString(), font) + 4);
   return result;
 }
 QRect AlarmView::visualRect(const QModelIndex& index) const {
@@ -420,12 +436,9 @@ void AlarmView::executeNameDrag(QDrag* drag) {
 }
 bool AlarmView::event(QEvent* event) {
   bool result = QTreeView::event(event);
-  if (!legacyAppearance() && (event->type() == QEvent::FontChange ||
-      event->type() == QEvent::ApplicationFontChange || event->type() == QEvent::StyleChange ||
-      event->type() == QEvent::ScreenChangeInternal)) {
-    doItemsLayout();
-    scheduleExtent();
-  }
+  if (event->type() == QEvent::FontChange || event->type() == QEvent::ApplicationFontChange ||
+      event->type() == QEvent::StyleChange || event->type() == QEvent::ScreenChangeInternal)
+    invalidateTextWidths();
   return result;
 }
 bool AlarmView::viewportEvent(QEvent* event) {
