@@ -53,6 +53,22 @@ To check that build again, pass the same prefix with `--check-only`.
 
 `scripts/sync-docs.py` refreshes imported pages and downloads. Generated pages contain a comment naming that script; edit their source documents rather than the generated copy. The sync step also carries the original manual and linked benchmark evidence into the website.
 
+## Shared documentation theme
+
+The custom VitePress theme keeps QtALH's teal accents and reading layout, with
+neutral navigation surfaces and compact APS/Argonne affiliation links.
+`.vitepress/theme/Layout.vue` extends the default layout through `doc-before`
+and `doc-after` slots. The affiliation row scrolls with the article; the shared
+footer follows the previous/next navigation. Keep credits in that footer rather
+than repeating them on the homepage or in `themeConfig.footer`.
+
+Keep colors, spacing, and print rules in `.vitepress/theme/custom.css`, including
+dark-mode counterparts. Use `withBase` for internal links in Vue components so
+both root and APS subdirectory builds work. Preserve VitePress's navigation
+offsets, search, mobile menus, and document outline. Check desktop and mobile
+layouts in both themes after changing the shared framing; the affiliation and
+credits are hidden in print. The original ALH manual is an unchanged archive.
+
 ## Application screenshots
 
 Keep actual QtALH captures in `docs/site/public/images/`, and record the fixture,

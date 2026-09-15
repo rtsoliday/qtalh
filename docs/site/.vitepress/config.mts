@@ -65,7 +65,6 @@ export default defineConfig({
         { text: 'Appearance comparisons', link: '/history/appearance' },
         { text: 'Original ALH manual', link: '/legacy/ALH.html', target: '_self' }
       ]}
-    ],
-    footer: { message: 'Qt port development & maintenance: Robert Soliday', copyright: 'Based on EPICS ALH 1.2.35. Original author credits and license preserved.' }
+    ]
   }
 })

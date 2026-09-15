@@ -42,5 +42,3 @@ explains the font-size shortcuts.
 ## Working on QtALH
 
 Read the [architecture](./develop/architecture), run the [test suites](./develop/testing), or inspect the [compatibility inventory](./understand/compatibility). Historical measurements and implementation investigations live in [Engineering history](./history/).
-
-Qt port development and maintenance: **[Robert Soliday](./project/authors)**. Based on ALH 1.2.35, developed at Argonne National Laboratory. [Original credits](./project/authors) · [License](./project/license).
