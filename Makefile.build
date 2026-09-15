@@ -1,0 +1,213 @@
+# Common build recipes. Keep synchronized with the sibling repository.
+CLEAN_DIRS ?= $(OBJ_DIR)
+
+define make_prod_objs
+$(1)_OBJS = $(patsubst %.cpp, $(OBJ_DIR)/%.$(OBJEXT), $(patsubst %.cc, $(OBJ_DIR)/%.$(OBJEXT), $(patsubst %.c, $(OBJ_DIR)/%.$(OBJEXT), $($(1)_SRC))))
+endef
+
+ifneq ($(SCRIPTS),)
+ SCRIPTS := $(patsubst %,$(BIN_DIR)/%, $(SCRIPTS))
+endif
+
+ifneq ($(EPICS_INC_DIR),)
+ifneq ($(INC),)
+ INC := $(patsubst %,$(EPICS_INC_DIR)/%, $(INC))
+endif
+endif
+
+ifneq ($(LIBRARY),)
+ ifeq ($(OS), Windows)
+  DLL = $(LIBRARY:.lib=.dll)
+  EXP = $(LIBRARY:.lib=.exp)
+  LIBRARY := $(LIBRARY:=.lib)
+  DLL := $(patsubst %,$(OBJ_DIR)/%, $(DLL))
+  EXP := $(patsubst %,$(OBJ_DIR)/%, $(EXP))
+ else
+  LIBRARY := lib$(LIBRARY:=.a)
+ endif
+ LIBRARY := $(patsubst %,$(OBJ_DIR)/%, $(LIBRARY))
+
+ LIBRARY_OBJS = $(LIBRARY_SRC:.c=.$(OBJEXT))
+ LIBRARY_OBJS := $(LIBRARY_OBJS:.cc=.$(OBJEXT))
+ LIBRARY_OBJS := $(LIBRARY_OBJS:.cpp=.$(OBJEXT))
+ LIBRARY_OBJS := $(patsubst %,$(OBJ_DIR)/%, $(LIBRARY_OBJS))
+endif
+
+ifneq ($(PYTHON_SHARED_LIBRARY),)
+ ifeq ($(OS), Windows)
+  DLL = $(PYTHON_SHARED_LIBRARY:.lib=.dll)
+  EXP = $(PYTHON_SHARED_LIBRARY:.lib=.exp)
+  PYTHON_SHARED_LIBRARY := $(PYTHON_SHARED_LIBRARY:=.lib)
+  DLL := $(patsubst %,$(OBJ_DIR)/%, $(DLL))
+  EXP := $(patsubst %,$(OBJ_DIR)/%, $(EXP))
+ else
+  PYTHON_SHARED_LIBRARY_a = lib$(PYTHON_SHARED_LIBRARY:=.a)
+  PYTHON_SHARED_LIBRARY := lib$(PYTHON_SHARED_LIBRARY:=.so)
+ endif
+ PYTHON_SHARED_LIBRARY := $(patsubst %,$(OBJ_DIR)/%, $(PYTHON_SHARED_LIBRARY))
+
+ LIBRARY_OBJS = $(LIBRARY_SRC:.c=.$(OBJEXT))
+ LIBRARY_OBJS := $(LIBRARY_OBJS:.cc=.$(OBJEXT))
+ LIBRARY_OBJS := $(LIBRARY_OBJS:.cpp=.$(OBJEXT))
+ LIBRARY_OBJS := $(patsubst %,$(OBJ_DIR)/%, $(LIBRARY_OBJS))
+endif
+
+ifneq ($(PROD),)
+ $(foreach prod, $(PROD), $(eval $(call make_prod_objs,$(prod))))
+ FULLPROD = $(patsubst %,$(OBJ_DIR)/%$(EXEEXT), $(PROD))
+ PROD_OBJECTS = $(patsubst %$(EXEEXT),%.$(OBJEXT),$(FULLPROD))
+ .SECONDARY: $(PROD_OBJECTS)
+endif
+
+ifeq ($(OS), Windows)
+ ifneq ($(PROD_LIBS),)
+  PROD_DEPS = $(addprefix $(LIB_DIR)/,$(filter-out gsl.lib gslcblas.lib, $(PROD_LIBS)))
+ endif
+ ifneq ($(PROD_LIBS_SDDS),)
+  PROD_DEPS = $(addprefix $(SDDS_REPO)/lib/$(OS)-$(ARCH)/,$(PROD_LIBS_SDDS))
+ endif
+ ifneq ($(LIBRARY_LIBS),)
+  LIBRARY_DEPS = $(addprefix $(LIB_DIR)/, $(filter-out gsl.lib gslcblas.lib, $(LIBRARY_LIBS)))
+ endif
+ ifneq ($(LIBRARY_LIBS_SDDS),)
+  LIBRARY_DEPS = $(addprefix $(SDDS_REPO)/lib/$(OS)-$(ARCH)/,$(LIBRARY_LIBS_SDDS))
+ endif
+else
+ ifneq ($(PROD_LIBS),)
+  PROD_DEPS = $(addsuffix .a,$(patsubst -l%,$(LIB_DIR)/lib%,$(PROD_LIBS)))
+ endif
+ ifneq ($(PROD_LIBS_SDDS),)
+  PROD_DEPS += $(addsuffix .a,$(patsubst -l%,$(SDDS_REPO)/lib/$(OS)-$(ARCH)/lib%,$(PROD_LIBS_SDDS)))
+ endif
+endif
+
+all: $(OBJ_DIR) $(BIN_DIR) $(LIB_DIR) $(EPICS_BIN_DIR) $(EPICS_LIB_DIR) $(EPICS_INC_DIR) $(LIBRARY) $(PYTHON_SHARED_LIBRARY) $(FULLPROD) $(SCRIPTS) $(INC)
+
+$(EPICS_BIN_DIR):
+	mkdir -p $(EPICS_BIN_DIR)
+
+$(EPICS_LIB_DIR):
+	mkdir -p $(EPICS_LIB_DIR)
+
+$(EPICS_INC_DIR):
+	mkdir -p $(EPICS_INC_DIR)
+
+$(BIN_DIR):
+	mkdir -p $(BIN_DIR)
+
+$(LIB_DIR):
+	mkdir -p $(LIB_DIR)
+
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
+
+ifeq ($(OS), Windows)
+
+ %$(EXEEXT): %.$(OBJEXT) $(PROD_DEPS)
+	$(LINKEXE) -out:$@ $(@:.exe=.obj) $(LIB_LINK_DIRS) $(PROD_LIBS) $(PROD_LIBS_SDDS) $(PROD_SYS_LIBS)
+	cp -f $@ $(BIN_DIR)/
+	@if [ -n "$(EPICS_BIN_DIR)" ]; then echo cp -f $@ $(EPICS_BIN_DIR)/; fi
+	@if [ -n "$(EPICS_BIN_DIR)" ]; then cp -f $@ $(EPICS_BIN_DIR)/; fi
+	
+ ifeq ($(NO_DLL), 1)
+  $(LIBRARY): $(LIBRARY_OBJS) $(LIBRARY_DEPS)
+	$(LINKLIB) -out:$(LIBRARY) $(LIB_LINK_DIRS) $(LIBRARY_OBJS) $(LIBRARY_LIBS) $(LIBRARY_LIBS_SDDS) $(LIBRARY_SYS_LIBS)
+	cp -f $@ $(LIB_DIR)/
+	@if [ -n "$(EPICS_LIB_DIR)" ]; then echo cp -f $@ $(EPICS_LIB_DIR)/; fi
+	@if [ -n "$(EPICS_LIB_DIR)" ]; then cp -f $@ $(EPICS_LIB_DIR)/; fi
+ else
+  $(LIBRARY): $(LIBRARY_OBJS) $(LIBRARY_DEPS)
+	$(LINKDLL) -out:$(DLL) -implib:$(LIBRARY) $(LIB_LINK_DIRS) $(LIBRARY_OBJS) $(LIBRARY_LIBS) $(LIBRARY_LIBS_SDDS) $(LIBRARY_SYS_LIBS)
+	cp -f $(DLL) $(BIN_DIR)/
+	cp -f $@ $(LIB_DIR)/
+	@if [ -n "$(EPICS_BIN_DIR)" ]; then echo cp -f $(DLL) $(EPICS_BIN_DIR)/; fi
+	@if [ -n "$(EPICS_BIN_DIR)" ]; then cp -f $(DLL) $(EPICS_BIN_DIR)/; fi
+	@if [ -n "$(EPICS_LIB_DIR)" ]; then echo cp -f $@ $(EPICS_LIB_DIR)/; fi
+	@if [ -n "$(EPICS_LIB_DIR)" ]; then cp -f $@ $(EPICS_LIB_DIR)/; fi
+ endif
+ $(PYTHON_SHARED_LIBRARY): $(LIBRARY_OBJS) $(LIBRARY_DEPS)
+	$(LINKDLL) -out:$(DLL) -implib:$(PYTHON_SHARED_LIBRARY) $(LIB_LINK_DIRS) $(LIBRARY_OBJS) $(LIBRARY_LIBS) $(LIBRARY_LIBS_SDDS) $(LIBRARY_SYS_LIBS)
+	cp -f $(DLL) $(BIN_DIR)/
+	cp -f $@ $(LIB_DIR)/
+	@if [ -n "$(EPICS_BIN_DIR)" ]; then echo cp -f $(DLL) $(EPICS_BIN_DIR)/; fi
+	@if [ -n "$(EPICS_BIN_DIR)" ]; then cp -f $(DLL) $(EPICS_BIN_DIR)/; fi
+	@if [ -n "$(EPICS_LIB_DIR)" ]; then echo cp -f $@ $(EPICS_LIB_DIR)/; fi
+	@if [ -n "$(EPICS_LIB_DIR)" ]; then cp -f $@ $(EPICS_LIB_DIR)/; fi
+
+DEPFLAGS =
+
+else
+ %$(EXEEXT): %.$(OBJEXT) $(PROD_DEPS)
+	$(CCC) -o $@ $@.o $(LDFLAGS) $(LIB_LINK_DIRS) $(PROD_LIBS) $(PROD_LIBS_SDDS) $(PROD_SYS_LIBS)
+	cp -f $@ $(BIN_DIR)/
+	@if [ -n "$(EPICS_BIN_DIR)" ]; then echo cp -f $@ $(EPICS_BIN_DIR)/; fi
+	@if [ -n "$(EPICS_BIN_DIR)" ]; then cp -f $@ $(EPICS_BIN_DIR)/; fi
+
+ $(LIBRARY): $(LIBRARY_OBJS)
+	$(AR) $(LIBRARY) $(LIBRARY_OBJS)
+	$(RANLIB) $(LIBRARY)
+	cp -f $@ $(LIB_DIR)/
+	@if [ -n "$(EPICS_LIB_DIR)" ]; then echo cp -f $@ $(EPICS_LIB_DIR)/; fi
+	@if [ -n "$(EPICS_LIB_DIR)" ]; then cp -f $@ $(EPICS_LIB_DIR)/; fi
+	
+ifeq ($(OS), Linux)
+ $(PYTHON_SHARED_LIBRARY): $(LIBRARY_OBJS)
+	$(CCC) -o $@ -shared -fPIC -Wl,-h$@ $(LDFLAGS) $(LIBRARY_OBJS) $(LIBRARY_LIBS) $(LIBRARY_SYS_LIBS)
+	cp -f $@ $(LIB_DIR)/
+	@if [ -n "$(EPICS_LIB_DIR)" ]; then echo cp -f $@ $(EPICS_LIB_DIR)/; fi
+	@if [ -n "$(EPICS_LIB_DIR)" ]; then cp -f $@ $(EPICS_LIB_DIR)/; fi
+endif
+ifeq ($(OS), Darwin)
+ $(PYTHON_SHARED_LIBRARY): $(LIBRARY_OBJS)
+	$(CCC) -fPIC -dynamiclib -flat_namespace -o $@ $(LDFLAGS) $(LIBRARY_OBJS) $(LIBRARY_LIBS) $(LIBRARY_SYS_LIBS)
+	cp -f $@ $(LIB_DIR)/
+	@if [ -n "$(EPICS_LIB_DIR)" ]; echo cp -f $@ $(EPICS_LIB_DIR)/; fi
+	@if [ -n "$(EPICS_LIB_DIR)" ]; cp -f $@ $(EPICS_LIB_DIR)/; fi
+endif
+
+DEPFLAGS = -MMD -MP -MF $(@:.$(OBJEXT)=.d)
+
+endif
+
+
+$(OBJ_DIR)/%.$(OBJEXT): %.c $(BUILD_FILES) | $(OBJ_DIR)
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) $(DEPFLAGS) $(if $(filter $(notdir $<), $(LIBRARY_SRC)),$(LIBRARY_CFLAGS)) -c $< $(OUTPUT)
+$(OBJ_DIR)/%.$(OBJEXT): %.cc $(BUILD_FILES) $(EXTRA_CXX_OBJ_DEPS) | $(OBJ_DIR)
+	@mkdir -p $(dir $@)
+	$(CCC) $(CPPFLAGS) $(CCFLAGS) $(DEPFLAGS) $(if $(filter $(notdir $<), $(LIBRARY_SRC)),$(LIBRARY_CCFLAGS)) -c $< $(OUTPUT)
+$(OBJ_DIR)/%.$(OBJEXT): %.cpp $(BUILD_FILES) $(EXTRA_CXX_OBJ_DEPS) | $(OBJ_DIR)
+	@mkdir -p $(dir $@)
+	$(CCC) $(CPPFLAGS) $(CCFLAGS) $(DEPFLAGS) $(if $(filter $(notdir $<), $(LIBRARY_SRC)),$(LIBRARY_CCFLAGS)) -c $< $(OUTPUT)
+$(BIN_DIR)/%: %
+	cp -f $< $@
+	@if [ -n "$(EPICS_BIN_DIR)" ]; then echo cp -f $@ $(EPICS_BIN_DIR)/; fi
+	@if [ -n "$(EPICS_BIN_DIR)" ]; then cp -f $@ $(EPICS_BIN_DIR)/; fi
+ifneq ($(EPICS_INC_DIR),)
+$(EPICS_INC_DIR)/%: %
+	cp -f $< $@
+
+endif
+
+clean:
+	rm -rf $(CLEAN_DIRS)
+
+$(PROD_DEPS):
+
+$(LIBRARY_DEPS):
+
+-include $(wildcard $(OBJ_DIR)/*.d $(OBJ_DIR)/*/*.d)
+
+.PHONY: all clean
+
+# Refresh both installations even when the executable is already built.
+.PHONY: install-programs
+all: install-programs
+install-programs: $(FULLPROD) | $(BIN_DIR) $(EPICS_BIN_DIR)
+	$(if $(FULLPROD),set -e; $(foreach program,$(FULLPROD),cp -f $(program) $(BIN_DIR)/;))
+	$(if $(and $(EPICS_BIN_DIR),$(FULLPROD)),set -e; $(foreach program,$(FULLPROD),cp -f $(program) $(EPICS_BIN_DIR)/;))
+
+.PHONY: install distclean
+install: all
+distclean: clean
+	rm -f $(addprefix $(BIN_DIR)/,$(notdir $(FULLPROD)))

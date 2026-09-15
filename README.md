@@ -117,7 +117,7 @@ Legacy objects live in `alh/O.<OS>-<architecture>/`.
 
 When the repository is in an EPICS extensions tree at `extensions/src/qtalh`,
 with `extensions/configure/CONFIG` and `RELEASE` present, the same build commands
-install into `extensions/bin/<EPICS_HOST_ARCH>/` (for example,
+also install into `extensions/bin/<EPICS_HOST_ARCH>/` (for example,
 `extensions/bin/linux-x86_64/qtalh`). Base is selected by the extensions
 `configure/RELEASE`, including its local includes and host-specific overrides.
 The extensions `CONFIG_SITE` files can redirect installation with
@@ -208,7 +208,9 @@ or `make docs-distclean` to clean only the documentation.
 Windows cleanup uses `python` (other platforms use `python3`); override with
 `PYTHON=/path/to/python` if needed.
 
-The original extensions makefile is preserved as `alh/Makefile.epics`.
+The historical EPICS build is available with
+`make -C alh LEGACY_EPICS_BUILD=1`. The default build also supports the
+extensions layout and installs both local and shared executables.
 CDEV and CMLOG are outside the Qt port's scope.
 
 ## Validation
@@ -305,3 +307,21 @@ work of the original ALH authors and the SNS and PSI contributors. See
 The original license is in [LICENSE](LICENSE). The Qt files are modified works
 based on the original ALH parsing, alarm algorithms, workflows and protocols;
 source comments and the inventory identify their provenance.
+
+Builds always retain repository-local executables in `bin/<OS>-<architecture>/`,
+including when using the extensions configuration. The shared destination uses
+`INSTALL_LOCATION_EXTENSIONS` when set, otherwise `INSTALL_LOCATION`.
+
+### Makefile organization
+
+The top-level `Makefile` dispatches application, test, and documentation builds.
+`Makefile.rules` provides platform settings and EPICS, Motif, and Qt discovery.
+`Makefile.build` supplies common compilation, installation, and cleanup recipes.
+Each application has one `Makefile` containing its sources, link recipes, and
+application-specific tests, with Windows and Unix branches where needed.
+
+The shared `Makefile.build` is kept identical to MEDM’s. Both projects use
+the same platform and extensions-installation setup in `Makefile.rules`.
+QtALH uses `PROD`, `FULLPROD`, `OBJEXT`, `CCC`, and `CCFLAGS` for the common
+build recipes. `EPICS_BASE_LIB_DIR` selects Base libraries; `EPICS_LIB_DIR`
+is the extensions library installation directory.

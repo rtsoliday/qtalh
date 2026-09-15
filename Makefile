@@ -7,7 +7,6 @@ HAVE_MOTIF :=
 HAVE_QT := 1
 else
 HAVE_MOTIF := $(if $(and $(XM_LIB),$(wildcard $(MOTIF_INC)/Xm/Xm.h)),1)
-include Makefile.qt
 endif
 .PHONY: all alh qtalh test-qtalh clean distclean check-dependencies
 all: check-dependencies $(if $(HAVE_MOTIF),alh) $(if $(HAVE_QT),qtalh)
@@ -94,3 +93,7 @@ docs-clean:
 	$(PYTHON) scripts/sync-docs.py --clean
 docs-distclean:
 	$(PYTHON) scripts/sync-docs.py --distclean
+
+# The extensions parent invokes install; all already copies the executables.
+.PHONY: install
+install: all
