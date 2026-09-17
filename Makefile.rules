@@ -11,10 +11,16 @@ ifneq ($(filter CYGWIN% MINGW% MSYS% Windows_NT,$(OS)),)
 endif
 
 RULES_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+RULES_PROFILE ?= $(if $(wildcard $(RULES_DIR)qtstriptool/Makefile),striptool,$(if $(wildcard $(RULES_DIR)alh/Makefile),qtalh,medm))
 BUILD_FILES = Makefile $(RULES_DIR)Makefile.rules $(RULES_DIR)Makefile.build
 PKG_CONFIG ?= pkg-config
 PYTHON ?= $(if $(filter Windows,$(OS)),python,python3)
 
+ifeq ($(RULES_PROFILE),striptool)
+OBJ_DIR ?= O.$(OS)-$(ARCH)
+BIN_DIR ?= $(RULES_DIR)bin/$(OS)-$(ARCH)
+LIB_DIR ?= $(RULES_DIR)lib/$(OS)-$(ARCH)
+else
 DEV_BUILD ?= 0
 USE_CCACHE ?= 0
 CCACHE ?= ccache
@@ -23,6 +29,7 @@ DEV_OBJ_DIR = O.$(OS)-$(ARCH)-dev
 OBJ_DIR = $(if $(filter 1,$(DEV_BUILD)),$(DEV_OBJ_DIR),$(BASE_OBJ_DIR))
 BIN_DIR = $(DD)../bin/$(OS)-$(ARCH)
 LIB_DIR = $(DD)../lib/$(OS)-$(ARCH)
+endif
 
 EPICS_HOST := $(shell uname -s | tr '[:upper:]' '[:lower:]')
 EPICS_ARCH = $(ARCH)
@@ -79,6 +86,231 @@ EPICS_INC_DIR = $(EPICS_INSTALL_DIR)/include
 endif
 endif
 
+# Select the dependency and toolchain rules required by each repository.
+ifeq ($(RULES_PROFILE),striptool)
+EPICS_SEARCH_PATHS = /usr/local/oag/base $(RULES_DIR)epics-base \
+                     $(RULES_DIR)../epics-base $(RULES_DIR)../../../base \
+                     $(HOME)/epics/base $(HOME)/epics/base-7.0
+EPICS_BASE ?= $(firstword $(foreach base,$(EPICS_SEARCH_PATHS),\
+               $(if $(wildcard $(base)/include/cadef.h),$(base))))
+ifneq ($(strip $(EPICS_BASE)),)
+EPICS_BASE := $(abspath $(EPICS_BASE))
+HAVE_EPICS := 1
+ifeq ($(OS),Windows)
+EPICS_HOST_ARCH ?= windows-x64
+endif
+ifeq ($(origin EPICS_HOST_ARCH),undefined)
+EPICS_HOST_ARCH_SCRIPT := $(call find_epics_host_arch,$(EPICS_BASE))
+ifneq ($(EPICS_HOST_ARCH_SCRIPT),)
+EPICS_HOST_ARCH := $(shell perl "$(EPICS_HOST_ARCH_SCRIPT)")
+endif
+endif
+endif
+
+ifneq ($(strip $(EPICS_INSTALL_DIR)),)
+EPICS_BIN_DIR := $(EPICS_INSTALL_DIR)/bin/$(EPICS_HOST_ARCH)
+endif
+
+# Common library search paths. Keep the MEDM ordering where it applies, while
+# retaining StripTool's standalone and Homebrew locations.
+LIB_DIRS := $(MOTIF_LIB) $(EPICS_LIB_DIR) $(EPICS_EXTENSIONS_LIB_DIR) \
+            $(HOME)/epics/extensions/lib/$(EPICS_HOST)-$(EPICS_ARCH) \
+            /usr/lib64 /usr/lib/$(ARCH)-linux-gnu /usr/lib/x86_64-linux-gnu \
+            /lib64 /usr/lib /lib /usr/local/lib /usr/X11/lib /opt/local/lib \
+            /opt/X11/lib /sw/lib /usr/sfw/lib /opt/homebrew/lib
+
+ifneq ($(OS),Windows)
+Z_LIB = $(firstword $(wildcard \
+          $(addsuffix /libz.dylib,$(LIB_DIRS)) \
+          $(addsuffix /libz.so,$(LIB_DIRS)) \
+          $(addsuffix /libz.a,$(LIB_DIRS))))
+PNG_LIB = $(firstword $(wildcard \
+            $(addsuffix /libpng.dylib,$(LIB_DIRS)) \
+            $(addsuffix /libpng.so,$(LIB_DIRS)) \
+            $(addsuffix /libpng.a,$(LIB_DIRS))))
+JPEG_LIB = $(firstword $(wildcard \
+             $(addsuffix /libjpeg.dylib,$(LIB_DIRS)) \
+             $(addsuffix /libjpeg.so,$(LIB_DIRS)) \
+             $(addsuffix /libjpeg.a,$(LIB_DIRS))))
+XM_LIB = $(firstword $(wildcard \
+           $(addsuffix /libXm.dylib,$(LIB_DIRS)) \
+           $(addsuffix /libXm.so,$(LIB_DIRS)) \
+           $(addsuffix /libXm.a,$(LIB_DIRS))))
+
+# A shared Motif library records its X11 dependencies, but a static archive
+# does not. Prefer dependencies from the directory containing libXm so a
+# MacPorts archive is paired with MacPorts libraries instead of XQuartz ones.
+find_motif_dependency = $(firstword $(wildcard \
+                          $(addsuffix /lib$(1).dylib,$(MOTIF_DEP_LIB_DIRS)) \
+                          $(addsuffix /lib$(1).so,$(MOTIF_DEP_LIB_DIRS)) \
+                          $(addsuffix /lib$(1).a,$(MOTIF_DEP_LIB_DIRS))))
+MOTIF_STATIC_DEP_LIBS =
+MOTIF_STATIC_EXTRA_LIBS =
+ifneq ($(filter %.a,$(XM_LIB)),)
+  MOTIF_LIB_DIR := $(patsubst %/,%,$(dir $(XM_LIB)))
+  MOTIF_DEP_LIB_DIRS := $(MOTIF_LIB_DIR) \
+                        $(filter-out $(MOTIF_LIB_DIR),$(LIB_DIRS))
+  MOTIF_STATIC_DEP_LIBS := \
+    $(call find_motif_dependency,Xrandr) \
+    $(call find_motif_dependency,Xrender) \
+    $(call find_motif_dependency,Xcursor) \
+    $(call find_motif_dependency,Xpm)
+  # OpenMotif's MacPorts archive also carries font and image dependencies.
+  MOTIF_STATIC_EXTRA_LIBS := \
+    $(call find_motif_dependency,Xft) \
+    $(call find_motif_dependency,fontconfig) \
+    $(call find_motif_dependency,jpeg) \
+    $(call find_motif_dependency,png) \
+    $(call find_motif_dependency,iconv) \
+    $(call find_motif_dependency,z)
+endif
+
+XMU_LIB = $(firstword $(wildcard \
+            $(addsuffix /libXmu.dylib,$(LIB_DIRS)) \
+            $(addsuffix /libXmu.so,$(LIB_DIRS)) \
+            $(addsuffix /libXmu.a,$(LIB_DIRS))))
+XPM_LIB = $(firstword $(wildcard \
+            $(addsuffix /libXpm.dylib,$(LIB_DIRS)) \
+            $(addsuffix /libXpm.so,$(LIB_DIRS)) \
+            $(addsuffix /libXpm.a,$(LIB_DIRS))))
+XT_LIB = $(firstword $(wildcard \
+           $(addsuffix /libXt.dylib,$(LIB_DIRS)) \
+           $(addsuffix /libXt.so,$(LIB_DIRS)) \
+           $(addsuffix /libXt.a,$(LIB_DIRS))))
+ICE_LIB = $(firstword $(wildcard \
+            $(addsuffix /libICE.dylib,$(LIB_DIRS)) \
+            $(addsuffix /libICE.so,$(LIB_DIRS)) \
+            $(addsuffix /libICE.a,$(LIB_DIRS))))
+SM_LIB = $(firstword $(wildcard \
+           $(addsuffix /libSM.dylib,$(LIB_DIRS)) \
+           $(addsuffix /libSM.so,$(LIB_DIRS)) \
+           $(addsuffix /libSM.a,$(LIB_DIRS))))
+X11_LIB = $(firstword $(wildcard \
+            $(addsuffix /libX11.dylib,$(LIB_DIRS)) \
+            $(addsuffix /libX11.so,$(LIB_DIRS)) \
+            $(addsuffix /libX11.a,$(LIB_DIRS))))
+XP_LIB = $(firstword $(wildcard \
+           $(addsuffix /libXp.dylib,$(LIB_DIRS)) \
+           $(addsuffix /libXp.so,$(LIB_DIRS)) \
+           $(addsuffix /libXp.a,$(LIB_DIRS))))
+XAU_LIB = $(firstword $(wildcard \
+            $(addsuffix /libXau.dylib,$(LIB_DIRS)) \
+            $(addsuffix /libXau.so,$(LIB_DIRS)) \
+            $(addsuffix /libXau.a,$(LIB_DIRS))))
+XFT_LIB = $(firstword $(wildcard \
+            $(addsuffix /libXft.dylib,$(LIB_DIRS)) \
+            $(addsuffix /libXft.so,$(LIB_DIRS)) \
+            $(addsuffix /libXft.a,$(LIB_DIRS))))
+XEXT_LIB = $(firstword $(wildcard \
+             $(addsuffix /libXext.dylib,$(LIB_DIRS)) \
+             $(addsuffix /libXext.so,$(LIB_DIRS)) \
+             $(addsuffix /libXext.a,$(LIB_DIRS))))
+FONTCONFIG_LIB = $(firstword $(wildcard \
+                  $(addsuffix /libfontconfig.dylib,$(LIB_DIRS)) \
+                  $(addsuffix /libfontconfig.so,$(LIB_DIRS)) \
+                  $(addsuffix /libfontconfig.a,$(LIB_DIRS))))
+ICONV_LIB = $(firstword $(wildcard \
+             $(addsuffix /libiconv.dylib,$(LIB_DIRS)) \
+             $(addsuffix /libiconv.so,$(LIB_DIRS)) \
+             $(addsuffix /libiconv.a,$(LIB_DIRS))))
+
+# Detect Motif/X11 include directories.
+MOTIF_INC_SEARCH := /usr/include /usr/X11R6/include /usr/local/include \
+                    /opt/local/include /usr/X11/include /opt/X11/include \
+                    /opt/homebrew/include
+MOTIF_INC ?= $(firstword $(foreach dir,$(MOTIF_INC_SEARCH),\
+               $(if $(wildcard $(dir)/Xm/Xm.h),$(dir))))
+X11_INC_SEARCH := /usr/include /usr/X11R6/include /usr/local/include \
+                  /opt/local/include /usr/X11/include /opt/X11/include \
+                  /opt/homebrew/include
+X11_INC ?= $(firstword $(foreach dir,$(X11_INC_SEARCH),\
+             $(if $(wildcard $(dir)/X11/Xlib.h),$(dir))))
+
+# Motif requires both its public header and library; StripTool additionally
+# requires X11 headers and the core X11 library.
+ifneq ($(XM_LIB),)
+  ifneq ($(MOTIF_INC),)
+    ifneq ($(and $(X11_INC),$(X11_LIB)),)
+      HAVE_MOTIF = 1
+    endif
+  endif
+endif
+endif
+
+HAVE_LEGACY := $(if $(and $(HAVE_EPICS),$(HAVE_MOTIF)),1)
+
+ifeq ($(OS),Windows)
+QT_VERSION ?= 6
+QT_DIR ?= C:/Qt/6.11.2/msvc2022_64
+QT_DIR := $(subst \,/,$(QT_DIR))
+HAVE_QT := $(if $(wildcard $(QT_DIR)/include/QtWidgets/QtWidgets),1)
+QT_CFLAGS = /DQT_NO_DEBUG /DQT_CORE_LIB /DQT_GUI_LIB /DQT_WIDGETS_LIB /DQT_PRINTSUPPORT_LIB \
+            /I"$(QT_DIR)/include" /I"$(QT_DIR)/include/QtCore" \
+            /I"$(QT_DIR)/include/QtGui" /I"$(QT_DIR)/include/QtWidgets" \
+            /I"$(QT_DIR)/include/QtPrintSupport"
+QT_LIBS = "$(QT_DIR)/lib/Qt$(QT_VERSION)Widgets.lib" \
+          "$(QT_DIR)/lib/Qt$(QT_VERSION)Gui.lib" \
+          "$(QT_DIR)/lib/Qt$(QT_VERSION)PrintSupport.lib" \
+          "$(QT_DIR)/lib/Qt$(QT_VERSION)Core.lib"
+QT_TEST_CFLAGS = /DQT_TESTLIB_LIB /I"$(QT_DIR)/include/QtTest"
+QT_TEST_LIBS = "$(QT_DIR)/lib/Qt$(QT_VERSION)Test.lib"
+MOC_QT_CFLAGS = -DQT_NO_DEBUG -DQT_CORE_LIB -DQT_GUI_LIB \
+                -DQT_WIDGETS_LIB -DQT_PRINTSUPPORT_LIB -DQT_TESTLIB_LIB \
+                -I"$(QT_DIR)/include" -I"$(QT_DIR)/include/QtCore" \
+                -I"$(QT_DIR)/include/QtGui" -I"$(QT_DIR)/include/QtWidgets" \
+                -I"$(QT_DIR)/include/QtPrintSupport" \
+                -I"$(QT_DIR)/include/QtTest"
+MOC = "$(QT_DIR)/bin/moc.exe"
+RCC = "$(QT_DIR)/bin/rcc.exe"
+else
+QT6_AVAILABLE := $(shell $(PKG_CONFIG) --exists Qt6Widgets 2>/dev/null && echo 1)
+QT5_AVAILABLE := $(shell $(PKG_CONFIG) --atleast-version=5.15 Qt5Widgets 2>/dev/null && echo 1)
+QMAKE6 ?= qmake6
+ifeq ($(QT6_AVAILABLE),)
+QT6_QMAKE_VERSION := $(shell $(QMAKE6) -query QT_VERSION 2>/dev/null)
+ifneq ($(filter 6.%,$(QT6_QMAKE_VERSION)),)
+QT6_HEADERS := $(shell $(QMAKE6) -query QT_INSTALL_HEADERS 2>/dev/null)
+QT6_LIB_DIR := $(shell $(QMAKE6) -query QT_INSTALL_LIBS 2>/dev/null)
+QT6_TOOL_DIRS := $(shell $(QMAKE6) -query QT_HOST_LIBEXECS 2>/dev/null) \
+                 $(shell $(QMAKE6) -query QT_HOST_BINS 2>/dev/null)
+ifneq ($(wildcard $(QT6_HEADERS)/QtWidgets/QtWidgets),)
+QT6_QMAKE_AVAILABLE := 1
+endif
+endif
+endif
+QT_VERSION ?= $(if $(or $(QT6_AVAILABLE),$(QT6_QMAKE_AVAILABLE)),6,5)
+HAVE_QT := $(if $(filter 6,$(QT_VERSION)),$(or $(QT6_AVAILABLE),$(QT6_QMAKE_AVAILABLE)),$(QT5_AVAILABLE))
+ifeq ($(QT_VERSION),6)
+ifeq ($(QT6_QMAKE_AVAILABLE),1)
+qt_modules = $(sort $(1) Core $(if $(filter Widgets,$(1)),Gui))
+qt_cflags = -I$(QT6_HEADERS) $(foreach mod,$(call qt_modules,$(1)),-I$(QT6_HEADERS)/Qt$(mod) -DQT_$(shell echo $(mod) | tr '[:lower:]' '[:upper:]')_LIB)
+qt_libs = -L$(QT6_LIB_DIR) -Wl,-rpath,$(QT6_LIB_DIR) $(foreach mod,$(call qt_modules,$(1)),-lQt6$(mod))
+QT_TOOL_DIRS = $(QT6_TOOL_DIRS)
+else
+qt_cflags = $(shell $(PKG_CONFIG) --cflags $(addprefix Qt$(QT_VERSION),$(1)))
+qt_libs = $(shell $(PKG_CONFIG) --libs $(addprefix Qt$(QT_VERSION),$(1)))
+QT_CORE_PACKAGE = Qt$(QT_VERSION)Core
+QT_TOOL_DIRS = $(shell $(PKG_CONFIG) --variable=host_bins $(QT_CORE_PACKAGE)) \
+               $(shell $(PKG_CONFIG) --variable=libexecdir $(QT_CORE_PACKAGE)) \
+               $(shell $(PKG_CONFIG) --variable=bindir $(QT_CORE_PACKAGE))
+endif
+else
+qt_cflags = $(shell $(PKG_CONFIG) --cflags $(addprefix Qt$(QT_VERSION),$(1)))
+qt_libs = $(shell $(PKG_CONFIG) --libs $(addprefix Qt$(QT_VERSION),$(1)))
+QT_CORE_PACKAGE = Qt$(QT_VERSION)Core
+QT_TOOL_DIRS = $(shell $(PKG_CONFIG) --variable=host_bins $(QT_CORE_PACKAGE)) \
+               $(shell $(PKG_CONFIG) --variable=libexecdir $(QT_CORE_PACKAGE)) \
+               $(shell $(PKG_CONFIG) --variable=bindir $(QT_CORE_PACKAGE))
+endif
+QT_CFLAGS = $(call qt_cflags,Widgets PrintSupport)
+QT_LIBS = $(call qt_libs,Widgets PrintSupport)
+QT_TEST_CFLAGS = $(call qt_cflags,Test)
+QT_TEST_LIBS = $(call qt_libs,Test)
+MOC_QT_CFLAGS = $(QT_CFLAGS) $(QT_TEST_CFLAGS)
+MOC = $(firstword $(wildcard $(addsuffix /moc,$(QT_TOOL_DIRS))))
+RCC = $(firstword $(wildcard $(addsuffix /rcc,$(QT_TOOL_DIRS))))
+endif
+else ifeq ($(RULES_PROFILE),qtalh)
 CFLAGS ?= -O2 -g -Wall -std=gnu99
 ALH_HELP_URL ?= https://epics.anl.gov/EpicsDocumentation/ExtensionsManuals/AlarmHandler/current/ALHUserGuide.html
 
@@ -282,4 +514,505 @@ OBJEXT = o
 EXEEXT =
 OUTPUT = -o $@
 OUTPUTEXE = -o $@
+endif
+else ifeq ($(RULES_PROFILE),medm)
+LIB_DIRS := $(EPICS_LIB_DIR) $(EPICS_EXTENSIONS_LIB_DIR) $(HOME)/epics/extensions/lib/$(EPICS_HOST)-$(EPICS_ARCH) /usr/lib64 /usr/lib/x86_64-linux-gnu /lib64 /usr/lib /lib /usr/X11/lib /opt/local/lib /sw/lib /usr/sfw/lib $(DD)../../lib
+
+FFTW3_LIB = $(firstword $(wildcard \
+           $(addsuffix /libfftw3.dylib, $(LIB_DIRS)) \
+           $(addsuffix /libfftw3.so, $(LIB_DIRS)) \
+           $(addsuffix /libfftw3.a, $(LIB_DIRS))))
+Z_LIB = $(firstword $(wildcard \
+           $(addsuffix /libz.dylib, $(LIB_DIRS)) \
+           $(addsuffix /libz.so, $(LIB_DIRS)) \
+           $(addsuffix /libz.a, $(LIB_DIRS)) \
+           $(addsuffix /z.lib, $(LIB_DIR))))
+ZSTD_LIB = $(firstword $(wildcard \
+           $(addsuffix /libzstd.dylib, $(LIB_DIRS)) \
+           $(addsuffix /libzstd.so, $(LIB_DIRS)) \
+           $(addsuffix /libzstd.a, $(LIB_DIRS))))
+LZMA_LIB = $(firstword $(wildcard \
+           $(addsuffix /liblzma.dylib, $(LIB_DIRS)) \
+           $(addsuffix /liblzma.so, $(LIB_DIRS)) \
+           $(addsuffix /liblzma.a, $(LIB_DIRS)) \
+           $(addsuffix /lzma.lib, $(LIB_DIR))))
+#Note that on Ubuntu 25.04 we cannot link to the serial version of hdf5
+HDF5_LIB = $(firstword $(wildcard \
+           $(addsuffix /libhdf5.dylib, $(LIB_DIRS)) \
+           $(addsuffix /libhdf5.a, $(LIB_DIRS)) \
+           $(addsuffix /libhdf5_serial.a, $(LIB_DIRS)) \
+           $(addsuffix /libhdf5.so, $(LIB_DIRS)) \
+           $(addsuffix /libhdf5_serial.so, $(LIB_DIRS))))
+SZ_LIB = $(firstword $(wildcard \
+           $(addsuffix /libsz.dylib, $(LIB_DIRS)) \
+           $(addsuffix /libsz.so, $(LIB_DIRS)) \
+           $(addsuffix /libsz.a, $(LIB_DIRS))))
+GSL_LIB = $(firstword $(wildcard \
+           $(addsuffix /libgsl.dylib, $(LIB_DIRS)) \
+           $(addsuffix /libgsl.a, $(LIB_DIRS)) \
+           $(addsuffix /libgsl.so, $(LIB_DIRS))))
+GSLCBLAS_LIB = $(firstword $(wildcard \
+              $(addsuffix /libgslcblas.dylib, $(LIB_DIRS)) \
+              $(addsuffix /libgslcblas.a, $(LIB_DIRS)) \
+              $(addsuffix /libgslcblas.so, $(LIB_DIRS))))
+PNG_LIB = $(firstword $(wildcard \
+           $(addsuffix /libpng.dylib, $(LIB_DIRS)) \
+           $(addsuffix /libpng.so, $(LIB_DIRS)) \
+           $(addsuffix /libpng.a, $(LIB_DIRS)) \
+           $(addsuffix /png.lib, $(LIB_DIR))))
+GD_LIB = $(firstword $(wildcard \
+           $(addsuffix /libgd.dylib, $(LIB_DIRS)) \
+           $(addsuffix /libgd.so, $(LIB_DIRS)) \
+           $(addsuffix /libgd.a, $(LIB_DIRS)) \
+           $(addsuffix /gd.lib, $(LIB_DIR))))
+JPEG_LIB = $(firstword $(wildcard \
+           $(addsuffix /libjpeg.dylib, $(LIB_DIRS)) \
+           $(addsuffix /libjpeg.so, $(LIB_DIRS)) \
+           $(addsuffix /libjpeg.a, $(LIB_DIRS))))
+LERC_LIB = $(firstword $(wildcard \
+           $(addsuffix /libLerc.dylib, $(LIB_DIRS)) \
+           $(addsuffix /libLerc.so, $(LIB_DIRS)) \
+           $(addsuffix /libLerc.a, $(LIB_DIRS))))
+DEFLATE_LIB = $(firstword $(wildcard \
+           $(addsuffix /libdeflate.dylib, $(LIB_DIRS)) \
+           $(addsuffix /libdeflate.so, $(LIB_DIRS)) \
+           $(addsuffix /libdeflate.a, $(LIB_DIRS))))
+TIFF_LIB = $(firstword $(wildcard \
+           $(addsuffix /libtiff.dylib, $(LIB_DIRS)) \
+           $(addsuffix /libtiff.so, $(LIB_DIRS)) \
+           $(addsuffix /libtiff.a, $(LIB_DIRS)) \
+           $(addsuffix /tiff.lib, $(LIB_DIR))))
+XM_LIB = $(firstword $(wildcard \
+         $(addsuffix /libXm.dylib, $(LIB_DIRS)) \
+         $(addsuffix /libXm.so, $(LIB_DIRS)) \
+         $(addsuffix /libXm.a, $(LIB_DIRS))))
+
+# A shared Motif library records its X11 dependencies, but a static archive
+# does not.  Prefer dependencies from the directory containing libXm so a
+# MacPorts archive is paired with MacPorts libraries instead of XQuartz ones.
+find_motif_dependency = $(firstword $(wildcard \
+                          $(addsuffix /lib$(1).dylib,$(MOTIF_DEP_LIB_DIRS)) \
+                          $(addsuffix /lib$(1).so,$(MOTIF_DEP_LIB_DIRS)) \
+                          $(addsuffix /lib$(1).a,$(MOTIF_DEP_LIB_DIRS))))
+MOTIF_STATIC_DEP_LIBS =
+ifneq ($(filter %.a,$(XM_LIB)),)
+  MOTIF_LIB_DIR := $(patsubst %/,%,$(dir $(XM_LIB)))
+  MOTIF_DEP_LIB_DIRS := $(MOTIF_LIB_DIR) \
+                        $(filter-out $(MOTIF_LIB_DIR),$(LIB_DIRS))
+  MOTIF_STATIC_DEP_LIBS := \
+    $(call find_motif_dependency,Xrandr) \
+    $(call find_motif_dependency,Xrender) \
+    $(call find_motif_dependency,Xcursor) \
+    $(call find_motif_dependency,Xpm)
+endif
+
+XMU_LIB = $(firstword $(wildcard \
+          $(addsuffix /libXmu.dylib, $(LIB_DIRS)) \
+          $(addsuffix /libXmu.so, $(LIB_DIRS)) \
+          $(addsuffix /libXmu.a, $(LIB_DIRS))))
+XT_LIB = $(firstword $(wildcard \
+         $(addsuffix /libXt.so, $(LIB_DIRS)) \
+         $(addsuffix /libXt.a, $(LIB_DIRS))))
+ICE_LIB = $(firstword $(wildcard \
+         $(addsuffix /libICE.so, $(LIB_DIRS)) \
+         $(addsuffix /libICE.a, $(LIB_DIRS))))
+SM_LIB = $(firstword $(wildcard \
+         $(addsuffix /libSM.so, $(LIB_DIRS)) \
+         $(addsuffix /libSM.a, $(LIB_DIRS))))
+X11_LIB = $(firstword $(wildcard \
+          $(addsuffix /libX11.dylib, $(LIB_DIRS)) \
+          $(addsuffix /libX11.so, $(LIB_DIRS)) \
+          $(addsuffix /libX11.a, $(LIB_DIRS))))
+XP_LIB = $(firstword $(wildcard \
+         $(addsuffix /libXp.dylib, $(LIB_DIRS)) \
+         $(addsuffix /libXp.so, $(LIB_DIRS)) \
+         $(addsuffix /libXp.a, $(LIB_DIRS))))
+XAU_LIB = $(firstword $(wildcard \
+         $(addsuffix /libXau.dylib, $(LIB_DIRS)) \
+         $(addsuffix /libXau.so, $(LIB_DIRS)) \
+         $(addsuffix /libXau.a, $(LIB_DIRS))))
+XFT_LIB = $(firstword $(wildcard \
+         $(addsuffix /libXft.dylib, $(LIB_DIRS)) \
+         $(addsuffix /libXft.so, $(LIB_DIRS)) \
+         $(addsuffix /libXft.a, $(LIB_DIRS))))
+XEXT_LIB = $(firstword $(wildcard \
+         $(addsuffix /libXext.dylib, $(LIB_DIRS)) \
+         $(addsuffix /libXext.so, $(LIB_DIRS)) \
+         $(addsuffix /libXext.a, $(LIB_DIRS))))
+FONTCONFIG_LIB = $(firstword $(wildcard \
+          $(addsuffix /libfontconfig.dylib, $(LIB_DIRS)) \
+          $(addsuffix /libfontconfig.so, $(LIB_DIRS)) \
+          $(addsuffix /libfontconfig.a, $(LIB_DIRS))))
+ICONV_LIB = $(firstword $(wildcard \
+          $(addsuffix /libiconv.dylib, $(LIB_DIRS)) \
+          $(addsuffix /libiconv.so, $(LIB_DIRS)) \
+          $(addsuffix /libiconv.a, $(LIB_DIRS))))
+
+# Detect Motif/X11 include directories
+MOTIF_INC_SEARCH := /usr/include /usr/X11R6/include /usr/local/include /opt/local/include \
+                    /usr/X11/include /opt/homebrew/include
+MOTIF_INC = $(firstword $(foreach d,$(MOTIF_INC_SEARCH),$(wildcard $d/Xm/Xm.h)))
+MOTIF_INC := $(patsubst %/Xm/Xm.h,%,$(MOTIF_INC))
+
+X11_INC_SEARCH := /usr/include /usr/X11R6/include /usr/local/include /opt/local/include \
+                  /usr/X11/include /opt/homebrew/include
+X11_INC = $(firstword $(foreach d,$(X11_INC_SEARCH),$(wildcard $d/X11/Xlib.h)))
+X11_INC := $(patsubst %/X11/Xlib.h,%,$(X11_INC))
+
+# Check if Motif development environment is available
+# Requires both headers (Xm.h) and library (libXm)
+ifneq ($(XM_LIB),)
+  ifneq ($(MOTIF_INC),)
+    HAVE_MOTIF = 1
+  endif
+endif
+
+# Detect Qt development environment using pkg-config
+# On Windows, Qt detection is handled separately in qtedm/Makefile
+ifneq ($(OS), Windows)
+  QT6_CFLAGS := $(shell pkg-config --cflags Qt6Widgets 2>/dev/null)
+  QT6_LIBS := $(shell pkg-config --libs Qt6Widgets 2>/dev/null)
+  ifneq ($(QT6_CFLAGS),)
+    ifneq ($(QT6_LIBS),)
+      HAVE_QT = 1
+    endif
+  endif
+  ifneq ($(HAVE_QT), 1)
+    QT5_CFLAGS := $(shell pkg-config --cflags Qt5Widgets 2>/dev/null)
+    QT5_LIBS := $(shell pkg-config --libs Qt5Widgets 2>/dev/null)
+    ifneq ($(QT5_CFLAGS),)
+      ifneq ($(QT5_LIBS),)
+        HAVE_QT = 1
+      endif
+    endif
+  endif
+endif
+
+# On Windows, assume Qt is available (checked separately in qtedm/Makefile)
+ifeq ($(OS), Windows)
+  HAVE_QT = 1
+endif
+
+IOMP5_LIB = -liomp5
+ifneq ($(wildcard /gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/gcc-13.2.0),)
+  IMPROV_BUILD=1
+  LZMA_LIB = /gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/gcc-13.2.0/xz-5.4.6-3zhah5p/lib/liblzma.so
+  HDF5_LIB = -Wl,-rpath,/gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/gcc-13.2.0/hdf5-1.14.3-o6prqns/lib
+  HDF5_LIB += /gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/gcc-13.2.0/hdf5-1.14.3-o6prqns/lib/libhdf5.so
+  TIFF_LIB = -Wl,-rpath,/gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/gcc-12.3.0/libtiff-4.5.1-hmstscv/lib64
+  TIFF_LIB += /gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/gcc-12.3.0/libtiff-4.5.1-hmstscv/lib64/libtiff.so
+  GD_LIB = /gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/gcc-12.3.0/libgd-2.3.3-enxppnl/lib/libgd.so
+  JPEG_LIB = /gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/gcc-12.3.0/libjpeg-turbo-3.0.0-v7a5c5g/lib64/libjpeg.so
+  FFTW3_LIB = /gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/gcc-13.2.0/fftw-3.3.10-x5237xr/lib/libfftw3.so
+  IOMP5_LIB_DIR = /gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/gcc-13.2.0/intel-oneapi-mkl-2024.2.2-ueuijm5/compiler/2024.2/lib
+  IOMP5_LIB = -Wl,-rpath,$(IOMP5_LIB_DIR) $(IOMP5_LIB_DIR)/libiomp5.so
+endif
+
+
+ifeq ($(words $(wildcard /usr/local/oag/3rdParty/intel/oneapi/mkl/latest)),1)
+ MKLROOT = /usr/local/oag/3rdParty/intel/oneapi/mkl/latest
+endif
+ifneq ($(MKLROOT),)
+ MKL_CFLAG = -DMKL
+ MKL_INCLUDE = -I"$(MKLROOT)/include/"
+ifeq ($(OS), Windows)
+ MKL_LIB = mkl_intel_ilp64.lib mkl_intel_thread.lib mkl_core.lib libiomp5md.lib
+else
+ MKL_LIB = -Wl,--start-group \
+           $(MKLROOT)/lib/intel64/libmkl_intel_lp64.a \
+           $(MKLROOT)/lib/intel64/libmkl_core.a \
+           $(MKLROOT)/lib/intel64/libmkl_gnu_thread.a \
+           -Wl,--end-group \
+           -Wl,-rpath,$(MKLROOT)/lib/intel64/../../../compiler/lib/intel64 \
+           -Wl,-rpath,$(MKLROOT)/lib/intel64/../../../../compiler/latest/linux/compiler/lib/intel64_lin \
+           -L$(MKLROOT)/lib/intel64/../../../compiler/lib/intel64 \
+           -L$(MKLROOT)/lib/intel64/../../../../compiler/latest/linux/compiler/lib/intel64_lin \
+           $(IOMP5_LIB) -ldl
+endif
+else
+ LAPACK_CFLAG = -DLAPACK
+ LAPACK_INCLUDE = -I/usr/include/lapacke
+ LAPACK_LIB = -llapack -lblas
+ ifeq ($(IMPROV_BUILD),1)
+  LAPACK_LIB = -Wl,-rpath,/gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/gcc-12.3.0/nvhpc-24.3-ksebg4i/Linux_x86_64/24.3/compilers/lib
+  LAPACK_LIB += /gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/gcc-12.3.0/nvhpc-24.3-ksebg4i/Linux_x86_64/24.3/compilers/lib/liblapack.so
+  LAPACK_LIB += /gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/gcc-12.3.0/nvhpc-24.3-ksebg4i/Linux_x86_64/24.3/compilers/lib/libblas.so
+ endif
+endif
+
+ifeq ($(OS), Windows)
+  EXTRA_INC_DIRS = -I$(DD)../tiff -I$(DD)../gd -I$(DD)../png -I$(DD)../zlib -I$(DD)../lzma -I$(DD)../../gsl
+  EXTRA_INC_DIRS =
+else
+  EXTRA_INC_DIRS = $(sort $(dir $(filter-out ,$(Z_LIB) $(LZMA_LIB) $(HDF5_LIB) $(FFTW3_LIB) $(SZ_LIB) $(GSL_LIB) $(GSLCBLAS_LIB))))
+  EXTRA_INC_DIRS := $(patsubst %/lib64/,%/include, $(EXTRA_INC_DIRS))
+  EXTRA_INC_DIRS := $(patsubst %/x86_64-linux-gnu/,%/include, $(EXTRA_INC_DIRS))
+  EXTRA_INC_DIRS := $(patsubst %/lib/,%/include, $(EXTRA_INC_DIRS))
+  EXTRA_INC_DIRS := $(patsubst %/$(OBJ_DIR)/,%, $(EXTRA_INC_DIRS))
+  EXTRA_INC_DIRS := $(patsubst %,-I%, $(EXTRA_INC_DIRS))
+
+  ifeq ($(IMPROV_BUILD),1)
+    EXTRA_INC_DIRS += -I/gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/aocc-4.1.0/xz-5.4.1-gju4bpk/include
+    EXTRA_INC_DIRS += -I/gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/gcc-11.4.0/libtiff-4.5.1-bzputfw/include
+    EXTRA_INC_DIRS += -I/gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/gcc-12.3.0/libgd-2.3.3-enxppnl/include
+  endif
+
+endif
+
+ifeq ($(OS), Windows)
+  ifneq ($(strip $(GSL_REPO)),)
+    WINDOWS_GSL_LIB_DIR = $(GSL_REPO)/lib
+  else
+    WINDOWS_GSL_LIB_DIR = $(DD)../../gsl/lib
+  endif
+  LIB_LINK_DIRS = -LIBPATH:$(DD)../lib/$(OS)-$(ARCH) -LIBPATH:$(WINDOWS_GSL_LIB_DIR)
+else
+  LIB_LINK_DIRS = -L$(DD)../lib/$(OS)-$(ARCH)
+endif
+
+# Try to locate MPI compiler
+MPI_CC = $(firstword $(wildcard \
+           /usr/bin/mpicc \
+           /usr/local/bin/mpicc \
+           /usr/local/oag/3rdParty/mpich-4.3.0/bin/mpicc \
+           /usr/lib64/mpich/bin/mpicc \
+           /usr/lib64/openmpi/bin/mpicc \
+           /usr/lib64/mpi/gcc/mpich/bin/mpicc \
+           /usr/lib64/mpi/gcc/openmpi/bin/mpicc \
+           /usr/lib64/mpich-3.2/bin/mpicc \
+           /opt/local/bin/mpicc \
+           /opt/homebrew/bin/mpicc \
+           /lustre/3rdPartySoftware/mpich-4.1.1/bin/mpicc \
+	   /gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/aocc-4.1.0/openmpi-5.0.1-jk5bu46/bin/mpicc ))
+MPI_CCC = $(firstword $(wildcard \
+           /usr/bin/mpic++ \
+           /usr/bin/mpicxx \
+           /usr/local/bin/mpic++ \
+           /usr/local/bin/mpicxx \
+           /usr/local/oag/3rdParty/mpich-4.3.0/bin/mpic++ \
+           /usr/lib64/mpich/bin/mpic++ \
+           /usr/lib64/mpich/bin/mpicxx \
+           /usr/lib64/openmpi/bin/mpic++ \
+           /usr/lib64/openmpi/bin/mpicxx \
+           /usr/lib64/mpi/gcc/mpich/bin/mpic++ \
+           /usr/lib64/mpi/gcc/openmpi/bin/mpic++ \
+           /usr/lib64/mpich-3.2/bin/mpicxx \
+           /opt/local/bin/mpic++ \
+           /opt/local/bin/mpicxx \
+           /opt/homebrew/bin/mpic++ \
+           /opt/homebrew/bin/mpicxx \
+           /lustre/3rdPartySoftware/mpich-4.1.1/bin/mpicxx \
+	   /gpfs/fs1/soft/improv/software/spack-built/linux-rhel8-zen3/aocc-4.1.0/openmpi-5.0.1-jk5bu46/bin/mpicxx ))
+WIN_MPI = $(firstword $(wildcard \
+           C:/Program\ Files/Microsoft\ MPI \
+           C:/Program\ Files\ (x86)/Microsoft\ SDKs/MPI \
+           C:/MicrosoftMPI ))
+
+ifneq ($(WIN_MPI),)
+  WIN_MPI_INC = -I$(WIN_MPI)/Include
+  WIN_MPI_LIB = $(WIN_MPI)/Lib/x64/msmpi.lib
+  MPI_CC = FOUND
+endif
+
+ifeq ($(OS), Windows)
+ifeq ($(PY),)
+  PY = 12
+endif
+endif
+ifeq (1, $(words $(wildcard /usr/local/oag/apps/bin/linux-x86_64/oagpython3)))
+  PYTHON = oagpython3
+else ifeq (1, $(words $(wildcard C:/Python3$(PY)/python.exe)))
+  PYTHON = C:/Python3$(PY)/python.exe
+else
+  PYTHON = python3
+endif
+
+PYTHON_PREFIX = $(shell $(PYTHON) -c 'import sys; print(sys.prefix)')
+PYTHON_EXEC_PREFIX = $(shell $(PYTHON) -c 'import sys; print(sys.exec_prefix)')
+PYTHON_VERSION = $(shell $(PYTHON) -c 'import sys; print("{}.{}".format(*sys.version_info[:2]))')
+PYTHON_INCLUDE_DIRS = -I$(PYTHON_PREFIX)/include/python$(PYTHON_VERSION) \
+                      -I$(PYTHON_PREFIX)/include/python$(PYTHON_VERSION)m \
+                      -I$(PYTHON_EXEC_PREFIX)/include/python$(PYTHON_VERSION) \
+                      -I$(PYTHON_EXEC_PREFIX)/include/python$(PYTHON_VERSION)m
+
+ifeq ($(OS), Linux)
+  CC = gcc
+  CCC = g++
+  AR = ar rcs
+  RANLIB = ranlib
+  CFLAGS = -m64 -O3 -g -Wall -fPIC $(EXTRA_INC_DIRS)
+  CCFLAGS = -m64 -O3 -g -Wall -fPIC -std=c++17 $(EXTRA_INC_DIRS)
+  #Use this for memory checking with valgrind
+  #CFLAGS = -m64  -g -O0 -Wall -fno-inline -fno-omit-frame-pointer -fPIC $(EXTRA_INC_DIRS)
+  #CCFLAGS = -m64  -g -O0 -Wall -fno-inline -fno-omit-frame-pointer -fPIC $(EXTRA_INC_DIRS)
+  LDFLAGS += -rdynamic -m64
+  LIBRARY_SYS_LIBS = -lpthread -lm -lrt -ldl -lgcc
+  PROD_SYS_LIBS = -lpthread -lm -lrt -ldl -lgcc
+  ifeq ($(IMPROV_BUILD),1)
+    LIBRARY_SYS_LIBS += $(IOMP5_LIB)
+    PROD_SYS_LIBS += $(IOMP5_LIB)
+  endif
+  OBJEXT = o
+  LIBEXT = a
+  LIBPRE = lib
+  LINKEXE = $(CCC)
+
+  F77 = gfortran -m64 -ffixed-line-length-132
+
+  #-m64         Generates code for a 64-bit environment.
+  #-O3          Enables high-level optimizations, focusing on maximizing performance.
+  #-g           Includes debugging information in the compiled output.
+  #-Wall        Enables a broad set of warning messages to help identify potential issues.
+  #-fPIC        Generates position-independent code, which is essential for creating shared libraries.
+
+  CUSTOM_GCC_PATH = /usr/local/oag/3rdParty/gcc-11.3.0
+  ifneq ($(wildcard $(CUSTOM_GCC_PATH)),)
+    CC = $(CUSTOM_GCC_PATH)/bin/gcc
+    CCC = $(CUSTOM_GCC_PATH)/bin/g++
+    ifeq ($(MPI_CC),/usr/lib64/mpich-3.2/bin/mpicc)
+      MPI_CC :=MPICH_CC=$(CUSTOM_GCC_PATH)/bin/gcc $(MPI_CC)
+      MPI_CCC :=MPICH_CXX=$(CUSTOM_GCC_PATH)/bin/g++ $(MPI_CCC)
+    endif
+    ifeq ($(MPI_CC),/usr/local/oag/3rdParty/mpich-4.3.0/bin/mpicc)
+      MPI_CC :=MPICH_CC=$(CUSTOM_GCC_PATH)/bin/gcc $(MPI_CC)
+      MPI_CCC :=MPICH_CXX=$(CUSTOM_GCC_PATH)/bin/g++ $(MPI_CCC)
+    endif
+    AR = $(CUSTOM_GCC_PATH)/bin/gcc-ar -rc
+    RANLIB = $(CUSTOM_GCC_PATH)/bin/gcc-ranlib
+    F77 = $(CUSTOM_GCC_PATH)/bin/gfortran -m64 -ffixed-line-length-132
+    RPATH = -Wl,-rpath,/usr/local/oag/3rdParty/gcc-11.3.0/lib64
+    LDFLAGS += -static-libstdc++
+  endif
+endif
+
+ifeq ($(OS), Darwin)
+  DARWIN_ARCH_FLAGS =
+  ifeq ($(ARCH),x86_64)
+    DARWIN_ARCH_FLAGS += -m64
+  endif
+  CC = clang
+  CCC = clang++
+  AR = libtool -static -o
+  RANLIB = ranlib
+  #MAC_VERSION = -mmacosx-version-min=10.13
+  CFLAGS = -Wno-deprecated-non-prototype $(DARWIN_ARCH_FLAGS) -O3 -g -Wall -fPIC -fno-common $(MAC_VERSION) $(EXTRA_INC_DIRS)
+  CCFLAGS = -Wno-deprecated-non-prototype $(DARWIN_ARCH_FLAGS) -O3 -g -Wall -fPIC -fno-common -std=c++17 $(MAC_VERSION) $(EXTRA_INC_DIRS)
+  LDFLAGS = $(MAC_VERSION) -std=c++17
+  LIBRARY_SYS_LIBS = -lm
+  PROD_SYS_LIBS = -lm
+  OBJEXT = o
+  LIBEXT = a
+  LIBPRE = lib
+  EXEEXT =
+  LINKEXE = $(CCC)
+
+  F77 = gfortran-mp-14 -m64 -ffixed-line-length-132
+
+  #-Wno-deprecated-non-prototype  Suppresses warnings about deprecated non-prototype function declarations.
+  #-m64         Generates code for a 64-bit environment.
+  #-O3          Enables high-level optimizations, focusing on maximizing performance.
+  #-g           Includes debugging information in the compiled output.
+  #-Wall        Enables a broad set of warning messages to help identify potential issues.
+  #-fPIC        Generates position-independent code, which is essential for creating shared libraries.
+  #-fno-common  Treats uninitialized global variables as separate entities, preventing potential linker conflicts.
+  #-std=c++17   Specifies that the code should be compiled using the C++17 standard.
+
+endif
+
+ifeq ($(ARCH), x86_64)
+    CFLAGS += -mtune=generic
+    CCFLAGS += -mtune=generic
+endif
+
+ifeq ($(ARCH), arm64)
+  ifneq ($(OS), Darwin)
+    CFLAGS += -mcpu=native
+    CCFLAGS += -mcpu=native
+  endif
+endif
+
+# Adjust for Windows in a cygwin terminal
+ifeq ($(OS), Windows)
+  HDF_DIR = $(DD)../../hdf5/HDF5-1.14.6-win64
+  CC = cl
+  CCC = cl
+  CFLAGS = -nologo -FC -D__STDC__=0 -D_CRT_SECURE_NO_DEPRECATE -D_CRT_NONSTDC_NO_DEPRECATE -Ox -GL -Oy- -W3 -MD $(EXTRA_INC_DIRS)
+  CCFLAGS = -EHsc -GR -nologo -FC -D__STDC__=0 -D_CRT_SECURE_NO_DEPRECATE -D_CRT_NONSTDC_NO_DEPRECATE -Ox -GL -Oy- -W3 -MD $(EXTRA_INC_DIRS)
+  LINKEXE = link -nologo -LTCG -incremental:no -opt:ref -release -MACHINE:X64
+  LINKDLL = link -nologo -LTCG -incremental:no -opt:ref -release -MACHINE:X64 -subsystem:windows -dll
+  LINKLIB = lib -nologo
+  #PROD_SYS_LIBS = netapi32.lib
+  OBJEXT = obj
+  LIBEXT = lib
+  LIBPRE =
+  EXEEXT = .exe
+  #LIB_LINK_DIRS =
+  PYTHON_PREFIX := $(subst \,/,$(PYTHON_PREFIX))
+  PYTHON_EXEC_PREFIX := $(subst \,/,$(PYTHON_EXEC_PREFIX))
+  PYTHON_VERSION := $(subst \,/,$(PYTHON_VERSION))
+  PYTHON_INCLUDE_DIRS = -I$(PYTHON_PREFIX)/include
+
+
+
+  #-nologo       Suppresses the display of the startup banner and version information.
+  #-FC           Displays the full path of source code files in diagnostic messages.
+  #-D__STDC__=0  Defines the preprocessor macro __STDC__ with a value of 0. This can be useful when dealing with code that checks for standard compliance.
+  #-D_CRT_SECURE_NO_DEPRECATE   Defines the macro _CRT_SECURE_NO_DEPRECATE, which disables deprecation warnings for older, less secure C runtime functions.
+  #-D_CRT_NONSTDC_NO_DEPRECATE  Defines the macro _CRT_NONSTDC_NO_DEPRECATE, which suppresses deprecation warnings for non-standard C runtime functions.
+  #-Ox           Enables full optimization, including favoring speed over size and other aggressive optimizations.
+  #-GL           Enables whole program optimization, allowing the compiler to perform optimizations across all modules.
+  #-Oy-          Disables frame pointer omission, which can be useful for debugging purposes.
+  #-W3           Sets the warning level to 3, which displays all but the most verbose warnings.
+  #-MD           Specifies that the application should use the multithreaded, DLL version of the runtime library.
+  #-EHsc         Enables standard C++ exception handling, allowing the use of try, catch, and throw constructs. The s specifies synchronous exception handling, and the c indicates that extern C functions can throw exceptions.
+  #-GR           Enables run-time type information (RTTI), allowing the use of the dynamic_cast and typeid operators.
+  #-LTCG         Enables Link-Time Code Generation, allowing the linker to perform optimizations across the entire program.
+  #-incremental:no  Disables incremental linking, ensuring a full linking process.
+  #-opt:ref      Eliminates functions and data that are never referenced, reducing the size of the output file.
+  #-release      Indicates a release build, typically disabling debug information and enabling optimizations.
+  #-MACHINE:X64  Specifies the target platform as x64, indicating that the output is intended for 64-bit systems.
+  #-subsystem:windows  Specifies that the application is a Windows GUI application, which affects the entry point and subsystem settings.
+  #-dll          Instructs the linker to create a dynamic-link library (DLL) instead of an executable.
+
+endif
+
+ifeq ($(DEV_BUILD),1)
+  ifeq ($(OS), Windows)
+    CFLAGS := $(filter-out -Ox -GL,$(CFLAGS)) -Od -Zi
+    CCFLAGS := $(filter-out -Ox -GL,$(CCFLAGS)) -Od -Zi
+    LINKEXE := $(filter-out -LTCG -opt:ref -release,$(LINKEXE)) /debug
+    LINKDLL := $(filter-out -LTCG -opt:ref -release,$(LINKDLL)) /debug
+  else
+    CFLAGS := $(filter-out -O3 -g,$(CFLAGS)) -Og -g1
+    CCFLAGS := $(filter-out -O3 -g,$(CCFLAGS)) -Og -g1
+    ifeq ($(OS), Linux)
+      CFLAGS += -fno-var-tracking-assignments
+      CCFLAGS += -fno-var-tracking-assignments
+    endif
+  endif
+endif
+
+ifeq ($(USE_CCACHE),1)
+  ifeq ($(OS), Windows)
+    $(warning USE_CCACHE=1 is not supported by this Windows make profile; continuing without ccache)
+  else
+    CCACHE_AVAILABLE := $(shell command -v $(firstword $(CCACHE)) >/dev/null 2>&1 && echo 1)
+    ifeq ($(CCACHE_AVAILABLE),1)
+      CC := $(CCACHE) $(CC)
+      CCC := $(CCACHE) $(CCC)
+    else
+      $(warning USE_CCACHE=1 requested but '$(CCACHE)' was not found; continuing without ccache)
+    endif
+  endif
+endif
+
+ifeq ($(OS),Windows)
+OUTPUT = /Fo$@
+OUTPUTEXE = -out:$@
+else
+OUTPUT = -o $@
+OUTPUTEXE = -o $@
+endif
+else
+  $(error Unsupported RULES_PROFILE '$(RULES_PROFILE)'; expected medm, qtalh or striptool)
 endif

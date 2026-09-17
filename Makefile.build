@@ -1,4 +1,25 @@
-# Common build recipes. Keep synchronized with the sibling repository.
+# Common build recipes shared by MEDM, QtALH and StripTool.
+ifeq ($(RULES_PROFILE),striptool)
+.PHONY: prepare-output install-program
+
+$(BIN_DIR):
+	mkdir -p $(BIN_DIR)
+
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
+
+prepare-output: $(OBJ_DIR) $(BIN_DIR)
+
+install-program: $(PROGRAM) | prepare-output
+	cp -f $(PROGRAM) $(BIN_DIR)/
+	@if [ -n "$(EPICS_BIN_DIR)" ]; then echo cp -f $(PROGRAM) $(EPICS_BIN_DIR)/; fi
+	@if [ -n "$(EPICS_BIN_DIR)" ]; then mkdir -p $(EPICS_BIN_DIR); cp -f $(PROGRAM) $(EPICS_BIN_DIR)/; fi
+
+$(BIN_DIR)/%: % | $(BIN_DIR)
+	cp -f $< $@
+	@if [ -n "$(EPICS_BIN_DIR)" ]; then echo cp -f $@ $(EPICS_BIN_DIR)/; fi
+	@if [ -n "$(EPICS_BIN_DIR)" ]; then mkdir -p $(EPICS_BIN_DIR); cp -f $@ $(EPICS_BIN_DIR)/; fi
+else
 CLEAN_DIRS ?= $(OBJ_DIR)
 
 define make_prod_objs
@@ -108,7 +129,7 @@ ifeq ($(OS), Windows)
 	cp -f $@ $(BIN_DIR)/
 	@if [ -n "$(EPICS_BIN_DIR)" ]; then echo cp -f $@ $(EPICS_BIN_DIR)/; fi
 	@if [ -n "$(EPICS_BIN_DIR)" ]; then cp -f $@ $(EPICS_BIN_DIR)/; fi
-	
+
  ifeq ($(NO_DLL), 1)
   $(LIBRARY): $(LIBRARY_OBJS) $(LIBRARY_DEPS)
 	$(LINKLIB) -out:$(LIBRARY) $(LIB_LINK_DIRS) $(LIBRARY_OBJS) $(LIBRARY_LIBS) $(LIBRARY_LIBS_SDDS) $(LIBRARY_SYS_LIBS)
@@ -149,7 +170,7 @@ else
 	cp -f $@ $(LIB_DIR)/
 	@if [ -n "$(EPICS_LIB_DIR)" ]; then echo cp -f $@ $(EPICS_LIB_DIR)/; fi
 	@if [ -n "$(EPICS_LIB_DIR)" ]; then cp -f $@ $(EPICS_LIB_DIR)/; fi
-	
+
 ifeq ($(OS), Linux)
  $(PYTHON_SHARED_LIBRARY): $(LIBRARY_OBJS)
 	$(CCC) -o $@ -shared -fPIC -Wl,-h$@ $(LDFLAGS) $(LIBRARY_OBJS) $(LIBRARY_LIBS) $(LIBRARY_SYS_LIBS)
@@ -211,3 +232,4 @@ install-programs: $(FULLPROD) | $(BIN_DIR) $(EPICS_BIN_DIR)
 install: all
 distclean: clean
 	rm -f $(addprefix $(BIN_DIR)/,$(notdir $(FULLPROD)))
+endif
