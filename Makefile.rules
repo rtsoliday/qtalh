@@ -18,8 +18,17 @@ PYTHON ?= $(if $(filter Windows,$(OS)),python,python3)
 
 ifeq ($(RULES_PROFILE),striptool)
 OBJ_DIR ?= O.$(OS)-$(ARCH)
+ifeq ($(OS),Windows)
+# GNU Make parses the colon in an absolute drive-letter path as target syntax.
+# StripTool's component makefiles are one directory below the repository root,
+# so keep target paths relative on Windows while preserving the established
+# absolute paths on Unix-like hosts.
+BIN_DIR ?= ../bin/$(OS)-$(ARCH)
+LIB_DIR ?= ../lib/$(OS)-$(ARCH)
+else
 BIN_DIR ?= $(RULES_DIR)bin/$(OS)-$(ARCH)
 LIB_DIR ?= $(RULES_DIR)lib/$(OS)-$(ARCH)
+endif
 else
 DEV_BUILD ?= 0
 USE_CCACHE ?= 0
