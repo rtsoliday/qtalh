@@ -16,7 +16,29 @@ BUILD_FILES = Makefile $(RULES_DIR)Makefile.rules $(RULES_DIR)Makefile.build
 PKG_CONFIG ?= pkg-config
 PYTHON ?= $(if $(filter Windows,$(OS)),python,python3)
 
+ifneq ($(filter striptool qtalh,$(RULES_PROFILE)),)
+# Use the APS GCC 11.3 toolchain on Linux.  When invoked from the RHEL 8 build
+# shell, this uses the same GCC major version as the installed EPICS
+# libraries while retaining the shell's RHEL 8 glibc baseline.  Statically
+# linking the C++ runtime lets the result run without this private compiler
+# installation on the target host.
+ifeq ($(OS),Linux)
+CUSTOM_GCC_PATH ?= /usr/local/oag/3rdParty/gcc-11.3.0
+ifneq ($(and $(strip $(CUSTOM_GCC_PATH)),\
+              $(wildcard $(CUSTOM_GCC_PATH)/bin/gcc),\
+              $(wildcard $(CUSTOM_GCC_PATH)/bin/g++)),)
+CC = $(CUSTOM_GCC_PATH)/bin/gcc
+CCC = $(CUSTOM_GCC_PATH)/bin/g++
+CXX = $(CUSTOM_GCC_PATH)/bin/g++
+AR = $(CUSTOM_GCC_PATH)/bin/gcc-ar -rc
+RANLIB = $(CUSTOM_GCC_PATH)/bin/gcc-ranlib
+LDFLAGS += -static-libstdc++
+endif
+endif
+endif
+
 ifeq ($(RULES_PROFILE),striptool)
+
 OBJ_DIR ?= O.$(OS)-$(ARCH)
 ifeq ($(OS),Windows)
 # GNU Make parses the colon in an absolute drive-letter path as target syntax.
@@ -253,27 +275,30 @@ QT_VERSION ?= 6
 QT_DIR ?= C:/Qt/6.11.2/msvc2022_64
 QT_DIR := $(subst \,/,$(QT_DIR))
 HAVE_QT := $(if $(wildcard $(QT_DIR)/include/QtWidgets/QtWidgets),1)
-QT_CFLAGS = /DQT_NO_DEBUG /DQT_CORE_LIB /DQT_GUI_LIB /DQT_WIDGETS_LIB /DQT_PRINTSUPPORT_LIB \
+QT_CFLAGS = /DQT_NO_DEBUG /DQT_CORE_LIB /DQT_GUI_LIB /DQT_WIDGETS_LIB /DQT_NETWORK_LIB /DQT_PRINTSUPPORT_LIB \
             /I"$(QT_DIR)/include" /I"$(QT_DIR)/include/QtCore" \
             /I"$(QT_DIR)/include/QtGui" /I"$(QT_DIR)/include/QtWidgets" \
+            /I"$(QT_DIR)/include/QtNetwork" \
             /I"$(QT_DIR)/include/QtPrintSupport"
 QT_LIBS = "$(QT_DIR)/lib/Qt$(QT_VERSION)Widgets.lib" \
           "$(QT_DIR)/lib/Qt$(QT_VERSION)Gui.lib" \
+          "$(QT_DIR)/lib/Qt$(QT_VERSION)Network.lib" \
           "$(QT_DIR)/lib/Qt$(QT_VERSION)PrintSupport.lib" \
           "$(QT_DIR)/lib/Qt$(QT_VERSION)Core.lib"
 QT_TEST_CFLAGS = /DQT_TESTLIB_LIB /I"$(QT_DIR)/include/QtTest"
 QT_TEST_LIBS = "$(QT_DIR)/lib/Qt$(QT_VERSION)Test.lib"
 MOC_QT_CFLAGS = -DQT_NO_DEBUG -DQT_CORE_LIB -DQT_GUI_LIB \
-                -DQT_WIDGETS_LIB -DQT_PRINTSUPPORT_LIB -DQT_TESTLIB_LIB \
+                -DQT_WIDGETS_LIB -DQT_NETWORK_LIB -DQT_PRINTSUPPORT_LIB -DQT_TESTLIB_LIB \
                 -I"$(QT_DIR)/include" -I"$(QT_DIR)/include/QtCore" \
                 -I"$(QT_DIR)/include/QtGui" -I"$(QT_DIR)/include/QtWidgets" \
+                -I"$(QT_DIR)/include/QtNetwork" \
                 -I"$(QT_DIR)/include/QtPrintSupport" \
                 -I"$(QT_DIR)/include/QtTest"
 MOC = "$(QT_DIR)/bin/moc.exe"
 RCC = "$(QT_DIR)/bin/rcc.exe"
 else
-QT6_AVAILABLE := $(shell $(PKG_CONFIG) --exists Qt6Widgets 2>/dev/null && echo 1)
-QT5_AVAILABLE := $(shell $(PKG_CONFIG) --atleast-version=5.15 Qt5Widgets 2>/dev/null && echo 1)
+QT6_AVAILABLE := $(shell $(PKG_CONFIG) --exists Qt6Widgets Qt6Network 2>/dev/null && echo 1)
+QT5_AVAILABLE := $(shell $(PKG_CONFIG) --atleast-version=5.15 Qt5Widgets Qt5Network 2>/dev/null && echo 1)
 QMAKE6 ?= qmake6
 ifeq ($(QT6_AVAILABLE),)
 QT6_QMAKE_VERSION := $(shell $(QMAKE6) -query QT_VERSION 2>/dev/null)
@@ -282,7 +307,7 @@ QT6_HEADERS := $(shell $(QMAKE6) -query QT_INSTALL_HEADERS 2>/dev/null)
 QT6_LIB_DIR := $(shell $(QMAKE6) -query QT_INSTALL_LIBS 2>/dev/null)
 QT6_TOOL_DIRS := $(shell $(QMAKE6) -query QT_HOST_LIBEXECS 2>/dev/null) \
                  $(shell $(QMAKE6) -query QT_HOST_BINS 2>/dev/null)
-ifneq ($(wildcard $(QT6_HEADERS)/QtWidgets/QtWidgets),)
+ifneq ($(and $(wildcard $(QT6_HEADERS)/QtWidgets/QtWidgets),$(wildcard $(QT6_HEADERS)/QtNetwork/QtNetwork)),)
 QT6_QMAKE_AVAILABLE := 1
 endif
 endif
@@ -311,8 +336,8 @@ QT_TOOL_DIRS = $(shell $(PKG_CONFIG) --variable=host_bins $(QT_CORE_PACKAGE)) \
                $(shell $(PKG_CONFIG) --variable=libexecdir $(QT_CORE_PACKAGE)) \
                $(shell $(PKG_CONFIG) --variable=bindir $(QT_CORE_PACKAGE))
 endif
-QT_CFLAGS = $(call qt_cflags,Widgets PrintSupport)
-QT_LIBS = $(call qt_libs,Widgets PrintSupport)
+QT_CFLAGS = $(call qt_cflags,Widgets Network PrintSupport)
+QT_LIBS = $(call qt_libs,Widgets Network PrintSupport)
 QT_TEST_CFLAGS = $(call qt_cflags,Test)
 QT_TEST_LIBS = $(call qt_libs,Test)
 MOC_QT_CFLAGS = $(QT_CFLAGS) $(QT_TEST_CFLAGS)
