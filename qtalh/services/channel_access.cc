@@ -69,6 +69,7 @@ ChannelAccess::Channel* ChannelAccess::add(const QString& name) {
   auto c = p.get();
   channels.push_back(std::move(p));
   channelsByName[name].push_back(c);
+  noteDeadline(c);
   report(
       ca_create_channel(name.toLocal8Bit().constData(), connection, c, CA_PRIORITY_DEFAULT, &c->id),
       "Create " + name);
@@ -82,18 +83,21 @@ void ChannelAccess::monitor(const QString& n, std::function<void(Event)> callbac
   // A startup force can add monitoring before Engine::start reaches this row.
   // Reuse active as well as cancelled monitors for the same owner/PV pair;
   // other owners of the same PV must keep their independent subscriptions.
-  for (auto& channel : channels)
-    if (channel->name == n && channel->tag == tag && channel->alarm) {
-      c = channel.get();
-      break;
-    }
+  // The name index preserves creation order, avoiding a scan of every channel.
+  const auto named = channelsByName.constFind(n);
+  if (named != channelsByName.cend())
+    for (auto channel : *named)
+      if (channel->tag == tag && channel->alarm) {
+        c = channel;
+        break;
+      }
   if (!c)
     c = add(n);
   // Access callbacks are ignored during Cancel and CA need not repeat them on
   // Add. Defer the check until poll(): an inline alarm here would re-enter
   // Engine::applyMask before it has updated the parent group counts.
   if (c->cancelled)
-    c->recheckAccess = true;
+    c->recheckAccess = recheckPending = true;
   c->cancelled = false;
   c->tag = tag;
   c->alarm = std::move(callback);
@@ -101,6 +105,7 @@ void ChannelAccess::monitor(const QString& n, std::function<void(Event)> callbac
   // check when reusing that channel, even if it connected successfully earlier.
   if (!c->id || ca_state(c->id) != cs_conn)
     c->connectionDeadline = monotonicNow() + 1000;
+  noteDeadline(c);
   subscribe(c);
   ca_flush_io();
 }
@@ -118,12 +123,13 @@ void ChannelAccess::number(const QString& n, std::function<void(double)> callbac
   c->numericError.clear();
   if (!c->id || ca_state(c->id) != cs_conn)
     c->connectionDeadline = monotonicNow() + 1000;
+  noteDeadline(c);
   subscribe(c);
   ca_flush_io();
 }
 void ChannelAccess::prepare(const QString& n) {
-  for (auto& c : channels)
-    if (c->name == n && !c->cancelled) {
+  for (auto c : channelsByName.value(n))
+    if (!c->cancelled) {
       c->prepared = true;
       return;
     }
@@ -324,8 +330,8 @@ bool ChannelAccess::put(const QString& n, double v, WriteKind kind) {
   return false;
 }
 void ChannelAccess::cancel(const QString& n, const void* tag) {
-  for (auto& c : channels)
-    if (c->name == n && c->alarm && (!tag || c->tag == tag)) {
+  for (auto c : channelsByName.value(n))
+    if (c->alarm && (!tag || c->tag == tag)) {
       c->cancelled = true;
       c->recheckAccess = false;
       c->haveLast = false; // A later Add must not replay data from before Cancel.
@@ -353,6 +359,7 @@ void ChannelAccess::cancelNumbers(const void* tag) {
       // Retain that write connection, but release the obsolete input callback.
       c->tag = nullptr;
       c->cancelled = false;
+      noteDeadline(c);
       ++it;
     } else {
       if (c->id)
@@ -380,6 +387,8 @@ void ChannelAccess::clear() {
   ca_flush_io();
   channels.clear();
   channelsByName.clear();
+  recheckPending = false;
+  nextDeadline = 0;
   pendingSeverity.clear();
   initialAckWritten.clear();
   clearing = false;
@@ -390,29 +399,45 @@ void ChannelAccess::poll() {
   dispatching = true;
   ca_poll();
   auto now = monotonicNow();
-  for (auto& c : channels) {
-    if (!c->recheckAccess || c->cancelled)
-      continue;
-    c->recheckAccess = false;
-    if (c->id && ca_state(c->id) == cs_conn) {
-      // Cancel invalidates haveLast; healthy recovery must use fresh IOC data.
-      // Keeping this work on the channel also makes cancel/clear discard it.
-      access_rights_handler_args rights{};
-      rights.chid = c->id;
-      access(rights);
+  // Scan the channels only when an access recheck or connection deadline is
+  // pending; the periodic poll otherwise costs nothing per channel.
+  if (recheckPending) {
+    recheckPending = false;
+    for (auto& c : channels) {
+      if (!c->recheckAccess || c->cancelled)
+        continue;
+      c->recheckAccess = false;
+      if (c->id && ca_state(c->id) == cs_conn) {
+        // Cancel invalidates haveLast; healthy recovery must use fresh IOC data.
+        // Keeping this work on the channel also makes cancel/clear discard it.
+        access_rights_handler_args rights{};
+        rights.chid = c->id;
+        access(rights);
+      }
     }
   }
   // CA does not send an initial disconnect callback for a PV that never existed.
-  for (auto& c : channels)
-    if (!c->cancelled && c->connectionDeadline && now >= c->connectionDeadline) {
-      c->connectionDeadline = 0;
-      if (c->id && ca_state(c->id) == cs_conn)
-        continue;
-      if (c->alarm)
-        c->alarm({ALARM_NSTATUS, 4, 0, -1, "0"});
-      numericUnavailable(c.get(), "PV not connected");
-    }
+  if (nextDeadline && now >= nextDeadline) {
+    nextDeadline = 0;
+    for (auto& c : channels)
+      if (!c->cancelled && c->connectionDeadline && now >= c->connectionDeadline) {
+        c->connectionDeadline = 0;
+        if (c->id && ca_state(c->id) == cs_conn)
+          continue;
+        if (c->alarm)
+          c->alarm({ALARM_NSTATUS, 4, 0, -1, "0"});
+        numericUnavailable(c.get(), "PV not connected");
+      }
+    for (auto& c : channels)
+      noteDeadline(c.get());
+  }
   dispatching = false;
+}
+void ChannelAccess::noteDeadline(const Channel* c) {
+  // Deadlines cleared by a connection leave this stale; poll() then rescans once.
+  if (!c->cancelled && c->connectionDeadline &&
+      (!nextDeadline || c->connectionDeadline < nextDeadline))
+    nextDeadline = c->connectionDeadline;
 }
 void ChannelAccess::fd(void* data, int descriptor, int opened) {
   Q_UNUSED(data);

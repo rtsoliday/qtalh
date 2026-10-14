@@ -1,6 +1,7 @@
 #include "services/ipc.h"
 #include "services/logging.h"
 #include "services/log_recovery.h"
+#include "services/sha256.h"
 #include <QCryptographicHash>
 #include <QtEndian>
 #include <QLocale>
@@ -220,6 +221,30 @@ private slots:
   }
 #endif
 #ifndef Q_OS_WIN
+  void sha256MatchesQt() {
+    // Log fingerprints must stay byte-identical to QCryptographicHash, using
+    // both the hardware path (when available) and the portable fallback.
+    const bool hardware = Sha256::accelerated();
+    for (bool accelerated : {false, true}) {
+      if (accelerated && !hardware) continue;
+      Sha256::accelerated() = accelerated;
+      QByteArray data;
+      for (int size = 0; size <= 1100; ++size) {
+        const auto expected = QCryptographicHash::hash(data, QCryptographicHash::Sha256);
+        QCOMPARE(QByteArray(Sha256::of(data.constData(), data.size()).data(), 32), expected);
+        Sha256 split;
+        const int middle = size * 7 / 11;
+        split.add(data.constData(), middle);
+        split.add(data.constData() + middle, data.size() - middle);
+        QCOMPARE(QByteArray(split.finish().data(), 32), expected);
+        const auto record = QByteArray::number(size) + ':' + data;
+        QCOMPARE(QByteArray(Sha256::record(size, data.constData(), data.size()).data(), 32),
+                 QCryptographicHash::hash(record, QCryptographicHash::Sha256));
+        data += char(size * 131 + 7);
+      }
+    }
+    Sha256::accelerated() = hardware;
+  }
   void printer_data() {
     QTest::addColumn<QString>("binary");
     QTest::addColumn<QString>("color");

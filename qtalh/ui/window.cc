@@ -106,7 +106,9 @@ void applyInitialGeometry(QWidget* window, const QString& geometry) {
   window->move(position);
 }
 QString code(int s) {
-  return QString(" YRVE").mid(qBound(0, s, 4), 1);
+  static const QString codes[] = {QStringLiteral(" "), QStringLiteral("Y"), QStringLiteral("R"),
+                                  QStringLiteral("V"), QStringLiteral("E")};
+  return codes[qBound(0, s, 4)];
 }
 } // namespace
 AlarmModel::AlarmModel(Document* d, Engine* e, bool t, QObject* p)
@@ -150,10 +152,11 @@ QModelIndex AlarmModel::index(int row, int col, const QModelIndex& p) const {
     return {};
   if (!tree && p.isValid())
     return {};
-  auto list = children(node(p));
+  // A const copy shares the cached list; a mutable one would copy all rows here.
+  const auto list = children(node(p));
   if (row >= list.size())
     return {};
-  return createIndex(row, col, list[row]);
+  return createIndex(row, col, list.at(row));
 }
 QModelIndex AlarmModel::parent(const QModelIndex& i) const {
   if (!tree)
@@ -175,6 +178,11 @@ QVariant AlarmModel::data(const QModelIndex& i, int role) const {
   auto n = node(i);
   if (!n)
     return {};
+  // Painting and measuring request these per cell; they need no alarm state.
+  if (role == Qt::FontRole)
+    return font(i.column(), n->group);
+  if (role == Qt::TextAlignmentRole)
+    return int(i.column() < 2 ? Qt::AlignCenter : Qt::AlignLeft | Qt::AlignVCenter);
   const auto& s = engine->state(n);
   const auto shown = engine->presentation(n);
   int severity = shown.severity;
@@ -200,37 +208,18 @@ QVariant AlarmModel::data(const QModelIndex& i, int role) const {
       return severityColor(unack);
     if (i.column() == 1)
       return severityColor(severity);
+    static const QColor group("#b0c3ca"), channel("lightblue"), masked("blue");
     if (i.column() == 2)
-      return legacyAppearance() ? (n->group ? QColor("#b0c3ca") : QColor("lightblue")) : QColor();
+      return legacyAppearance() ? (n->group ? group : channel) : QColor();
     if (i.column() == 6 && coloredMasks) {
       // ALH colors <CDATL> when C, D, or A (including the timed H) is set.
       const bool silenced = n->group
                                 ? s.maskCounts[Cancel] || s.maskCounts[Disable] || s.maskCounts[Ack]
                                 : s.mask[Cancel] || s.mask[Disable] || s.mask[Ack];
       if (silenced || s.noAckUntil)
-        return QColor("blue");
+        return masked;
     }
   }
-  if (role == Qt::FontRole) {
-    if (!legacyAppearance()) {
-      auto f = QApplication::font();
-      if (i.column() == 2) f.setBold(n->group);
-      return f;
-    }
-    QFont f("monospace", 10);
-    f.setStyleHint(QFont::TypeWriter);
-    if (i.column() == 2) {
-      f = QFont("Helvetica", 10);
-      f.setBold(true);
-    }
-    f.setPixelSize(12);
-    f.setStretch(100);
-    if (i.column() != 2)
-      f.setStretch(85);
-    return f;
-  }
-  if (role == Qt::TextAlignmentRole)
-    return int(i.column() < 2 ? Qt::AlignCenter : Qt::AlignLeft | Qt::AlignVCenter);
   if (role != Qt::DisplayRole)
     return {};
   switch (i.column()) {
@@ -244,12 +233,13 @@ QVariant AlarmModel::data(const QModelIndex& i, int role) const {
   case 3:
     return n->group && std::any_of(n->children.begin(), n->children.end(),
                                    [](const auto& c) { return c->group; })
-               ? QString::fromUtf8("▶")
+               ? QStringLiteral("\u25B6")
                : QString();
   case 4:
-    return !n->option("GUIDANCE").isEmpty() || !n->option("GUIDANCE_TEXT").isEmpty() ? "G" : "";
+    return !n->option("GUIDANCE").isEmpty() || !n->option("GUIDANCE_TEXT").isEmpty()
+               ? QStringLiteral("G") : QString();
   case 5:
-    return n->option("COMMAND").isEmpty() ? "" : "P";
+    return n->option("COMMAND").isEmpty() ? QString() : QStringLiteral("P");
   case 6: {
     QString m = s.mask.text();
     if (n->group) {
@@ -279,6 +269,59 @@ QVariant AlarmModel::data(const QModelIndex& i, int role) const {
   }
   return {};
 }
+QFont AlarmModel::font(int column, bool group) const {
+  if (!legacyAppearance()) {
+    const auto base = QApplication::font();
+    if (column != 2) return base;
+    // Rebuild the name fonts only when the application font is replaced.
+    if (!styledFonts || !styledBase.isCopyOf(base)) {
+      styledBase = base;
+      for (int bold = 0; bold < 2; ++bold) {
+        styledName[bold] = base;
+        styledName[bold].setBold(bold);
+      }
+      styledFonts = true;
+    }
+    return styledName[group];
+  }
+  if (!legacyFonts) {
+    legacyText = QFont("monospace", 10);
+    legacyText.setStyleHint(QFont::TypeWriter);
+    legacyText.setPixelSize(12);
+    legacyText.setStretch(100);
+    legacyText.setStretch(85);
+    legacyName = QFont("Helvetica", 10);
+    legacyName.setBold(true);
+    legacyName.setPixelSize(12);
+    legacyName.setStretch(100);
+    legacyFonts = true;
+  }
+  return column == 2 ? legacyName : legacyText;
+}
+AlarmModel::RowSignature AlarmModel::signature(Node* n) const {
+  const auto& s = engine->state(n);
+  const auto shown = engine->presentation(n);
+  RowSignature result;
+  result.counts = shown.counts;
+  result.severity = shown.severity;
+  result.unack = shown.unack;
+  result.shelved = shown.shelved;
+  result.status = s.status;
+  result.beep = s.highestBeepThreshold;
+  for (int bit = 0; bit < 5; ++bit)
+    if (n->group ? s.maskCounts[bit] != 0 : s.mask[bit]) result.flags |= 1 << bit;
+  if (s.noAckUntil) result.flags |= 1 << 5;
+  if (s.shelf.until) result.flags |= 1 << 6;
+  if (n->group && std::any_of(n->children.begin(), n->children.end(),
+                              [](const auto& c) { return c->group; }))
+    result.flags |= 1 << 7;
+  if (!n->option("GUIDANCE").isEmpty() || !n->option("GUIDANCE_TEXT").isEmpty())
+    result.flags |= 1 << 8;
+  if (!n->option("COMMAND").isEmpty()) result.flags |= 1 << 9;
+  if (coloredMasks) result.flags |= 1 << 10;
+  result.label = n->label();
+  return result;
+}
 Qt::ItemFlags AlarmModel::flags(const QModelIndex& i) const {
   if (!i.isValid()) return Qt::NoItemFlags;
   auto flags = Qt::ItemIsEnabled | Qt::ItemIsSelectable;
@@ -300,6 +343,7 @@ QMimeData* AlarmModel::mimeData(const QModelIndexList& list) const {
 void AlarmModel::reset(Document* d, Engine* e) {
   beginResetModel();
   childCache.clear();
+  signatures.clear();
   doc = d;
   engine = e;
   group = d->root.get();
@@ -308,12 +352,14 @@ void AlarmModel::reset(Document* d, Engine* e) {
 void AlarmModel::setGroup(Node* n) {
   beginResetModel();
   childCache.clear();
+  signatures.clear();
   group = n;
   endResetModel();
 }
 void AlarmModel::setFilter(int f) {
   beginResetModel();
   childCache.clear();
+  signatures.clear();
   filter = f;
   endResetModel();
 }
@@ -353,9 +399,30 @@ void AlarmModel::refresh() {
         first = last + 1;
       }
     }
-    int count = rowCount(p);
-    if (count)
-      emit dataChanged(index(0, 0, p), index(count - 1, 8, p));
+    // Report each run of changed rows. Unchanged rows keep their pixels.
+    const auto rows = children(node(p));
+    const int count = rows.size();
+    int first = -1;
+    for (int row = 0; row <= count; ++row) {
+      bool changed = false;
+      if (row < count) {
+        auto next = signature(rows[row]);
+        auto previous = signatures.find(rows[row]);
+        if (previous == signatures.end()) {
+          signatures.insert(rows[row], std::move(next));
+          changed = true;
+        } else if (!(*previous == next)) {
+          *previous = std::move(next);
+          changed = true;
+        }
+      }
+      if (changed && first < 0) {
+        first = row;
+      } else if (!changed && first >= 0) {
+        emit dataChanged(index(first, 0, p), index(row - 1, 8, p));
+        first = -1;
+      }
+    }
     if (tree)
       for (int r = 0; r < count; ++r)
         visit(index(r, 0, p));
@@ -879,9 +946,7 @@ void Window::refresh() {
     }
   }
   if (options.filter) restoreVisibleSelection();
-  int disabledForces = 0;
-  for (auto node : doc.nodes())
-    if (engine->state(node).forceDisabled) ++disabledForces;
+  const int disabledForces = engine->disabledForces();
   disabledForceLabel->setText(disabledForces ? QString("Disabled forcePVs: %1").arg(disabledForces)
                                             : QString());
   refreshStatus();
@@ -1315,6 +1380,13 @@ void Window::menus() {
       if (shortcuts.contains(a->text()))
         a->setShortcut(QKeySequence(shortcuts[a->text()]));
   }
+  // Menu actions are created only here; selection changes enable them often.
+  const QStringList selectedActions = {"Acknowledge Alarm", "Display Guidance", "Start Related Process",
+      "Force Process Variable...", "Force Mask...", "Modify Mask Settings...", "Beep Severity...",
+      "Shelve Alarms...", "Unshelve Alarms", "NoAck for One Hour", "Properties Window"};
+  selectionActions.clear();
+  for (auto a : findChildren<QAction*>())
+    if (selectedActions.contains(a->text())) selectionActions.push_back(a);
   auto help = new QMenu("Help", this);
   if (!legacyAppearance()) menuBar()->addMenu(help);
   else {
@@ -1732,11 +1804,8 @@ void Window::rebuildSelectionDialog(const QString& key) {
   }
 }
 void Window::scheduleDialogSync() {
-  const QStringList selectedActions = {"Acknowledge Alarm", "Display Guidance", "Start Related Process",
-      "Force Process Variable...", "Force Mask...", "Modify Mask Settings...", "Beep Severity...",
-      "Shelve Alarms...", "Unshelve Alarms", "NoAck for One Hour", "Properties Window"};
-  for (auto action : findChildren<QAction*>())
-    if (selectedActions.contains(action->text())) action->setEnabled(selection != nullptr);
+  for (const auto& action : selectionActions)
+    if (action) action->setEnabled(selection != nullptr);
   if (!selection) {
     for (const auto& key : selectionDialogs.keys()) {
       const auto dialog = selectionDialogs.value(key).window;

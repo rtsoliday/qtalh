@@ -36,6 +36,11 @@ struct Node {
   std::vector<std::shared_ptr<Node>> children;
   QVector<Directive> directives;
   QString option(const QString& key, const QString& fallback = {}) const;
+  // Literal keys are compared without allocating a temporary key on hot paths.
+  QString option(QLatin1String key, const QString& fallback = {}) const;
+  template <std::size_t N> QString option(const char (&key)[N], const QString& fallback = {}) const {
+    return option(QLatin1String(key, int(N - 1)), fallback);
+  }
   void setOption(const QString& key, const QString& value);
   QString label() const;
 };

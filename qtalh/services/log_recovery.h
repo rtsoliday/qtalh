@@ -3,7 +3,7 @@
 // large scans run on a worker while the GUI spools new alarms separately.
 #include "log_identity.h"
 #include "log_timestamp.h"
-#include <QCryptographicHash>
+#include "sha256.h"
 #include <QDateTime>
 #include <QLocale>
 #include <QRegularExpression>
@@ -50,11 +50,15 @@ inline bool scan(QFile& file, qint64 begin, qint64 end, bool retain,
   qint64 offset = begin;
   bool active = false, lineStart = true, xml = false;
   QByteArray header, raw, ending;
-  QCryptographicHash hash(QCryptographicHash::Sha256);
+  Sha256 hash;
   auto finish = [&](qint64 endOffset) {
-    visit(index++, offset, endOffset - offset, header,
-          retain ? QByteArray() : hash.result(), std::move(raw));
-    raw.clear(); header.clear(); ending.clear(); hash.reset();
+    QByteArray digest;
+    if (!retain) {
+      const auto result = hash.finish();
+      digest = QByteArray(result.data(), int(result.size()));
+    }
+    visit(index++, offset, endOffset - offset, header, digest, std::move(raw));
+    raw.clear(); header.clear(); ending.clear(); hash = Sha256();
   };
   while (file.pos() < end) {
     if (stopped && stopped()) return true;
@@ -65,11 +69,11 @@ inline bool scan(QFile& file, qint64 begin, qint64 end, bool retain,
       if (active) finish(start);
       if (stopped && stopped()) return true;
       active = true; offset = start; xml = chunk.startsWith("<entry>");
-      if (!retain) hash.addData(QByteArray::number(index) + ':');
+      if (!retain) hash.addIndex(index);
     }
     if (header.size() < 256) header += chunk.left(256 - header.size());
     if (retain) raw += chunk;
-    else hash.addData(chunk);
+    else hash.add(chunk.constData(), std::size_t(chunk.size()));
     lineStart = chunk.endsWith('\n');
     // XML has an explicit terminator. Text following it is not a continuation
     // of that entry, and should still be reported as unrecognized by searches.
@@ -95,7 +99,7 @@ inline Result read(QFile& file, const QString& positionPath,
   for (int i = 0; i < 2; ++i) {
     const auto bytes = metadata.mid(i * 96, 96);
     if (bytes.size() != 96 || bytes.left(8) != "ALHPOS01" ||
-        QCryptographicHash::hash(bytes.left(64), QCryptographicHash::Sha256) != bytes.mid(64)) continue;
+        std::memcmp(Sha256::of(bytes.constData(), 64).data(), bytes.constData() + 64, 32)) continue;
     auto& slot = positions[i];
     slot.sequence = qFromBigEndian<quint64>(bytes.constData() + 8);
     slot.count = qFromBigEndian<quint64>(bytes.constData() + 16);

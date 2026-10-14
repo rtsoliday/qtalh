@@ -3541,6 +3541,71 @@ private slots:
     QCOMPARE(tree->model()->index(0, 0).data().toString().trimmed(), QString());
     QCOMPARE(resets.count(), 0);
   }
+  void incrementalRepaint() {
+    // Views repaint only changed rows. The displayed pixels must still match a
+    // complete render after alarm, selection and acknowledgement changes.
+    if (QGuiApplication::platformName() != "offscreen")
+      QSKIP("Screen grabs equal the backing store only on the offscreen platform");
+    auto w = std::make_unique<Window>(parseConfig(
+        "GROUP NULL root\nGROUP root first\nCHANNEL first a\nCHANNEL first b\nCHANNEL first c\n"
+        "GROUP root second\nCHANNEL second d\n"), options(false), false);
+    w->show();
+    QVERIFY(QTest::qWaitForWindowExposed(w.get()));
+    if (w->devicePixelRatioF() != 1) QSKIP("Pixel comparison requires an unscaled display");
+    auto& engine = w->alarmEngine();
+    const auto channels = w->document().channels();
+    auto tree = w->findChild<QTreeView*>("alarmTree");
+    auto group = w->findChild<QTreeView*>("groupContents");
+    QVERIFY(tree && group);
+    auto displayed = [&](const char* step) {
+      QTest::qWait(450); // Refresh timer, extent update and repaint.
+      const auto screen = w->screen()->grabWindow(w->winId()).toImage();
+      for (auto view : {tree, group}) {
+        const auto viewport = view->viewport();
+        const QRect area(viewport->mapTo(w.get(), QPoint()), viewport->size());
+        const auto actual = screen.copy(area).convertToFormat(QImage::Format_RGB32);
+        const auto expected = viewport->grab().toImage().convertToFormat(QImage::Format_RGB32);
+        if (actual != expected) {
+          QDir().mkpath(QString(TEST_OUTPUT));
+          const auto name = QString("%1/repaint-%2-%3-").arg(TEST_OUTPUT, step, view->objectName());
+          actual.save(name + "actual.png");
+          expected.save(name + "expected.png");
+          return false;
+        }
+      }
+      return true;
+    };
+    QVERIFY(displayed("initial"));
+    for (auto n : channels) engine.event(n, {0, 0, 0, 1, "0"});
+    QVERIFY(displayed("connected"));
+    engine.event(channels[1], {3, 2, 2, 1, "7"});
+    QVERIFY(displayed("alarm"));
+    group->setCurrentIndex(group->model()->index(0, 2));
+    QVERIFY(displayed("select-group"));
+    group->setCurrentIndex(group->model()->index(1, 2));
+    QVERIFY(displayed("reselect-group"));
+    const auto first = tree->model()->index(0, 0, tree->model()->index(0, 0));
+    QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, tree->visualRect(first.sibling(first.row(), 2)).center());
+    QVERIFY(displayed("open-group"));
+    QCOMPARE(group->model()->rowCount(), 3);
+    group->setCurrentIndex(group->model()->index(0, 2));
+    group->setCurrentIndex(group->model()->index(2, 2));
+    QVERIFY(displayed("select-channel"));
+    w->activateWindow();
+    if (QTest::qWaitForWindowActive(w.get())) {
+      group->setFocus();
+      QVERIFY(displayed("focus"));
+      tree->setFocus();
+      QVERIFY(displayed("focus-moved"));
+    }
+    engine.event(channels[2], {4, 1, 1, 1, "longer value text"});
+    engine.event(channels[3], {3, 2, 2, 1, "8"});
+    QVERIFY(displayed("more-alarms"));
+    engine.event(channels[1], {0, 0, 2, 1, "0"});
+    QVERIFY(displayed("transient"));
+    engine.acknowledge(w->document().root.get());
+    QVERIFY(displayed("acknowledged"));
+  }
   void largeGroup() {
     QString text = "GROUP NULL large\n";
     for (int i = 0; i < 10000; ++i)

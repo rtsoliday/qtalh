@@ -148,6 +148,8 @@ public:
   void cancelNoAckTimer(Node*);
   void forceValue(Node*, double);
   void setForceDisabled(Node*, bool);
+  // Nodes whose Force PV is disabled through configureForce/setForceDisabled.
+  int disabledForces() const { return forceDisabledCount; }
   void configureForce(Node*, const QVector<Directive>&, bool disabled);
   void setBeep(Node*, int);
   bool audible() const;
@@ -174,7 +176,7 @@ private:
   mutable QHash<const Node*, SnapshotMetadata> snapshotMetadataCache;
   mutable quint64 snapshotMetadataRevision = 0;
   const SnapshotMetadata& snapshotMetadata(const Node*) const;
-  ChannelUpdate snapshot(Node*, const State&) const;
+  ChannelUpdate snapshot(Node*, const State&, qint64 observedAt) const;
   void publish(Node*, const State&, ObservationCause);
   qint64 nextStateDeadline = 0, nextShelfDeadline = 0;
   bool externalStateAccess = false;
@@ -201,6 +203,8 @@ private:
   // Editable directives do not own live CALC variables or subscription lifetimes.
   QHash<Node*, std::shared_ptr<ForceRuntime>> forces;
   bool applyMask(Node*, Mask, bool automatic, Node* forceSource);
+  int forceDisabledCount = 0;
+  void markForceDisabled(Node*, bool);
   void discardForceWrites(Node*);
   void retryForceWrites();
   bool running = false;

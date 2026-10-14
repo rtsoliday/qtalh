@@ -3,6 +3,7 @@
 #include "engine.h"
 #include <QRegularExpression>
 #include <QScopedValueRollback>
+#include <QStringBuilder>
 #include <alarm.h>
 #include <algorithm>
 #include <cmath>
@@ -10,8 +11,9 @@
 #include <postfix.h>
 namespace alh {
 namespace {
-QStringList fields(QString s) {
-  return s.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+QStringList fields(const QString& s) {
+  static const QRegularExpression whitespace("\\s+");
+  return s.split(whitespace, Qt::SkipEmptyParts);
 }
 int highest(const std::array<int, 5>& a) {
   for (int i = 4; i > 0; --i)
@@ -473,8 +475,10 @@ void Engine::addHistory(Node* n, qint64 time) {
     historySecond = second;
     historyTimestamp = QDateTime::fromMSecsSinceEpoch(time).toString("dd-MMM-yyyy HH:mm:ss");
   }
-  history.prepend(historyTimestamp + " " + n->name + " " + statusName(s.status) + " " +
-                  severityName(s.severity) + " " + s.value);
+  // Build each entry in one allocation; transitions can arrive thousands of times a second.
+  history.prepend(historyTimestamp % QLatin1Char(' ') % n->name % QLatin1Char(' ') %
+                  statusName(s.status) % QLatin1Char(' ') % severityName(s.severity) %
+                  QLatin1Char(' ') % s.value);
   while (history.size() > 10)
     history.removeLast();
 }
@@ -784,7 +788,7 @@ void Engine::discardForceWrites(Node* source) {
       ++i;
 }
 void Engine::retryForceWrites() {
-  if (!pv || !options.global || options.passive)
+  if (!pv || !options.global || options.passive || pendingForceAckT.isEmpty())
     return;
   auto pendingWrites = pendingForceAckT.values();
   std::sort(pendingWrites.begin(), pendingWrites.end(), [](const PendingAckT& a, const PendingAckT& b) {
@@ -923,7 +927,7 @@ void Engine::configureForce(Node* n, const QVector<Directive>& directives, bool 
     if (n->directives[i].key.startsWith("FORCEPV")) n->directives.removeAt(i);
   n->directives += replacement;
   states[n].forceCurrent = -999;
-  states[n].forceDisabled = disabled;
+  markForceDisabled(n, disabled);
   if (!startForce(n)) reapplyForce(n);
   // ALH audits Force PV Apply with codes 9/10 even without a mask transition.
   // Other/code 0 would retain the file record but omit database delivery.
@@ -933,11 +937,16 @@ void Engine::configureForce(Node* n, const QVector<Directive>& directives, bool 
 void Engine::setForceDisabled(Node* n, bool disabled) {
   if (states[n].forceDisabled == disabled) return;
   if (disabled) discardForceWrites(n);
-  states[n].forceDisabled = disabled;
+  markForceDisabled(n, disabled);
   if (!disabled) reapplyForce(n);
   // Enable/disable-only Apply uses the same legacy Force PV audit codes.
   logOperation(n, disabled ? "Disable Force PV" : "Enable Force PV",
                n->group ? OperationKind::ForceGroupMask : OperationKind::ForceMask);
+}
+void Engine::markForceDisabled(Node* n, bool disabled) {
+  auto& s = states[n];
+  forceDisabledCount += int(disabled) - int(s.forceDisabled);
+  s.forceDisabled = disabled;
 }
 void Engine::rebuildBeep() {
   const auto nodes = document.nodes();
@@ -1063,16 +1072,18 @@ void Engine::publish(Node* n, const State& before, ObservationCause cause) {
   observers.erase(std::remove_if(observers.begin(), observers.end(),
       [](const Observer& o) { return o.lifetime.expired(); }), observers.end());
   if (!channelUpdated && observers.isEmpty()) return;
-  auto after = channelUpdate(n);
+  // Both snapshots describe the same observation instant.
+  const auto time = now();
+  auto after = snapshot(n, state(n), time);
   if (channelUpdated) channelUpdated(after);
   if (observers.isEmpty()) return;
-  AlarmObservation observation{snapshot(n, before), after, cause};
+  AlarmObservation observation{snapshot(n, before, time), after, cause};
   const auto listeners = observers;
   for (const auto& listener : listeners)
     if (!listener.lifetime.expired()) listener.callback(observation);
 }
 QString Engine::nodeIdentity(const Node* n) { return identity(n); }
-ChannelUpdate Engine::channelUpdate(Node* n) const { return snapshot(n, state(n)); }
+ChannelUpdate Engine::channelUpdate(Node* n) const { return snapshot(n, state(n), now()); }
 const Engine::SnapshotMetadata& Engine::snapshotMetadata(const Node* n) const {
   const auto* parent = n->parent ? &snapshotMetadata(n->parent) : nullptr;
   const quint64 parentRevision = parent ? parent->revision : 0;
@@ -1102,7 +1113,7 @@ const Engine::SnapshotMetadata& Engine::snapshotMetadata(const Node* n) const {
   // Copy parent fields before insertion, which may invalidate QHash references.
   return snapshotMetadataCache.insert(n, std::move(metadata)).value();
 }
-ChannelUpdate Engine::snapshot(Node* n, const State& s) const {
+ChannelUpdate Engine::snapshot(Node* n, const State& s, qint64 observedAt) const {
   const auto& metadata = snapshotMetadata(n);
   ChannelUpdate u;
   u.identity = metadata.identity; u.path = metadata.path; u.pv = metadata.pv;
@@ -1114,7 +1125,7 @@ ChannelUpdate Engine::snapshot(Node* n, const State& s) const {
   u.noAck = s.mask[Ack]; u.shelved = s.shelf.until != 0;
   u.available = s.initialized && !s.awaitingObservation && s.severity < 4 && !u.cancelled;
   u.communicationError = options.global && s.observedSeverity == ErrorSeverity;
-  u.observedAt = now();
+  u.observedAt = observedAt;
   return u;
 }
 void Engine::restoreLocalAcknowledgements(const QHash<QString, int>& saved) {

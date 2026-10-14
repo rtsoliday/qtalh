@@ -59,6 +59,10 @@ private:
   void deliverQueue(bool printer, const QByteArray&);
   bool reportQueueLoss(bool printer);
   QByteArray queueLossRecord(bool printer, const QString&, const QueueLoss&);
+  struct Identity {
+    QString user, host, display;
+  } operatorTokens;
+  const Identity& identity();
   LoggingClock clock;
   std::shared_ptr<AlarmLogFile> alarmFile;
   // Remember queued dated/previous destinations until teardown has flushed them,
@@ -83,5 +87,8 @@ private:
   void openFiles();
   void record(bool, const QString&, qint64, int = 0);
   QString dated(const QString&) const;
+  QString dateSuffix(const QDate&) const;
+  mutable QDate suffixDate;
+  mutable QString suffix;
 };
 } // namespace alh

@@ -49,6 +49,25 @@ private:
   mutable QHash<Node*, QVector<Node*>> childCache;
   QVector<Node*> children(Node*) const;
   bool visible(Node*) const;
+  // Every input of the displayed text and colors. refresh() reports only rows
+  // whose signature changed, so views repaint those rows instead of everything.
+  struct RowSignature {
+    std::array<int, 5> counts{};
+    int severity = 0, unack = 0, shelved = 0, status = 0, beep = 0, flags = 0;
+    QString label;
+    bool operator==(const RowSignature& o) const {
+      return counts == o.counts && severity == o.severity && unack == o.unack &&
+             shelved == o.shelved && status == o.status && beep == o.beep && flags == o.flags &&
+             label == o.label;
+    }
+  };
+  QHash<Node*, RowSignature> signatures;
+  RowSignature signature(Node*) const;
+  // Fonts are requested for every painted and measured cell.
+  QFont font(int column, bool group) const;
+  mutable QFont legacyText, legacyName, styledBase;
+  mutable std::array<QFont, 2> styledName;
+  mutable bool legacyFonts = false, styledFonts = false;
 };
 class Window : public QMainWindow {
 public:
@@ -98,6 +117,7 @@ private:
   QAction *undoAction = nullptr, *redoAction = nullptr;
   QPointer<QDialog> historyDialog, shelfListDialog, notificationDialog, analyticsDialog;
   QPointer<QMessageBox> errorPopup, exitPopup;
+  QVector<QPointer<QAction>> selectionActions;
   QPointer<QPlainTextEdit> historyText;
   struct SelectionDialog {
     QPointer<QDialog> window;

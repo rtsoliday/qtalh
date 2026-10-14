@@ -4,7 +4,7 @@
 #include "log_identity.h"
 #include "log_recovery.h"
 #include "ipc.h"
-#include <QCryptographicHash>
+#include "sha256.h"
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
@@ -19,6 +19,7 @@
 #include <future>
 #include <QtEndian>
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -36,8 +37,9 @@
 namespace alh {
 namespace {
 QString identityToken(QString value, const QString& fallback) {
+  static const QRegularExpression whitespace("\\s+");
   value = value.trimmed();
-  value.replace(QRegularExpression("\\s+"), "_");
+  value.replace(whitespace, "_");
   return value.isEmpty() ? fallback : value;
 }
 QString operatorIdentity() {
@@ -65,9 +67,15 @@ QString displayIdentity() {
 // unchanged; XML character references preserve embedded control characters.
 template<typename String>
 String singleLine(String text, bool xml) {
-  text.replace("\r", xml ? "&#13;" : "\\r");
-  text.replace("\n", xml ? "&#10;" : "\\n");
+  // Most records contain neither character; skip the pattern replacements.
+  if (text.contains(QLatin1Char('\r'))) text.replace("\r", xml ? "&#13;" : "\\r");
+  if (text.contains(QLatin1Char('\n'))) text.replace("\n", xml ? "&#10;" : "\\n");
   return text;
+}
+// Same result as out += s.leftJustified(width, ' '), without the temporary.
+void appendPadded(QString& out, const QString& s, int width) {
+  out += s;
+  if (s.size() < width) out.resize(out.size() + width - s.size(), QLatin1Char(' '));
 }
 
 }
@@ -77,6 +85,10 @@ String singleLine(String text, bool xml) {
 struct AlarmLogFile : std::enable_shared_from_this<AlarmLogFile> {
   QFile file;
   std::deque<QByteArray> records;
+  // Fingerprint hash of each ring slot. Replacing a record then hashes only the
+  // new record instead of also re-hashing the one it overwrites.
+  using Hash = Sha256::Digest;
+  std::deque<Hash> recordHashes;
   int limit = -1, nextRecord = 0;
   qint64 nextOffset = 0;
   bool master = false;
@@ -99,6 +111,7 @@ struct AlarmLogFile : std::enable_shared_from_this<AlarmLogFile> {
   qint64 pendingOffset = 0, pendingEnd = 0;
   QString spoolReadError;
   std::function<void(const QString&)> asyncError;
+  QPointer<Logging> asyncErrorOwner;
   quint64 positionSequence = 0;
   int nextPositionSlot = 1;
   // Two 96-byte slots: magic/version, sequence, count, next, ring fingerprint,
@@ -113,17 +126,22 @@ struct AlarmLogFile : std::enable_shared_from_this<AlarmLogFile> {
 #endif
   }
 
-  void includeRecord(int index, const QByteArray& record) {
+  static Hash recordHash(int index, const QByteArray& record) {
     // Include the physical slot in each hash so reordering invalidates metadata.
-    auto hash = QCryptographicHash::hash(QByteArray::number(index) + ':' + record,
-                                         QCryptographicHash::Sha256);
-    for (int i = 0; i < digest.size(); ++i)
-      digest[i] = char(digest.at(i) ^ hash.at(i));
+    return Sha256::record(index, record.constData(), record.size());
+  }
+  void toggle(const Hash& hash) {
+    auto bytes = digest.data();
+    for (int i = 0; i < int(hash.size()); ++i)
+      bytes[i] = char(bytes[i] ^ hash[i]);
   }
   void rebuildFingerprint() {
     digest.fill(0);
-    for (int i = 0; i < int(records.size()); ++i)
-      includeRecord(i, records[i]);
+    recordHashes.clear();
+    for (int i = 0; i < int(records.size()); ++i) {
+      recordHashes.push_back(recordHash(i, records[i]));
+      toggle(recordHashes.back());
+    }
   }
 
   QString positionPath() const {
@@ -179,27 +197,27 @@ struct AlarmLogFile : std::enable_shared_from_this<AlarmLogFile> {
         return positionFailure(QString::fromLocal8Bit(strerror(errno)));
     }
 #endif
-    QByteArray slot(PositionSlotSize, 0);
-    std::memcpy(slot.data(), "ALHPOS01", 8);
-    qToBigEndian<quint64>(sequence, slot.data() + 8);
-    qToBigEndian<quint64>(records.size(), slot.data() + 16);
-    qToBigEndian<quint64>(nextRecord, slot.data() + 24);
-    std::memcpy(slot.data() + 32, digest.constData(), 32);
-    const auto checksum = QCryptographicHash::hash(slot.left(64), QCryptographicHash::Sha256);
-    std::memcpy(slot.data() + 64, checksum.constData(), 32);
+    char slot[PositionSlotSize] = {};
+    std::memcpy(slot, "ALHPOS01", 8);
+    qToBigEndian<quint64>(sequence, slot + 8);
+    qToBigEndian<quint64>(records.size(), slot + 16);
+    qToBigEndian<quint64>(nextRecord, slot + 24);
+    std::memcpy(slot + 32, digest.constData(), 32);
+    const auto checksum = Sha256::of(slot, 64);
+    std::memcpy(slot + 64, checksum.data(), checksum.size());
     // The alarm record is already flushed. Keep one previous checkpoint intact
     // and reject torn/stale slots on recovery. Match the log's flush-only
     // durability: pwrite reaches the kernel without adding an fsync per event.
     const qint64 offset = nextPositionSlot * PositionSlotSize;
 #ifdef Q_OS_WIN
-    if (!positionFile.seek(offset) || positionFile.write(slot) != slot.size() ||
+    if (!positionFile.seek(offset) || positionFile.write(slot, PositionSlotSize) != PositionSlotSize ||
         !positionFile.flush())
       return positionFailure(positionFile.errorString());
 #else
     qint64 written = 0;
-    while (written < slot.size()) {
-      const auto count = ::pwrite(positionFd, slot.constData() + written,
-                                  slot.size() - written, offset + written);
+    while (written < PositionSlotSize) {
+      const auto count = ::pwrite(positionFd, slot + written,
+                                  PositionSlotSize - written, offset + written);
       if (count < 0 && errno == EINTR)
         continue;
       if (count <= 0)
@@ -387,7 +405,7 @@ struct AlarmLogFile : std::enable_shared_from_this<AlarmLogFile> {
         if (!file.resize(file.pos()) || !file.flush()) return 0;
         recoveryRewrite = false;
       }
-      limit = -1; records.clear();
+      limit = -1; records.clear(); recordHashes.clear();
       return appendRecord(bytes);
     }
     if (limit != maximum) {
@@ -434,13 +452,17 @@ struct AlarmLogFile : std::enable_shared_from_this<AlarmLogFile> {
     }
     bool rewrite = recoveryRewrite;
     recoveryRewrite = false;
+    const auto hash = recordHash(nextRecord, bytes);
     if (nextRecord < int(records.size())) {
       rewrite |= records[nextRecord].size() != bytes.size();
-      includeRecord(nextRecord, records[nextRecord]);
+      toggle(recordHashes[nextRecord]);
       records[nextRecord] = bytes;
-    } else
+      recordHashes[nextRecord] = hash;
+    } else {
       records.push_back(bytes);
-    includeRecord(nextRecord, bytes);
+      recordHashes.push_back(hash);
+    }
+    toggle(hash);
 
     bool ok = true;
     if (rewrite) {
@@ -698,8 +720,16 @@ Logging::~Logging() {
   if (options.broadcast && !options.editor)
     releaseLock(broadcastFd);
 }
+QString Logging::dateSuffix(const QDate& date) const {
+  // Records are written many times per day; format each date's suffix once.
+  if (date != suffixDate || suffix.isEmpty()) {
+    suffixDate = date;
+    suffix = date.toString(".yyyy-MM-dd");
+  }
+  return suffix;
+}
 QString Logging::dated(const QString& p) const {
-  return p + (options.dated ? QDate::currentDate().toString(".yyyy-MM-dd") : QString());
+  return options.dated ? p + dateSuffix(QDate::currentDate()) : p;
 }
 QString Logging::alarmPath() const {
   return dated(options.alarmFile);
@@ -787,7 +817,7 @@ void Logging::alarm(Node* n, const State& s, qint64 time) {
   if (options.noLog && !options.printerKey && !options.databaseKey)
     return;
   QString body;
-  QString transient = s.mask[AckT] ? "noackT" : "ackT";
+  const QString transient = s.mask[AckT] ? QStringLiteral("noackT") : QStringLiteral("ackT");
   if (options.xml) {
     auto tag = [](QString k, QString v) {
       return '<' + k + '>' + v.toHtmlEscaped() + "</" + k + '>';
@@ -801,14 +831,28 @@ void Logging::alarm(Node* n, const State& s, qint64 time) {
       body +=
           ' ' + tag("status-noack", severityName(s.unack)) + ' ' + tag("severity-noack", transient);
   } else {
-    body = padded(n->name, 28) + ' ';
-    if (options.engine.description)
-      body += padded(s.description, 28) + ' ' + padded(s.value.left(40), 40) + ' ';
-    body += padded(statusName(s.status), 12) + ' ' + padded(severityName(s.severity), 16);
-    if (options.engine.global)
-      body += ' ' + padded(severityName(s.unack), 12) + ' ' + padded(transient, 5);
-    if (!options.engine.description)
-      body += ' ' + padded(s.value.left(40), 40);
+    body.reserve(192);
+    appendPadded(body, n->name, 28);
+    body += QLatin1Char(' ');
+    if (options.engine.description) {
+      appendPadded(body, s.description, 28);
+      body += QLatin1Char(' ');
+      appendPadded(body, s.value.left(40), 40);
+      body += QLatin1Char(' ');
+    }
+    appendPadded(body, statusName(s.status), 12);
+    body += QLatin1Char(' ');
+    appendPadded(body, severityName(s.severity), 16);
+    if (options.engine.global) {
+      body += QLatin1Char(' ');
+      appendPadded(body, severityName(s.unack), 12);
+      body += QLatin1Char(' ');
+      appendPadded(body, transient, 5);
+    }
+    if (!options.engine.description) {
+      body += QLatin1Char(' ');
+      appendPadded(body, s.value.left(40), 40);
+    }
   }
   record(true, body, time, 1);
 }
@@ -854,13 +898,18 @@ void Logging::record(bool alarm, const QString& rawBody, qint64 time, int code) 
       : timestamp;
   if (options.xml)
     line = "<entry>" + queueTimestamp + ' ' + body + "</entry>\n";
-  else
-    line = padded(timestamp, 20) + " : " + body + '\n';
+  else {
+    line.reserve(24 + body.size());
+    appendPadded(line, timestamp, 20);
+    line += QLatin1String(" : ");
+    line += body;
+    line += QLatin1Char('\n');
+  }
   auto bytes = line.toLocal8Bit();
   if (!options.noLog) {
     auto destination = alarmFile;
     if (alarm && options.dated) {
-      const auto eventPath = options.alarmFile + QDateTime::fromMSecsSinceEpoch(time).date().toString(".yyyy-MM-dd");
+      const auto eventPath = options.alarmFile + dateSuffix(QDateTime::fromMSecsSinceEpoch(time).date());
       if (eventPath != openedAlarmPath) {
         destination = acquireAlarmFile(eventPath, false);
         if (!destination->file.isOpen() && error)
@@ -869,8 +918,10 @@ void Logging::record(bool alarm, const QString& rawBody, qint64 time, int code) 
     }
     auto& f = alarm ? destination->file : *opmodFile;
     if (f.isOpen()) {
-      if (alarm) {
+      if (alarm && destination->asyncErrorOwner != this) {
+        // Report asynchronous failures to the most recent writer.
         const QPointer<Logging> owner(this);
+        destination->asyncErrorOwner = owner;
         destination->asyncError = [owner](const QString& reason) {
           if (owner && owner->error) owner->error(reason);
           else qWarning("%s", qPrintable(reason));
@@ -897,11 +948,18 @@ void Logging::record(bool alarm, const QString& rawBody, qint64 time, int code) 
     QString msg = QString("%1 %2 %3  %4 %5 %6 %7 %8")
                       .arg(alarm ? 1 : 2)
                       .arg(code)
-                      .arg(identityToken(facility, "unknown_facility"), operatorIdentity(),
-                           identityToken(QHostInfo::localHostName(), "unknown_host"),
-                           displayIdentity(), queueTimestamp, body);
+                      .arg(identityToken(facility, "unknown_facility"), identity().user,
+                           identity().host, identity().display, queueTimestamp, body);
     deliverQueue(false, msg.toLocal8Bit());
   }
+}
+const Logging::Identity& Logging::identity() {
+  // Like ALH's getUserInfo, resolve once per writer instead of an account
+  // lookup (possibly through NSS/LDAP) for every database record.
+  if (operatorTokens.user.isEmpty())
+    operatorTokens = {operatorIdentity(), identityToken(QHostInfo::localHostName(), "unknown_host"),
+                      displayIdentity()};
+  return operatorTokens;
 }
 void Logging::setFacility(const QString& identifier, const QString& label) {
   // ALH assigned its database applicationName only once. Keep the active root
@@ -931,8 +989,7 @@ QByteArray Logging::queueLossRecord(bool printer, const QString& identifier, con
       .arg(loss.count).arg(loss.first).arg(loss.last);
   const auto header = printer ? QString("1 5 ")
       : QString("1 4 %1  %2 %3 %4 ").arg(token(identifier, 32),
-          token(operatorIdentity(), 12), token(identityToken(QHostInfo::localHostName(), "unknown_host"), 20),
-          token(displayIdentity(), 8));
+          token(identity().user, 12), token(identity().host, 20), token(identity().display, 8));
   // Legacy loss records terminate the printer diagnostic with a newline.
   return (header + date + ' ' + body + '\n').toLocal8Bit();
 }

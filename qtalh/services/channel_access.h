@@ -58,6 +58,10 @@ private:
   QHash<QString, double> pendingSeverity;
   QTimer timer;
   bool active = false, clearing = false;
+  // poll() scans channels only for pending access rechecks or connection deadlines.
+  bool recheckPending = false;
+  qint64 nextDeadline = 0;
+  void noteDeadline(const Channel*);
   Channel* add(const QString&);
   void subscribe(Channel*);
   void report(int, const QString&);

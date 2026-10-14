@@ -31,6 +31,12 @@ QString Node::option(const QString& key, const QString& fallback) const {
       return d.value;
   return fallback;
 }
+QString Node::option(QLatin1String key, const QString& fallback) const {
+  for (const auto& d : directives)
+    if (d.key == key)
+      return d.value;
+  return fallback;
+}
 void Node::setOption(const QString& key, const QString& value) {
   for (int i = directives.size() - 1; i >= 0; --i)
     if (directives[i].key == key)
@@ -61,14 +67,18 @@ QVector<Node*> Document::channels() const {
   return out;
 }
 QString severityName(int v) {
-  static const char* names[] = {"NO_ALARM", "MINOR", "MAJOR", "INVALID", "ERROR"};
+  // Static literals copy without allocation; these names are formatted per event.
+  static const QString names[] = {QStringLiteral("NO_ALARM"), QStringLiteral("MINOR"),
+                                  QStringLiteral("MAJOR"), QStringLiteral("INVALID"),
+                                  QStringLiteral("ERROR")};
   return names[qBound(0, v, 4)];
 }
 int severityValue(const QString& s) {
+  const auto upper = s.toUpper();
   for (int i = 0; i < 5; ++i)
-    if (s.toUpper() == severityName(i))
+    if (upper == severityName(i))
       return i;
-  if (s.toUpper() == "NO_ALARMS")
+  if (upper == QLatin1String("NO_ALARMS"))
     return 0;
   bool ok = false;
   int n = s.toInt(&ok);
@@ -77,33 +87,32 @@ int severityValue(const QString& s) {
   throw ParseError("Unknown severity: " + s);
 }
 QString statusName(int v) {
-  static const char* names[] = {"NO_ALARM",
-                                "READ",
-                                "WRITE",
-                                "HIHI",
-                                "HIGH",
-                                "LOLO",
-                                "LOW",
-                                "STATE",
-                                "COS",
-                                "COMM",
-                                "TIMEOUT",
-                                "HWLIMIT",
-                                "CALC",
-                                "SCAN",
-                                "LINK",
-                                "SOFT",
-                                "BAD_SUB",
-                                "UDF",
-                                "DISABLE",
-                                "SIMM",
-                                "READ_ACCESS",
-                                "WRITE_ACCESS",
-                                "NOT_CONNECTED",
-                                "NO_READ_ACCESS",
-                                "NO_WRITE_ACCESS"};
-  return v >= 0 && v < int(sizeof(names) / sizeof(*names)) ? QString::fromLatin1(names[v])
-                                                           : QString::number(v);
+  static const QString names[] = {QStringLiteral("NO_ALARM"),
+                                  QStringLiteral("READ"),
+                                  QStringLiteral("WRITE"),
+                                  QStringLiteral("HIHI"),
+                                  QStringLiteral("HIGH"),
+                                  QStringLiteral("LOLO"),
+                                  QStringLiteral("LOW"),
+                                  QStringLiteral("STATE"),
+                                  QStringLiteral("COS"),
+                                  QStringLiteral("COMM"),
+                                  QStringLiteral("TIMEOUT"),
+                                  QStringLiteral("HWLIMIT"),
+                                  QStringLiteral("CALC"),
+                                  QStringLiteral("SCAN"),
+                                  QStringLiteral("LINK"),
+                                  QStringLiteral("SOFT"),
+                                  QStringLiteral("BAD_SUB"),
+                                  QStringLiteral("UDF"),
+                                  QStringLiteral("DISABLE"),
+                                  QStringLiteral("SIMM"),
+                                  QStringLiteral("READ_ACCESS"),
+                                  QStringLiteral("WRITE_ACCESS"),
+                                  QStringLiteral("NOT_CONNECTED"),
+                                  QStringLiteral("NO_READ_ACCESS"),
+                                  QStringLiteral("NO_WRITE_ACCESS")};
+  return v >= 0 && v < int(sizeof(names) / sizeof(*names)) ? names[v] : QString::number(v);
 }
 std::shared_ptr<Node> cloneNode(const Node& n, Node* parent) {
   auto c = std::make_shared<Node>();

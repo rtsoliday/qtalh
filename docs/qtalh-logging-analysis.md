@@ -2,21 +2,21 @@
 
 ## Measured result
 
-The current [CPU comparison](qtalh-performance.md), measured on 2026-09-14,
+The current [CPU comparison](qtalh-performance.md), measured on 2026-10-14,
 uses 1,000 channels, nominally 2,000 normal/MAJOR transitions per second, global
 mode, X11 rendering, and five alternating 30-second logged trials per application.
 Each trial uses a fresh 2,000-record circular alarm log.
 
 | Application | Median process CPU |
 | --- | ---: |
-| ALH 1.2.35 | 3.2666% |
-| QtALH | 4.7666% |
+| ALH 1.2.35 | 1.3000% |
+| QtALH | 0.8000% |
 
-QtALH uses 45.9% more CPU in this workload, a difference of 1.5000 percentage
-points of one core. Every logged trial retained both normal and MAJOR records
-for all 1,000 channels. The comparison measures the complete application; it
-does not attribute the difference to a particular function or persistence step.
-The benchmark page provides raw results, host details, limitations, and reproduction.
+QtALH uses 38.5% less CPU in this workload, a difference of 0.5000 percentage
+points of one core. On the same host, the QtALH build before the October 2026
+optimizations used 1.5000%. Every logged trial retained both normal and MAJOR
+records for all 1,000 channels. The benchmark page provides raw results, host
+details, limitations, and reproduction.
 
 ## Implemented changes
 
@@ -34,6 +34,13 @@ log. Torn, truncated, and stale checkpoints are rejected; another valid slot
 remains usable. On Unix, short writes and EINTR are retried. Other errors are
 reported, and later writes can repair the metadata.
 
+Each ring slot's fingerprint hash is kept in memory, so a write hashes only the
+new record and the checkpoint's first 64 bytes, rather than also re-hashing the
+record it replaces. SHA-256 uses x86 SHA extensions when the CPU provides them
+and a portable implementation otherwise; both produce the same digests as
+`QCryptographicHash`, which processes input a byte at a time. Recovery and the
+live log browser use the same implementation for their scans.
+
 The metadata preserves the exact ring position when several records have the
 same timestamp. A stale fingerprint detects changes such as an external writer
 or truncation. Plain ALH logs remain supported; equal timestamps alone cannot
@@ -42,8 +49,9 @@ JSON metadata format is unsupported.
 
 Legacy [`filePrintf`](../alh/alLog.c) keeps a fixed-length circular cursor in
 memory and writes and flushes alarm records directly. QtALH also handles
-variable-length ring records and maintains recovery metadata. These are
-implementation differences, not a measured attribution of the current CPU gap.
+variable-length ring records and maintains recovery metadata. Before the
+October 2026 optimizations, profiling attributed about a third of QtALH's
+logged-update CPU to SHA-256 hashing for that metadata.
 
 Flushing does not add a per-record `fsync` or promise stronger power-loss
 durability. Log and checkpoint writes are separate operations, not an atomic

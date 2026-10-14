@@ -1,5 +1,6 @@
 // Motif-style presentation only; alarm state remains in the item model.
 #include "alarm_view.h"
+#include <QAccessible>
 #include <QHeaderView>
 #include <QApplication>
 #include <QClipboard>
@@ -13,7 +14,7 @@
 #include <QTimer>
 namespace alh {
 namespace {
-const QColor base("#b0c3ca"), light("#dde6e9"), dark("#5f696d");
+const QColor base("#b0c3ca"), light("#dde6e9"), dark("#5f696d"), red("red"), blue("blue");
 void bevel(QPainter* painter, const QRect& rect, const QColor& color, bool down = false,
            int width = 2) {
   painter->fillRect(rect, color);
@@ -76,7 +77,7 @@ void MotifButton::paintEvent(QPaintEvent* event) {
   painter.setPen(Qt::black);
   painter.drawRect(rect().adjusted(2, 2, -2, -2));
   painter.setFont(font());
-  painter.setPen(background == QColor("red") ? Qt::white : Qt::black);
+  painter.setPen(background == red ? Qt::white : Qt::black);
   painter.drawText(rect().adjusted(4, 2, -4, -2).translated(0, 2), Qt::AlignCenter, text());
 }
 QSize MotifCheckBox::sizeHint() const {
@@ -179,7 +180,13 @@ void AlarmView::setModel(QAbstractItemModel* next) {
   connect(next, &QAbstractItemModel::modelReset, this, [this] { scheduleExtent(); });
   connect(next, &QAbstractItemModel::rowsInserted, this, [this] { scheduleExtent(); });
   connect(next, &QAbstractItemModel::rowsRemoved, this, [this] { scheduleExtent(); });
-  connect(next, &QAbstractItemModel::dataChanged, this, [this] { scheduleExtent(); });
+  connect(next, &QAbstractItemModel::dataChanged, this,
+          [this](const QModelIndex& topLeft, const QModelIndex& bottomRight) {
+            if (!tree)
+              for (int row = topLeft.row(); row <= bottomRight.row(); ++row) extentRows.push_back(row);
+            scheduleExtent(false, false);
+          });
+  extentFull = extentRepaint = true;
   updateExtent();
 }
 int AlarmView::textAdvance(const QString& text, const QFont& font) const {
@@ -248,6 +255,33 @@ std::array<QRect, 9> AlarmView::cells(const QModelIndex& row, const QRect& bound
   add(8, textAdvance(field(row, 8).toString(), font) + 4);
   return result;
 }
+void AlarmView::dataChanged(const QModelIndex& topLeft, const QModelIndex& bottomRight,
+                            const QVector<int>& roles) {
+  // QAbstractItemView repaints the whole viewport for any multi-cell range.
+  // Each row here is painted as one item with uniform height and no editors,
+  // so repainting the reported rows is sufficient.
+  if (!topLeft.isValid() || !bottomRight.isValid() || topLeft.parent() != bottomRight.parent() ||
+      !uniformRowHeights()) {
+    QTreeView::dataChanged(topLeft, bottomRight, roles);
+    return;
+  }
+  if (isVisible()) {
+    const auto first = QTreeView::visualRect(topLeft.sibling(topLeft.row(), 0));
+    const auto last = QTreeView::visualRect(bottomRight.sibling(bottomRight.row(), 0));
+    const auto rows = first.united(last);
+    if (!rows.isEmpty()) viewport()->update(rows);
+  }
+#if QT_CONFIG(accessibility)
+  if (QAccessible::isActive()) {
+    QAccessibleTableModelChangeEvent event(this, QAccessibleTableModelChangeEvent::DataChanged);
+    event.setFirstRow(topLeft.row());
+    event.setFirstColumn(topLeft.column());
+    event.setLastRow(bottomRight.row());
+    event.setLastColumn(bottomRight.column());
+    QAccessible::updateAccessibility(&event);
+  }
+#endif
+}
 QRect AlarmView::visualRect(const QModelIndex& index) const {
   if (!index.isValid())
     return {};
@@ -315,19 +349,19 @@ void AlarmView::drawRow(QPainter* painter, const QStyleOptionViewItem& option,
         painter->setPen(Qt::black);
         painter->drawRect(rect.adjusted(2, 2, -2, -2));
       }
-      painter->setPen(color == QColor("red") ? Qt::white : Qt::black);
+      painter->setPen(color == red ? Qt::white : Qt::black);
       const int textOffset = column == 2 ? 2 : 0;
       painter->drawText(rect.adjusted(2, 0, -2, 0).translated(0, textOffset), Qt::AlignCenter, text);
     } else if (column == 1) {
       if (!text.trimmed().isEmpty()) {
         painter->fillRect(rect.adjusted(0, 2, 0, -2), color);
-        painter->setPen(color == QColor("red") ? Qt::white : Qt::black);
+        painter->setPen(color == red ? Qt::white : Qt::black);
         painter->drawText(rect, Qt::AlignCenter, text);
       }
     } else {
       if (column == 6 && color != base) {
         painter->fillRect(rect, color);
-        painter->setPen(color == QColor("blue") ? Qt::white : Qt::black);
+        painter->setPen(color == blue ? Qt::white : Qt::black);
       }
       painter->drawText(rect, Qt::AlignLeft | Qt::AlignVCenter, text);
     }
@@ -439,10 +473,23 @@ bool AlarmView::event(QEvent* event) {
   if (event->type() == QEvent::FontChange || event->type() == QEvent::ApplicationFontChange ||
       event->type() == QEvent::StyleChange || event->type() == QEvent::ScreenChangeInternal)
     invalidateTextWidths();
+  if (event->type() == QEvent::FocusIn || event->type() == QEvent::FocusOut)
+    updateRow(currentIndex());
   return result;
 }
+void AlarmView::updateRow(const QModelIndex& index) {
+  if (index.isValid()) viewport()->update(QTreeView::visualRect(index.sibling(index.row(), 0)));
+}
+void AlarmView::currentChanged(const QModelIndex& current, const QModelIndex& previous) {
+  QTreeView::currentChanged(current, previous);
+  // Styled rows draw selection and focus across the row, but Qt repaints only
+  // the current cell. Repaint both rows so neither keeps a stale highlight.
+  updateRow(current);
+  updateRow(previous);
+}
 bool AlarmView::viewportEvent(QEvent* event) {
-  if (!legacyAppearance() && event->type() == QEvent::Resize) scheduleExtent();
+  // Row extents do not depend on the viewport, which only sets the minimum width.
+  if (!legacyAppearance() && event->type() == QEvent::Resize) scheduleExtent(false);
   if (!legacyAppearance() && (event->type() == QEvent::MouseMove ||
       event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonRelease ||
       event->type() == QEvent::Leave)) {
@@ -516,7 +563,9 @@ void AlarmView::drawStyledRow(QPainter* painter, const QStyleOptionViewItem& opt
   }
   painter->restore();
 }
-void AlarmView::scheduleExtent() {
+void AlarmView::scheduleExtent(bool full, bool repaint) {
+  extentFull |= full;
+  extentRepaint |= repaint;
   if (extentPending)
     return;
   extentPending = true;
@@ -525,20 +574,51 @@ void AlarmView::scheduleExtent() {
     updateExtent();
   });
 }
+void AlarmView::setRowExtent(const QModelIndex& index) {
+  const int extent = cells(index, QRect(0, 0, 1, alarmRowHeight(this)))[8].right() + 10;
+  auto found = rowExtents.find(index.internalPointer());
+  if (found != rowExtents.end()) {
+    if (*found == extent) return;
+    auto count = extentCounts.find(*found);
+    if (--*count == 0) extentCounts.erase(count);
+    *found = extent;
+  } else {
+    rowExtents.insert(index.internalPointer(), extent);
+  }
+  ++extentCounts[extent];
+}
 void AlarmView::updateExtent() {
   if (!model())
     return;
   int width = 0;
-  std::function<void(QModelIndex)> visit = [&](QModelIndex parent) {
-    for (int row = 0; row < model()->rowCount(parent); ++row) {
-      auto index = model()->index(row, 0, parent);
-      width = qMax(width, cells(index, QRect(0, 0, 1, alarmRowHeight(this)))[8].right() + 10);
-      if (tree && isExpanded(index))
-        visit(index);
+  if (tree) {
+    std::function<void(QModelIndex)> visit = [&](QModelIndex parent) {
+      for (int row = 0; row < model()->rowCount(parent); ++row) {
+        auto index = model()->index(row, 0, parent);
+        width = qMax(width, cells(index, QRect(0, 0, 1, alarmRowHeight(this)))[8].right() + 10);
+        if (isExpanded(index))
+          visit(index);
+      }
+    };
+    visit({});
+  } else {
+    const int rows = model()->rowCount();
+    if (extentFull) {
+      rowExtents.clear();
+      extentCounts.clear();
+      for (int row = 0; row < rows; ++row) setRowExtent(model()->index(row, 0));
+    } else {
+      for (int row : extentRows)
+        if (row < rows) setRowExtent(model()->index(row, 0));
     }
-  };
-  visit({});
-  setColumnWidth(0, qMax(width, viewport()->width()));
-  viewport()->update();
+    width = extentCounts.isEmpty() ? 0 : qMax(0, extentCounts.lastKey());
+  }
+  extentFull = false;
+  extentRows.clear();
+  width = qMax(width, viewport()->width());
+  const bool repaint = extentRepaint || width != columnWidth(0);
+  extentRepaint = false;
+  setColumnWidth(0, width);
+  if (repaint) viewport()->update();
 }
 } // namespace alh

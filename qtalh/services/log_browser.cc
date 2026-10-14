@@ -2,7 +2,6 @@
 #include "log_identity.h"
 #include "log_recovery.h"
 #include "log_timestamp.h"
-#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -33,7 +32,7 @@ LogPosition logPosition(const QByteArray& data) {
   for (int i = 0; i < 2; ++i) {
     auto slot = data.mid(i * 96, 96);
     if (slot.size() != 96 || slot.left(8) != "ALHPOS01" ||
-        QCryptographicHash::hash(slot.left(64), QCryptographicHash::Sha256) != slot.mid(64)) continue;
+        std::memcmp(Sha256::of(slot.constData(), 64).data(), slot.constData() + 64, 32)) continue;
     auto sequence = qFromBigEndian<quint64>(slot.constData() + 8);
     auto count = qFromBigEndian<quint64>(slot.constData() + 16);
     auto next = qFromBigEndian<quint64>(slot.constData() + 24);
@@ -298,8 +297,8 @@ LiveLogUpdate readLiveLog(const LiveLogCursor& previous, const QString& path,
       }
       if (!row.endsWith('\n')) { cursor.partial = row; complete = false; break; }
       chronological.add(row);
-      auto hash = QCryptographicHash::hash(QByteArray::number(count) + ':' + row, QCryptographicHash::Sha256);
-      for (int i = 0; i < digest.size(); ++i) digest[i] = char(digest.at(i) ^ hash.at(i));
+      const auto hash = Sha256::record(count, row.constData(), std::size_t(row.size()));
+      for (int i = 0; i < digest.size(); ++i) digest[i] = char(digest.at(i) ^ hash[i]);
       for (int i = 0; i < 2; ++i)
         (count < positions[i].next ? beforeSlots[i] : afterSlots[i]).add(row);
       ++count;

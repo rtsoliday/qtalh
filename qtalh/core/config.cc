@@ -15,7 +15,13 @@
 namespace alh {
 namespace {
 QStringList words(const QString& s) {
-  return s.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+  // Compile once: every configuration line is split into words.
+  static const QRegularExpression whitespace("\\s+");
+  return s.split(whitespace, Qt::SkipEmptyParts);
+}
+bool forceCalcInput(const QString& name) {
+  static const QRegularExpression input("^FORCEPV_CALC_[A-F]$");
+  return input.match(name).hasMatch();
 }
 class Parser {
 public:
@@ -124,7 +130,7 @@ public:
         // commands, aliases and guidance retain their text. CALC is handled below.
         const bool pvFirst = name == "HEARTBEATPV" || name == "ACKPV" ||
                              name == "FORCEPV" || name == "SEVRPV" ||
-                             QRegularExpression("^FORCEPV_CALC_[A-F]$").match(name).hasMatch();
+                             forceCalcInput(name);
         if (pvFirst || name == "BEEPSEVERITY" || name == "BEEPSEVR" ||
             name == "ALARMCOUNTFILTER") {
           auto args = words(value);
@@ -167,7 +173,7 @@ public:
             "GUIDANCE",         "ALIAS",   "COMMAND", "SEVRCOMMAND",  "STATCOMMAND",
             "ALARMCOUNTFILTER", "BEEPSEVR"};
         if (!supported.contains(name) &&
-            !QRegularExpression("^FORCEPV_CALC_[A-F]$").match(name).hasMatch())
+            !forceCalcInput(name))
           fail("Unsupported directive " + key);
         if (name == "GUIDANCE" && value.isEmpty()) {
           QStringList body;
@@ -201,7 +207,7 @@ public:
           fail("Missing directive value");
         const auto args = words(value);
         if (name == "SEVRPV" ||
-            QRegularExpression("^FORCEPV_CALC_[A-F]$").match(name).hasMatch()) {
+            forceCalcInput(name)) {
           // ALH reads one token for these directives and ignores the remainder.
           // Normalize before storage so runtime, editor and save/reload never
           // treat trailing arguments as part of a PV name (or numeric constant).
@@ -262,7 +268,7 @@ public:
           // Accept trailing hash comments while retaining CALC's # (not-equal)
           // operator. Prefer a valid full expression, then the longest valid
           // expression before a whitespace-separated hash.
-          const QRegularExpression comment("\\s+#");
+          static const QRegularExpression comment("\\s+#");
           while (!valid(value)) {
             const int start = value.lastIndexOf(comment);
             if (start < 0)
