@@ -77,6 +77,7 @@ QVector<Topic> helpTopics() {
   page("masks.md", "masks", "Masks and automatic forcing", "Configuration");
   page("phoebus.md", "phoebus", "Phoebus XML import and export", "Configuration");
   section("configuration-format", "Configuration");
+  section("pvaccess-channels", "Configuration");
   section("command-line-reference", "Reference");
   section("choosing-an-appearance", "Reference");
   topics.append({"keyboard-shortcuts", "Keyboard shortcuts", "Reference",

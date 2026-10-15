@@ -36,7 +36,7 @@ This connects to the configured PV names using your EPICS CA environment, or
 the PVA environment for `pva://` names (see pvAccess channels under
 configuration format).
 Unresolved names display ERROR. `--validate` checks parsing only, with no GUI
-or CA connections; it does not check PV existence, access rights, audio, or log
+or PV connections; it does not check PV existence, access rights, audio, or log
 permissions. Help, version, and successful validation exit with status 0;
 option/configuration errors print to stderr and exit with status 1.
 
@@ -158,7 +158,7 @@ INCLUDE paths retain their separate configuration-directory rule.
 | --- | --- |
 | `-c` | Configuration editor; otherwise runtime monitoring. |
 | `-global` | Use IOC ACKS/ACKT fields for global acknowledgement. Default: local acknowledgement. |
-| `-S` | Passive mode: suppress CA writes and operator acknowledgement. |
+| `-S` | Passive mode: suppress CA and pvAccess writes and operator acknowledgement. |
 | `-caputackt` | Apply configured transient acknowledgement settings at startup in global active mode. |
 | `-D` | Disable alarm and operation **file** logging. Does not disable CA writes or configured helper queues. |
 | `-s` | Start with Silence Forever enabled; it can be changed in Setup. |
@@ -307,40 +307,6 @@ letters and save in canonical `CDATL` positions; short/reordered forms such as
 Disable alone does not suppress alarm-file records; use NoLog for that. Timed
 NoAck is an operator setting and displays `H` in the mask summary.
 
-### pvAccess channels
-
-A PV name starting with `pva://` connects through pvAccess; every other name
-uses Channel Access, so existing configurations are unchanged. The prefix
-works wherever a PV is named: `CHANNEL`, `$SEVRPV`, `$ACKPV`, `$HEARTBEATPV`,
-`$FORCEPV`, and CALC inputs. Configure the client with the usual
-`EPICS_PVA_ADDR_LIST`, `EPICS_PVA_AUTO_ADDR_LIST`, and related variables.
-
-```text
-CHANNEL Vacuum pva://example:pressure
-$SEVRPV pva://example:vacuumSeverity
-```
-
-An alarm channel reads `value` and `alarm` from a normative-type PV. Severity
-is the PVA alarm severity. The status is the alarm condition named in
-`alarm.message`, as an IOC's PVA server (QSRV) reports it (for example `HIHI`).
-Other messages map to `UDF` or `COMM` for undefined or driver alarms, and to
-`SOFT` otherwise. Values display with `display.precision`; enumerated values
-display their state names, and writes set the enumeration index. Descriptions
-(`-desc`) read `pva://record.DESC`, and the alarm-limit tools read record fields
-the same way, so they need an EPICS IOC behind the name.
-
-PVA alarms carry no ACKS or ACKT, and QSRV rejects writes to those record
-fields. In global mode, QtALH therefore keeps the acknowledgement state for a
-`pva://` channel in the running instance. It applies the IOC's rules: an alarm
-change raises the unacknowledged severity unless transient acknowledgement retains
-a higher one; acknowledging clears it; and NoAckT lowers it to the current
-severity. The configured `T` mask sets the initial transient setting. These
-acknowledgements are not shared with other QtALH instances or Channel Access
-clients, and the record's own ACKS is unchanged. Configure the bare record name
-(Channel Access) where acknowledgements must be shared. PVA reports no access
-rights, so `NO_READ_ACCESS` and `NO_WRITE_ACCESS` do not appear; write failures
-are reported when the server rejects them.
-
 `INCLUDE parent filename` attaches another file beneath the named parent.
 Every relative include, including nested includes, resolves against `-f` or
 `ALARMHANDLER` (default `.`), not the containing include's directory. For example,
@@ -416,6 +382,40 @@ file replacement, expands includes, normalizes masks, orders channels before
 child groups, and discards comments and original formatting. Runtime Save As
 exports masks without changing the original configuration's reload, lock, or
 broadcast identity; editor Save As changes the document filename.
+
+### pvAccess channels
+
+A PV name starting with `pva://` connects through pvAccess; every other name
+uses Channel Access, so existing configurations are unchanged. The prefix
+works wherever a PV is named: `CHANNEL`, `$SEVRPV`, `$ACKPV`, `$HEARTBEATPV`,
+`$FORCEPV`, and CALC inputs. Configure the client with the usual
+`EPICS_PVA_ADDR_LIST`, `EPICS_PVA_AUTO_ADDR_LIST`, and related variables.
+
+```text
+CHANNEL Vacuum pva://example:pressure
+$SEVRPV pva://example:vacuumSeverity
+```
+
+An alarm channel reads `value` and `alarm` from a normative-type PV. Severity
+is the PVA alarm severity. The status is the alarm condition named in
+`alarm.message`, as an IOC's PVA server (QSRV) reports it (for example `HIHI`).
+Other messages map to `UDF` or `COMM` for undefined or driver alarms, and to
+`SOFT` otherwise. Values display with `display.precision`; enumerated values
+display their state names, and writes set the enumeration index. Descriptions
+(`-desc_field`) read `pva://record.DESC`, and the alarm-limit tools read record fields
+the same way, so they need an EPICS IOC behind the name.
+
+PVA alarms carry no ACKS or ACKT, and QSRV rejects writes to those record
+fields. In global mode, QtALH therefore keeps the acknowledgement state for a
+`pva://` channel in the running instance. It applies the IOC's rules: an alarm
+change raises the unacknowledged severity unless transient acknowledgement retains
+a higher one; acknowledging clears it; and NoAckT lowers it to the current
+severity. The configured `T` mask sets the initial transient setting. These
+acknowledgements are not shared with other QtALH instances or Channel Access
+clients, and the record's own ACKS is unchanged. Configure the bare record name
+(Channel Access) where acknowledgements must be shared. PVA reports no access
+rights, so `NO_READ_ACCESS` and `NO_WRITE_ACCESS` do not appear; write failures
+are reported when the server rejects them.
 
 ## Logging and shared operation
 

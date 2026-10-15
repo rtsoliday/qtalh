@@ -28,7 +28,7 @@ bin/Linux-x86_64/qtalh -c examples/minimal.alhConfig
 The example contains two placeholder PVs. [Open your first configuration](./get-started/first-run) explains how to replace them and start monitoring. Linux, macOS, and Windows builds are supported.
 
 <div class="doc-note">
-<strong>Choosing a mode?</strong> Local mode keeps acknowledgements in your runtime. Global mode uses IOC acknowledgement fields. Passive mode prevents CA writes. <a href="./understand/alarm-lifecycle.html">Compare the modes →</a>
+<strong>Choosing a mode?</strong> Local mode keeps acknowledgements in your runtime. Global mode uses IOC acknowledgement fields. Passive mode prevents PV writes. <a href="./understand/alarm-lifecycle.html">Compare the modes →</a>
 </div>
 
 ## Choose your appearance

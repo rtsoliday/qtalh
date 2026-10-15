@@ -1,22 +1,24 @@
 # Architecture
 
-QtALH separates configuration and alarm state from Channel Access, file services, and widgets. This allows the alarm algorithms to be exercised with deterministic PV callbacks and clocks.
+QtALH separates configuration and alarm state from Channel Access, pvAccess, file services, and widgets. This allows the alarm algorithms to be exercised with deterministic PV callbacks and clocks.
 
 | Layer | Location | Responsibility |
 | --- | --- | --- |
-| Core | `qtalh/core/` | Document tree, legacy text parsing/writing, masks, alarm state, filtering, acknowledgement, and aggregation. |
-| Services | `qtalh/services/` | Channel Access, CLI options, logging, log search, locking, broadcasts, and helper protocols. |
-| UI | `qtalh/ui/` | Item models, custom row controls, runtime/editor windows, dialogs, and operator workflows. |
+| Core | `qtalh/core/` | Document tree, legacy text parsing/writing, Phoebus XML conversion, masks, alarm state, filtering, acknowledgement, and aggregation. |
+| Services | `qtalh/services/` | Channel Access, pvAccess, PV routing, CLI options, logging, log search, locking, broadcasts, and helper protocols. |
+| UI | `qtalh/ui/` | Item models, custom row controls, runtime/editor windows, dialogs, operator tools, and the bundled help. |
 | Entry points | `qtalh/main.cc`, `printer_main.cc`, `database_main.cc` | Main application and Unix queue helpers. |
 | Tests | `qtalh/tests/` | Core, UI, IOC, helper, visual, and benchmark fixtures. |
 
-Core uses Qt Core and EPICS calculation routines, with no widget or Channel Access dependency. `PvService` and clock/log/command callbacks are the test seams.
+Core uses Qt Core and EPICS calculation routines, with no widget, Channel Access, or pvAccess dependency. `PvService` and clock/log/command callbacks are the test seams.
 
 ## Alarm update flow
 
-A CA subscription delivers an event to the engine. The engine updates channel state, propagates group counts, and invokes eligible log/command/output callbacks. The UI refreshes its models separately, preserving transition processing even when drawing is deferred.
+A CA or pvAccess subscription delivers an event to the engine. The engine updates channel state, propagates group counts, and invokes eligible log/command/output callbacks. The UI refreshes its models separately, preserving transition processing even when drawing is deferred.
 
 Channel Access uses a shared non-preemptive context, socket notifiers, and a 100 ms fallback poll. Callbacks are serialized on the GUI thread, polling is guarded against reentrancy, and subscriptions are cleared before model destruction. Ownership distinguishes subscriptions for separate rows using the same PV.
+
+`PvRouter` sends names starting with `pva://` to the pvAccess client and all others to Channel Access, behind the same `PvService` interface. pvAccess callbacks arrive on EPICS threads; their values are queued and delivered on the GUI thread, matching the CA model. Because PVA alarms have no ACKS/ACKT, the pvAccess client keeps acknowledgement state for each `pva://` record in the runtime.
 
 Analytics and notifications subscribe independently through lifetime-managed
 engine observers. Observations carry before/after state, availability, suppression

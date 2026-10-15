@@ -14,6 +14,9 @@ Beyond ALH, the runtime offers an Active Alarms table, Find Alarm, Alarm Details
 (including the record's alarm limits read from the IOC), Runtime Overrides, an
 Alarm Summary panel, and Phoebus alarm XML import/export (also `--to-phoebus` and
 `--from-phoebus`). These work in every appearance, including `-style motif`.
+PV names prefixed with `pva://` are monitored over pvAccess; all other names
+use Channel Access as in ALH (see
+[pvAccess channels](docs/qtalh-user-guide.md#pvaccess-channels)).
 
 ## Documentation
 
@@ -226,11 +229,12 @@ CDEV and CMLOG are outside the Qt port's scope.
 ## Validation
 
 ```sh
-make -j4 test-qtalh              # core, offscreen UI, IOC, and helper tests
+make -j4 test-qtalh              # core, offscreen UI, IOC, PVA, helper, notification, analytics
 make -C qtalh test-core
 make -C qtalh test-ui            # offscreen UI; native macOS child for audio
 make -C qtalh test-ui-motif      # the same UI suite with the classic appearance
 make -C qtalh test-ioc           # starts its own softIocPVA on loopback
+make -C qtalh test-pva           # pvAccess callbacks with a test provider, no IOC
 make -C qtalh test-helpers       # requires legacy binaries and local rpcbind
 make -C qtalh test-visual        # requires built legacy ALH, X11, xwininfo, softIoc
 ```
@@ -275,8 +279,8 @@ features, evidence, protocol details, and outstanding parity validation.
 
 `qtalh/core/` owns configuration and alarm state. It has no widget or Channel
 Access dependency; `PvService` and clock/log/command callbacks allow deterministic
-tests. `qtalh/services/` implements Channel Access, logging, locking and helper
-protocols. `qtalh/ui/` contains item models, delegates, windows and dialogs.
+tests. `qtalh/services/` implements Channel Access, pvAccess (for `pva://`
+names), logging, locking and helper protocols. `qtalh/ui/` contains item models, delegates, windows and dialogs.
 Channel Access uses a shared non-preemptive context, socket notifiers and a
 100 ms fallback poll, with serialized callbacks and explicit subscription cleanup.
 

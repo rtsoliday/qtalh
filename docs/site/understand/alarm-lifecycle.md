@@ -17,16 +17,16 @@ An acknowledgement can also occur while the alarm is still active. It does not w
 | Mode | Acknowledgement | Configured output PVs |
 | --- | --- | --- |
 | Local (default) | Maintained in this QtALH runtime. | Heartbeat, severity, and acknowledgement PVs are not written. |
-| Global (`-global`) | Uses IOC ACKS/ACKT fields. | Active mode can write configured outputs when permitted. |
-| Passive (`-S`, with either local or global) | Operator acknowledgement is disabled; no CA writes. | Writes are suppressed. |
+| Global (`-global`) | Uses IOC ACKS/ACKT fields for Channel Access channels. `pva://` channels keep acknowledgement in this runtime. | Active mode can write configured outputs when permitted. |
+| Passive (`-S`, with either local or global) | Operator acknowledgement is disabled; no CA or pvAccess writes. | Writes are suppressed. |
 
-`-caputackt` applies configured ACKT settings at startup in global active mode. Access-right failures remain visible; severity-output and automatic Force PV ACKT retries have specific behavior described in [Compatibility](/understand/compatibility).
+`-caputackt` applies configured ACKT settings at startup in global active mode. PVA alarms have no ACKS/ACKT fields, so [`pva://` channels](/reference/configuration#pvaccess-channels) apply the same acknowledgement rules locally. Access-right failures remain visible; severity-output and automatic Force PV ACKT retries have specific behavior described in [Compatibility](/understand/compatibility).
 
 ## Separate the controls
 
 - **Silence (`-s`)** controls sound.
 - **Disable file logging (`-D`)** controls alarm and operation file writes; configured helper queues retain their behavior.
-- **Passive (`-S`)** controls CA writes and operator acknowledgement.
+- **Passive (`-S`)** controls CA/pvAccess writes and operator acknowledgement.
 - **Display filters** control which rows appear.
 
 These controls do not disable configured shell commands. Commands can run for configured severity/status transitions, and related-process actions run on request. `MASTER_ONLY` and stop-logging broadcasts impose additional command restrictions.

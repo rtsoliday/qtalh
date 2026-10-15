@@ -14,10 +14,10 @@ From the repository root on Linux/macOS:
 make -j4 test-qtalh QT_VERSION=5
 ```
 
-This builds legacy programs if Motif is detected and runs core, UI, IOC, and
-helper suites. It does **not** run visual comparisons. The equivalent
+This builds legacy programs if Motif is detected and runs the core, modern and
+classic UI, IOC, pvAccess, helper, notification, and analytics suites. It does **not** run visual comparisons. The equivalent
 `make -C qtalh test` builds Qt prerequisites but does not build legacy helpers.
-Individual targets allow testing the Qt core/UI/CA without Motif:
+Individual targets allow testing the Qt core/UI/CA/PVA without Motif:
 
 | Target (use `make -C qtalh TARGET`) | Coverage and extra prerequisites |
 | --- | --- |

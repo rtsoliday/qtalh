@@ -1,6 +1,6 @@
 # Environment variables
 
-QtALH reads its own path/font settings and uses EPICS Base and Qt for connection and display settings. Explicit command-line path/font options take precedence over the corresponding QtALH defaults.
+QtALH reads its own path/font settings and uses EPICS Base (Channel Access and pvAccess) and Qt for connection and display settings. Explicit command-line path/font options take precedence over the corresponding QtALH defaults.
 
 | Variable | Purpose |
 | --- | --- |
@@ -12,12 +12,15 @@ QtALH reads its own path/font settings and uses EPICS Base and Qt for connection
 | `EPICS_CA_REPEATER_PORT` | CA repeater port. |
 | `EPICS_CAS_INTF_ADDR_LIST` | IOC server interfaces; the tutorial uses loopback only. |
 | `EPICS_CAS_BEACON_ADDR_LIST` | IOC beacon destinations. |
+| `EPICS_PVA_ADDR_LIST` | pvAccess server search addresses for `pva://` channels. |
+| `EPICS_PVA_AUTO_ADDR_LIST` | pvAccess automatic address discovery. |
+| `EPICS_PVA_BROADCAST_PORT` | pvAccess search (UDP) port. |
 | `DISPLAY` | X11 display, also selectable with `-display`. |
 | `QT_QPA_PLATFORM` | Qt platform backend, such as `xcb` or `offscreen`. |
 | `QT_PLUGIN_PATH` | Additional Qt plugin directories, including a split Multimedia SDK. |
 | `COMSPEC` | Windows command shell; defaults to `cmd.exe`. |
 
-Other standard `EPICS_CA_*` variables are handled by EPICS Base. Build-time variables such as `EPICS_BASE`, `EPICS_HOST_ARCH`, `QT_VERSION`, and `QT_DIR` are covered in [Install & build](/get-started/install).
+Other standard `EPICS_CA_*` and `EPICS_PVA_*` variables are handled by EPICS Base. Names without the `pva://` prefix use Channel Access; see [pvAccess channels](/reference/configuration#pvaccess-channels). Build-time variables such as `EPICS_BASE`, `EPICS_HOST_ARCH`, `QT_VERSION`, and `QT_DIR` are covered in [Install & build](/get-started/install).
 
 ## Path resolution
 

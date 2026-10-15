@@ -105,6 +105,8 @@ private slots:
     QVERIFY(!splitter->childrenCollapsible());
     QVERIFY(browser->toPlainText().contains("$FORCEPV"));
     QVERIFY(browser->toPlainText().contains("100,000 records or 10 MiB"));
+    // A subsection must not truncate the configuration topic's INCLUDE and directive text.
+    QVERIFY(browser->toPlainText().contains("Include cycles and excessive nesting are errors"));
     QVERIFY(!browser->toPlainText().contains(":::"));
     QHash<QString, int> anchors;
     QSet<QString> links;
@@ -136,6 +138,7 @@ private slots:
       QVERIFY(qAbs(browser->verticalScrollBar()->value() - qMin(y, browser->verticalScrollBar()->maximum())) <= 2);
     }
     QVERIFY(topics >= 20);
+    QVERIFY(anchors.contains("pvaccess-channels"));
     // Following the scrollbar and an internal documentation link updates the topic.
     auto position = anchors.value("log-browser");
     auto block = browser->document()->findBlock(position);
