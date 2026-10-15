@@ -1,12 +1,20 @@
 // Exercise PVA callback ordering and failures without a network server.
 #include "services/pv_access.h"
 #include <QtTest>
+#ifdef _MSC_VER
+// EPICS PVString intentionally inherits deserialize through virtual bases.
+#pragma warning(push)
+#pragma warning(disable: 4250)
+#endif
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #endif
 #include <pv/clientFactory.h>
 #include <pv/pvAccess.h>
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif

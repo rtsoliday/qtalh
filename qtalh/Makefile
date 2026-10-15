@@ -6,6 +6,8 @@ HELP_DOCS = ../docs/qtalh-user-guide.md $(addprefix ../docs/site/,\
             operate/analytics.md configure/editor.md configure/masks.md \
             configure/phoebus.md)
 ifeq ($(OS),Windows)
+# Native Windows Base uses DLL import libraries, including pvData static data.
+CPPFLAGS += -DEPICS_CALL_DLL
 CORE = core/analytics.cc core/model.cc core/config.cc core/engine.cc core/notifications.cc core/phoebus.cc
 SERVICES = services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/pv_access.cc services/pv_router.cc services/options.cc services/logging.cc services/ipc.cc
 GUI = ui/analytics.cc ui/notifications.cc ui/appearance.cc ui/workflows.cc ui/tools.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc ui/help.cc ui/about_banner.cc
@@ -13,8 +15,9 @@ OBJECTS = $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.obj) $(SERVICES:.cc=.obj) $(GUI:.c
 # MSVC does not emit GCC-style .d files. Rebuild on project header changes.
 HEADERS = $(wildcard core/*.h services/*.h ui/*.h)
 LIBS = advapi32.lib $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(LDLIBS)
-# pvData headers do not build in MSVC standards-conformance mode (as in QtEDM).
-$(OBJ_DIR)/services/pv_access.obj $(OBJ_DIR)/tests/test_pva.obj: CXXFLAGS := $(filter-out /permissive-,$(CXXFLAGS))
+# pvData needs delayed template parsing, while Qt 6.11 requires /permissive-.
+# Limit the EPICS compatibility option to translation units using its headers.
+$(OBJ_DIR)/services/pv_access.obj $(OBJ_DIR)/tests/test_pva.obj: CXXFLAGS += /Zc:twoPhase-
 
 .PHONY: all clean distclean test test-core test-ui test-ioc test-helpers test-visual benchmark-cpu FORCE
 PROD = qtalh

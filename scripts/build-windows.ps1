@@ -51,8 +51,11 @@ if ($Target -ne 'clean') {
   foreach ($tool in @('moc.exe', 'rcc.exe')) {
     $null = Require-File (Join-Path $qtRoot "bin\$tool")
   }
-  foreach ($lib in @('ca', 'Com')) {
+  foreach ($lib in @('ca', 'Com', 'pvAccess', 'pvData')) {
     $null = Require-File (Join-Path $epicsRoot "lib\$epicsArch\$lib.lib")
+  }
+  if ($Target -eq 'test') {
+    $null = Require-File (Join-Path $epicsRoot "bin\$epicsArch\softIocPVA.exe")
   }
   $vcvars = if ($env:VSINSTALLDIR) { Join-Path $env:VSINSTALLDIR 'VC\Auxiliary\Build\vcvars64.bat' }
   if (-not $vcvars -or -not (Test-Path -LiteralPath $vcvars)) {

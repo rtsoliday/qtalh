@@ -4,6 +4,11 @@
 // non-preemptive delivery.
 #include "pv_access.h"
 #include <alarm.h>
+#ifdef _MSC_VER
+// EPICS PVString intentionally inherits deserialize through virtual bases.
+#pragma warning(push)
+#pragma warning(disable: 4250)
+#endif
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
@@ -12,6 +17,9 @@
 #include <pv/createRequest.h>
 #include <pv/pvAccess.h>
 #include <pv/pvData.h>
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
@@ -161,7 +169,7 @@ PvAccess::Sample extract(const pvd::PVStructure& data, const pvd::BitSet* change
   if (changed)
     s.valueChanged = changed->get(0) ||
         [&] {
-          const auto bit = changed->nextSetBit(value->getFieldOffset());
+          const auto bit = changed->nextSetBit(static_cast<pvd::uint32>(value->getFieldOffset()));
           return bit >= 0 && size_t(bit) < value->getNextFieldOffset();
         }();
   switch (value->getField()->getType()) {
@@ -423,14 +431,14 @@ void PvAccess::sendPut(Channel* c) {
         throw std::runtime_error("PV has no value field");
       if (auto scalar = std::dynamic_pointer_cast<pvd::PVScalar>(value)) {
         scalar->putFrom<double>(v);
-        bits->set(scalar->getFieldOffset());
+        bits->set(static_cast<pvd::uint32>(scalar->getFieldOffset()));
       } else if (auto array = std::dynamic_pointer_cast<pvd::PVScalarArray>(value)) {
         pvd::shared_vector<double> one(1, v);
         array->putFrom<double>(pvd::freeze(one));
-        bits->set(array->getFieldOffset());
+        bits->set(static_cast<pvd::uint32>(array->getFieldOffset()));
       } else if (auto index = data->getSubField<pvd::PVInt>("value.index")) {
         index->put(static_cast<pvd::int32>(v));
-        bits->set(index->getFieldOffset());
+        bits->set(static_cast<pvd::uint32>(index->getFieldOffset()));
       } else {
         throw std::runtime_error("unsupported value type");
       }
@@ -657,7 +665,7 @@ void PvAccess::noteDeadline(const Channel* c) {
       (nextDeadline && c->connectionDeadline >= nextDeadline))
     return;
   nextDeadline = c->connectionDeadline;
-  deadlineTimer.start(int(qBound<qint64>(0, nextDeadline - monotonicNow(), 1000)));
+  deadlineTimer.start(int(qBound(qint64(0), nextDeadline - monotonicNow(), qint64(1000))));
 }
 void PvAccess::checkDeadlines() {
   const auto now = monotonicNow();

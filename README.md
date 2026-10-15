@@ -71,9 +71,9 @@ The output is `bin/Windows-x86_64/qtalh.exe`. To run it, add the Qt, Multimedia
 and EPICS `bin` directories to `PATH`; add the Qt and Multimedia `plugins`
 directories to `QT_PLUGIN_PATH` when using a split SDK. The launcher sets these
 for its test processes. For distribution, use Qt's `windeployqt` and include the
-EPICS `ca.dll` and `Com.dll` runtime libraries.
+EPICS `ca.dll`, `Com.dll`, `pvAccess.dll`, and `pvData.dll` runtime libraries.
 
-Windows supports the main Qt application, Channel Access, alarm audio, file
+Windows supports the main Qt application, Channel Access, pvAccess, alarm audio, file
 logging, master/slave locks and file broadcasts. Configured shell commands use
 `cmd.exe /d /s /c` and must use Windows syntax and paths. The Motif programs and
 the System V/Sun RPC helpers `qtalh_printer` and `qtalh_DB` remain Linux/macOS
@@ -84,11 +84,15 @@ POSIX lock interoperability with legacy ALH.
 Verified with MSVC 2022, Qt 6.11.2 (including its installed Multimedia module)
 and EPICS Base 7.0.10.1-DEV on Windows x64. The Windows flags explicitly enable
 `/Zc:lambda` so older MSVC 2022 versions can compile Qt 6.11's generated moc
-code in C++17 mode.
+code in C++17 mode. Keep `/permissive-` for Qt; only the pvAccess implementation
+and its test use `/Zc:twoPhase-` for EPICS header compatibility. The build defines
+`EPICS_CALL_DLL` to import EPICS DLL functions and static data.
 
-The Windows test target runs the core, offscreen UI/audio, loopback IOC and
+The Windows test target runs the core, pvAccess, offscreen UI/audio, loopback IOC and
 portable helper tests, including logging rotation/recovery, broadcasts and
-native lock lifetime. Unix-only queue/RPC, POSIX locking, symlink and resource
+native lock lifetime. The IOC suite requires `softIocPVA.exe` in Base's selected
+`bin/<EPICS_HOST_ARCH>` directory and tests both CA and PVA on loopback.
+Unix-only queue/RPC, POSIX locking, symlink and resource
 limit cases are excluded. Motif/X11 visual comparisons require Linux/macOS.
 Test reports are saved under `qtalh/O.Windows-x86_64-qt6/test-artifacts/`
 (or the corresponding Qt 5 directory) and printed after each suite.
