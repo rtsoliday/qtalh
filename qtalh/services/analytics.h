@@ -21,6 +21,7 @@ public:
   void request(const AnalyticsQuery&);
 
 private:
+  static constexpr int IdlePoll = 1000, ReportPoll = 100;
   void checkClock();
   struct Work {
     std::atomic<bool> busy{false};

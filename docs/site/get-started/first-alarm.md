@@ -43,11 +43,11 @@ On Apple Silicon, substitute `bin/Darwin-arm64/qtalh`. Validation should report 
 
 This exercise uses default local acknowledgement, disables file logging (`-D`), and silences audio (`-s`). It leaves acknowledgement enabled. If the row stays ERROR, check that the IOC is running and both terminals have the same CA settings.
 
-To use modern controls and layouts, add `-style fusion` to the launch command.
-The default remains the familiar Motif appearance; `-style motif` selects it
-explicitly. Both appearances provide the same alarm actions.
+QtALH starts with its modern appearance. To use the classic Motif look, add
+`-style motif` to the launch command. Both appearances provide the same alarm
+actions, menus and shortcuts.
 
-![QtALH with Fusion styling](/images/fusion-main.png)
+![QtALH in the modern appearance](/images/modern-main.png)
 
 ## 4. Raise and clear the alarm
 

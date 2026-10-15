@@ -202,7 +202,11 @@ Ctrl+N timed NoAck. View shortcuts: `+`, `*`, Ctrl+`*`, `-`. Editor supports
 Alt+Backspace undo, Ctrl+Y redo, Shift+Delete cut, Ctrl+Insert copy,
 Shift+Insert paste. File open uses Ctrl+O.
 
-Appearance retains the blue-gray background, yellow MINOR/red MAJOR/white
+The default modern appearance keeps ALH's yellow MINOR/red MAJOR/white INVALID
+and ERROR meanings, row order, menus and footer descriptions in an updated
+presentation; see [the appearance guide](qtalh-appearance.md).
+With `-style motif`, the classic appearance retains the blue-gray background,
+yellow MINOR/red MAJOR/white
 INVALID and ERROR indicators, group tree at left and group contents at right,
 and legacy footer descriptions. The runtime and main rows now use custom
 Motif-style controls, branch lines,
@@ -295,9 +299,9 @@ Supported legacy switches: `-c`, `-global`, `-S`, `-D`, `-s`, `-B`, `-L`,
 `-noerrorpopup`, `-maskcolor`, `-a`, `-o`, `-f`, `-l`, `-p`, `-P`, `-O`,
 `-m`, `-filter`, `-display`, `--display`, `-geometry`, `-fn`, `-font`, `-help`, `-h`,
 `-v`, `-version`. Help/version work without a GUI connection. Qt-specific
-`-platform` and `-style` are accepted. `-style fusion` opts into modern layouts
-and styling across the GUI; omission or `-style motif` preserves the existing
-appearance. `-style=name` is also accepted. `--help`, `--version`, `--validate`, and
+`-platform` and `-style` are accepted. The modern appearance is the default;
+`-style motif` selects the classic Motif-influenced appearance, and `-style
+fusion` or another Qt style applies that style to the modern layouts. `-style=name` is also accepted. `--help`, `--version`, `--validate`, and
 `--` are additional conveniences. Unknown switches, including arbitrary Xt
 resource overrides, fail with a diagnostic.
 

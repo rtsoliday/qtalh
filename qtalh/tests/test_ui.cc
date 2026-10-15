@@ -24,6 +24,11 @@
 #include <QAudioOutput>
 #endif
 using namespace alh;
+// Screenshot prefix: classic (motif), modern (default) or the selected Qt style.
+static QString artifactStyle() {
+  const auto style = qEnvironmentVariable("QTALH_TEST_STYLE").toLower();
+  return legacyAppearance() ? QString("classic") : style.isEmpty() ? QString("modern") : style;
+}
 static QString checkpointFor(const QString& path) {
   QFile file(path);
   if (!file.open(QIODevice::ReadOnly)) return {};
@@ -1122,7 +1127,7 @@ private slots:
     }
     QDir().mkpath(TEST_OUTPUT);
     for(int t=0;t<4;++t){tabs->setCurrentIndex(t);QCoreApplication::processEvents();
-      QVERIFY(dialog->grab().save(QString(TEST_OUTPUT)+(legacyAppearance()?"/classic-analytics-":"/fusion-analytics-")+QString::number(t)+".png"));}
+      QVERIFY(dialog->grab().save(QString(TEST_OUTPUT)+"/"+artifactStyle()+"-analytics-"+QString::number(t)+".png"));}
     tabs->setCurrentIndex(0);table->setCurrentIndex(table->model()->index(0,0));
     dialog->findChild<QPushButton*>("analyticsDetails")->click();
     QVERIFY(dialog->findChild<QDialog*>("analyticsChannelDetails"));
@@ -1280,7 +1285,7 @@ private slots:
                QString("Matches 1 channels in this configuration"));
       QDir().mkpath(TEST_OUTPUT);
       QVERIFY(editor->grab().save(QString(TEST_OUTPUT) +
-          (legacyAppearance() ? "/classic-notification-subscription.png" : "/fusion-notification-subscription.png")));
+          "/" + artifactStyle() + "-notification-subscription.png"));
       editor->findChild<QLineEdit*>("subscriptionName")->setText("Updated subscription");
       editor->accept();
     });
@@ -1300,7 +1305,7 @@ private slots:
     QVERIFY(dialog->findChild<QLabel*>("notificationStatus")->text().contains("enabled"));
     QDir().mkpath(TEST_OUTPUT);
     QVERIFY(dialog->grab().save(QString(TEST_OUTPUT) +
-        (legacyAppearance() ? "/classic-notifications.png" : "/fusion-notifications.png")));
+        "/" + artifactStyle() + "-notifications.png"));
     auto freshDocument = sample(); freshDocument.filename = dir.filePath("alarms.alh");
     auto fresh = std::make_unique<Window>(std::move(freshDocument), options(false), false);
     auto freshDialog = open(fresh.get()); QVERIFY(freshDialog);
@@ -1479,7 +1484,7 @@ private slots:
     auto tree = w->findChild<QTreeView*>("alarmTree");
     tree->setCurrentIndex(tree->model()->index(0, 0, tree->model()->index(0, 0)));
     QCOMPARE(dialog->findChild<QLabel*>("shelfTarget")->text(), QString("/BOOSTER"));
-    const auto name = legacyAppearance() ? "/classic" : "/fusion";
+    const auto name = "/" + artifactStyle();
     QDir().mkpath(QString(TEST_OUTPUT));
     QVERIFY(dialog->grab().save(QString(TEST_OUTPUT) + name + "-shelve-dialog.png"));
     apply->click(); QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
@@ -1788,7 +1793,7 @@ private slots:
     QCOMPARE(tree->model()->index(0, 1).data().toString(), QString("R"));
     QCOMPARE(tree->model()->index(0, 8).data().toString(), QString("(0,0,1,0,2)"));
     QDir().mkpath(QString(TEST_OUTPUT));
-    QVERIFY(w->grab().save(QString(TEST_OUTPUT) + (legacyAppearance() ? "/qtalh-main.png" : "/fusion-main.png")));
+    QVERIFY(w->grab().save(QString(TEST_OUTPUT) + "/" + artifactStyle() + "-main.png"));
     auto index = tree->model()->index(0, 0);
     tree->setCurrentIndex(index);
     QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier,
@@ -2063,7 +2068,7 @@ private slots:
     w->saveTo(dir.filePath("saved.alhConfig"));
     QCOMPARE(w->document().filename, dir.filePath("saved.alhConfig"));
     QCOMPARE(loadConfig(dir.filePath("saved.alhConfig")).channels().size(), count + 1);
-    QVERIFY(w->grab().save(QString(TEST_OUTPUT) + (legacyAppearance() ? "/qtalh-editor.png" : "/fusion-editor.png")));
+    QVERIFY(w->grab().save(QString(TEST_OUTPUT) + "/" + artifactStyle() + "-editor.png"));
   }
   void editorBeepSeverityUndoAndSave() {
     auto w = std::make_unique<Window>(sample(), options(true), false);
@@ -2624,7 +2629,7 @@ private slots:
       auto error = process.readAllStandardError();
       QVERIFY(error.contains("Unknown widget style")); QVERIFY(error.contains("Fusion"));
     }
-    for (const auto& style : QStringList{"", "motif", "FuSiOn"}) {
+    for (const auto& style : QStringList{"", "modern", "motif", "FuSiOn"}) {
       QProcess process;
       auto env = QProcessEnvironment::systemEnvironment();
       env.insert("QT_STYLE_OVERRIDE", "Fusion");
@@ -2640,7 +2645,8 @@ private slots:
       }
       process.terminate();
       if (!process.waitForFinished(3000)) { process.kill(); process.waitForFinished(); }
-      QVERIFY2(output.contains(style == "FuSiOn" ? "style=fusion" : "style=motif"), output.constData());
+      const char* expected = style == "FuSiOn" ? "style=fusion" : style == "motif" ? "style=motif" : "style=modern";
+      QVERIFY2(output.contains(expected), output.constData());
       QVERIFY(!output.contains("invalid style override"));
     }
   }
@@ -3115,8 +3121,7 @@ private slots:
       if (action->text().contains("Acknowledge Alarm")) action->trigger();
     QCOMPARE(engine.state(nodes[0]).unack, 2); QCOMPARE(engine.state(nodes[1]).unack, 0);
     QDir().mkpath(TEST_OUTPUT);
-    QVERIFY(w->grab().save(QString(TEST_OUTPUT) + (legacyAppearance()
-        ? "/classic-channel-selection.png" : "/fusion-channel-selection.png")));
+    QVERIFY(w->grab().save(QString(TEST_OUTPUT) + "/" + artifactStyle() + "-channel-selection.png"));
   }
 
   void filteredPendingClicks_data() {
@@ -3310,9 +3315,22 @@ private slots:
     QCOMPARE(group->model()->rowCount(), 1);
     QCOMPARE(group->model()->index(0, 2).data().toString(), QString("test:pv"));
     QVERIFY(group->model()->index(0, 8).data().toString().isEmpty());
-    auto slider = w->findChild<QSlider*>("paneWidth");
-    QVERIFY(slider);
-    slider->setValue(70);
+    // Classic ALH resizes the panes with its width slider; the modern view
+    // drags the splitter handle directly.
+    if (legacyAppearance()) {
+      auto slider = w->findChild<QSlider*>("paneWidth");
+      QVERIFY(slider);
+      slider->setValue(70);
+    } else {
+      QVERIFY(!w->findChild<QSlider*>("paneWidth"));
+      auto panes = w->findChild<QSplitter*>("alarmPanes");
+      QVERIFY(panes);
+      auto handle = panes->handle(1);
+      const QPoint grip = handle->rect().center();
+      QTest::mousePress(handle, Qt::LeftButton, Qt::NoModifier, grip);
+      QTest::mouseMove(handle, grip + QPoint(panes->width() / 5, 0));
+      QTest::mouseRelease(handle, Qt::LeftButton, Qt::NoModifier, grip + QPoint(panes->width() / 5, 0));
+    }
     QVERIFY(tree->width() > group->width());
   }
   void fontSizeShortcuts() {
@@ -3345,7 +3363,9 @@ private slots:
       if (action->text() == "Current Alarm History") action->trigger();
     auto history = w->findChild<QDialog*>("historyDialog");
     QVERIFY(history);
-    auto reader = history->findChild<QPlainTextEdit*>();
+    // Classic history is a text view; the modern history is a table.
+    QAbstractScrollArea* reader = history->findChild<QPlainTextEdit*>();
+    if (!reader) reader = history->findChild<QTableWidget*>("historyTable");
     QVERIFY(reader);
     const auto originalReaderFont = reader->font();
     QTest::keyClick(view, Qt::Key_Equal, Qt::ControlModifier);
@@ -3408,7 +3428,7 @@ private slots:
     QCOMPARE(QApplication::font(), largest);
   }
   void styledRowGeometryAndPalette() {
-    if (legacyAppearance()) QSKIP("Styled presentation contract; run with QTALH_TEST_STYLE=fusion");
+    if (legacyAppearance()) QSKIP("Styled presentation contract; run without QTALH_TEST_STYLE=motif");
     QVERIFY(QFontInfo(contentFont()).fixedPitch());
     struct Restore {
       QFont font = QApplication::font();
@@ -3449,7 +3469,7 @@ private slots:
         QCOMPARE(capture.pixelColor((badge.topLeft() + QPoint(3, 3)) * capture.devicePixelRatio()), expected);
       }
     }
-    QVERIFY(w->grab().save(QString(TEST_OUTPUT) + "/fusion-large-dark.png"));
+    QVERIFY(w->grab().save(QString(TEST_OUTPUT) + "/" + artifactStyle() + "-large-dark.png"));
     QVERIFY(w->findChild<QWidget*>("alarmLegend")->isHidden());
   }
   void relatedCommandDelimiters_data() {
@@ -3500,23 +3520,37 @@ private slots:
     w->show();
     for (auto action : w->findChildren<QAction*>())
       if (action->text() == "Current Alarm History") action->trigger();
-    auto history = w->findChild<QDialog*>("historyDialog")->findChild<QPlainTextEdit*>();
+    auto historyDialog = w->findChild<QDialog*>("historyDialog");
+    QVERIFY(historyDialog);
+    auto historyLines = historyDialog->findChild<QPlainTextEdit*>();
+    auto historyTable = historyDialog->findChild<QTableWidget*>("historyTable");
+    QVERIFY(historyLines || historyTable);
+    auto historyContent = [&] {
+      if (historyLines) return historyLines->toPlainText();
+      QStringList cells;
+      for (int row = 0; row < historyTable->rowCount(); ++row)
+        for (int column = 0; column < historyTable->columnCount(); ++column)
+          if (auto item = historyTable->item(row, column)) cells << item->text();
+      return cells.join(' ');
+    };
     auto tree = w->findChild<QTreeView*>("alarmTree");
     QVERIFY(tree);
     QTest::qWait(300);
     QSignalSpy resets(tree->model(), &QAbstractItemModel::modelReset);
     QSignalSpy insertions(tree->model(), &QAbstractItemModel::rowsInserted);
-    QSignalSpy historyChanges(history, &QPlainTextEdit::textChanged);
+    std::unique_ptr<QSignalSpy> historyChanges(historyLines
+        ? new QSignalSpy(historyLines, &QPlainTextEdit::textChanged)
+        : new QSignalSpy(historyTable->model(), &QAbstractItemModel::dataChanged));
     QTest::qWait(1200);
     QCOMPARE(resets.count(), 0);
-    QCOMPARE(historyChanges.count(), 0);
+    QCOMPARE(historyChanges->count(), 0);
     auto n = w->document().channels()[0];
     engine.event(n, {3, 2, 2, 1, "99"});
     // A new visible alarm updates membership without invalidating other rows.
     QTRY_VERIFY(insertions.count() > 0);
     QCOMPARE(tree->model()->rowCount(), 1);
     QCOMPARE(resets.count(), 0);
-    QTRY_VERIFY(history->toPlainText().contains("99"));
+    QTRY_VERIFY(historyContent().contains("99"));
     MotifButton* runtime = nullptr;
     for (auto widget : QApplication::topLevelWidgets())
       if (widget->objectName() == "runtimeWindow")
@@ -3524,11 +3558,11 @@ private slots:
     QVERIFY(runtime);
     const auto initialColor = runtime->background;
     resets.clear();
-    historyChanges.clear();
+    historyChanges->clear();
     time = 3000;
     QTRY_VERIFY_WITH_TIMEOUT(runtime->background != initialColor, 1500);
     QCOMPARE(resets.count(), 0);
-    QCOMPARE(historyChanges.count(), 0);
+    QCOMPARE(historyChanges->count(), 0);
     engine.silenceUntil = 3500;
     auto silence = w->findChild<QCheckBox*>("silenceInterval");
     QVERIFY(silence);
@@ -3605,6 +3639,32 @@ private slots:
     QVERIFY(displayed("transient"));
     engine.acknowledge(w->document().root.get());
     QVERIFY(displayed("acknowledged"));
+  }
+  void countOnlyUpdatesRepaintCounts() {
+    // A change that leaves a group's severities alone updates only its counts
+    // cell; a severity change still reports the whole row.
+    auto w = std::make_unique<Window>(parseConfig(
+        "GROUP NULL root\nGROUP root area\nCHANNEL area a\nCHANNEL area b\nCHANNEL area c\n"),
+        options(false), false);
+    w->show();
+    auto& engine = w->alarmEngine();
+    const auto channels = w->document().channels();
+    for (auto n : channels) engine.event(n, {0, 0, 0, 1, "0"});
+    engine.event(channels[0], {3, 2, 2, 1, "9"});
+    QTest::qWait(300);
+    auto group = w->findChild<QTreeView*>("groupContents");
+    QVERIFY(group);
+    QCOMPARE(group->model()->index(0, 8).data().toString(), QString("(0,0,1,0,2)"));
+    QSignalSpy changes(group->model(), &QAbstractItemModel::dataChanged);
+    engine.event(channels[1], {4, 1, 1, 1, "4"});
+    QTRY_VERIFY(!changes.isEmpty());
+    QCOMPARE(changes.size(), 1);
+    QCOMPARE(changes[0][0].value<QModelIndex>().column(), 8);
+    QCOMPARE(group->model()->index(0, 8).data().toString(), QString("(0,0,1,1,1)"));
+    changes.clear();
+    engine.event(channels[0], {0, 0, 0, 1, "0"});
+    QTRY_VERIFY(!changes.isEmpty());
+    QCOMPARE(changes[0][0].value<QModelIndex>().column(), 1);
   }
   void largeGroup() {
     QString text = "GROUP NULL large\n";

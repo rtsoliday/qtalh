@@ -83,7 +83,9 @@ NotificationService::NotificationService(QObject* parent, QString path)
   }
   timer.setInterval(250);
   connect(&timer, &QTimer::timeout, this, [this] { pump(); });
-  timer.start();
+}
+void NotificationService::schedulePump() {
+  if (!timer.isActive()) timer.start();
 }
 NotificationService::~NotificationService() {
   detach();
@@ -138,6 +140,7 @@ void NotificationService::attach(Engine* e, const QVector<Node*>& n, const QStri
       unique << it.key();
   policy.reconcile(channels());
   watch();
+  schedulePump();
 }
 void NotificationService::watch() {
   if (!engine)
@@ -153,6 +156,7 @@ void NotificationService::watch() {
 }
 void NotificationService::enable(bool enabled) {
   policy.enable(enabled);
+  schedulePump();
   watch();
   if (enabled)
     for (const auto& s : channels())
@@ -162,6 +166,7 @@ void NotificationService::enable(bool enabled) {
 }
 void NotificationService::apply(const NotificationSettings& s) {
   policy.configure(s, configuration);
+  schedulePump();
   for (const auto& channel : channels())
     if (unique.contains(channel.identity))
       policy.observe(channel, monotonicNow());
@@ -178,8 +183,10 @@ QString NotificationService::status() const {
       .arg(policy.throttled() ? "; throttled" : "");
 }
 void NotificationService::pump() {
-  if (!engine)
+  if (!engine || (!policy.enabled() && inFlight == 0 && policy.pending() == 0)) {
+    timer.stop();
     return;
+  }
   if (inFlight >= 4)
     return;
   policy.tick(monotonicNow(), 1000 - inFlight);
@@ -266,6 +273,7 @@ void NotificationService::sendTest(const QString& destination) {
   dispatch(e);
 }
 void NotificationService::dispatch(NotificationEnvelope e) {
+  schedulePump();
   NotificationDestination d;
   bool found = false;
   for (const auto& candidate : policy.settings().destinations)
@@ -378,6 +386,7 @@ void NotificationService::dispatch(NotificationEnvelope e) {
 void NotificationService::finish(NotificationEnvelope e, bool accepted, bool retryable,
                                  const QString& reason, int retryAfter) {
   --inFlight;
+  schedulePump();
   if (!accepted && retryable && e.attempts < 3 && !e.test && policy.revalidate(e)) {
     e.ready = monotonicNow() + qint64(qMax(e.attempts == 1 ? 30 : 120, retryAfter)) * 1000;
     policy.retry(e);

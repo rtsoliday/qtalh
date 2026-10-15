@@ -28,14 +28,31 @@ void bevel(QPainter* painter, const QRect& rect, const QColor& color, bool down 
     painter->drawLine(r.topRight(), r.bottomRight());
   }
 }
-int controlHeight(const QWidget* widget) {
-  QStyleOptionButton option;
-  option.initFrom(widget);
-  return widget->style()->sizeFromContents(QStyle::CT_PushButton, &option,
-      QSize(0, widget->fontMetrics().height()), widget).height();
-}
+// Modern rows: square chips three pixels inside the row, sized from the font.
 int alarmRowHeight(const QWidget* widget) {
-  return legacyAppearance() ? 24 : qMax(controlHeight(widget), widget->fontMetrics().height() + 8) + 6;
+  return legacyAppearance() ? 24 : qMax(24, widget->fontMetrics().height() + 11);
+}
+int chipSize(const QWidget* widget) { return alarmRowHeight(widget) - 6; }
+void roundedChip(QPainter* painter, const QRect& rect, const QColor& fill, const QColor& outline,
+                 qreal radius = 4) {
+  painter->setPen(outline.isValid() ? QPen(outline, 1) : QPen(Qt::NoPen));
+  painter->setBrush(fill.isValid() ? QBrush(fill) : QBrush(Qt::NoBrush));
+  painter->drawRoundedRect(QRectF(rect).adjusted(0.5, 0.5, -0.5, -0.5), radius, radius);
+}
+// A filled disclosure triangle, as ALH's arrow, pointing down when open.
+void disclosure(QPainter* painter, const QRect& rect, bool open, const QColor& color) {
+  const QPointF c = QRectF(rect).center();
+  const qreal s = qMax(3.0, rect.height() * 0.21);
+  QPolygonF triangle;
+  if (open)
+    triangle << QPointF(c.x() - s, c.y() - s * 0.55) << QPointF(c.x() + s, c.y() - s * 0.55)
+             << QPointF(c.x(), c.y() + s * 0.65);
+  else
+    triangle << QPointF(c.x() - s * 0.55, c.y() - s) << QPointF(c.x() - s * 0.55, c.y() + s)
+             << QPointF(c.x() + s * 0.65, c.y());
+  painter->setPen(Qt::NoPen);
+  painter->setBrush(color);
+  painter->drawPolygon(triangle);
 }
 class RowHeight : public QStyledItemDelegate {
 public:
@@ -55,21 +72,33 @@ bool selectedRow(const QTreeView* view, const QModelIndex& row) {
 }
 } // namespace
 QSize MotifButton::sizeHint() const {
-  if (!legacyAppearance()) return QPushButton::sizeHint();
+  if (!legacyAppearance()) {
+    auto bold = font();
+    bold.setBold(true);
+    return QFontMetrics(bold).size(Qt::TextSingleLine, text()) + QSize(28, 14);
+  }
   return QFontMetrics(font()).size(Qt::TextSingleLine, text()) + QSize(14, 10);
 }
 void MotifButton::paintEvent(QPaintEvent* event) {
   if (!legacyAppearance()) {
-    QPushButton::paintEvent(event);
-    if (background.isValid()) {
-      QPainter painter(this);
-      QStyleOptionButton option;
-      initStyleOption(&option);
-      auto area = style()->subElementRect(QStyle::SE_PushButtonContents, &option, this).adjusted(2, 2, -2, -2);
-      painter.fillRect(area, background);
-      painter.setPen(contrastingText(background));
-      painter.drawText(area, Qt::AlignCenter, text());
-    }
+    Q_UNUSED(event);
+    // A flat severity tile: the whole button carries the alarm color.
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+    const auto& colors = palette();
+    QColor fill = background.isValid() ? background : colors.color(QPalette::Button);
+    if (isDown()) fill = fill.darker(112);
+    else if (underMouse()) fill = background.isValid() ? fill.lighter(106) : blend(fill, colors.color(QPalette::Highlight), 0.08);
+    const QColor outline = background.isValid() ? background.darker(125)
+                                                : blend(colors.color(QPalette::Button), colors.color(QPalette::ButtonText), 0.28);
+    roundedChip(&painter, rect().adjusted(1, 1, -1, -1), fill, outline, 6);
+    if (hasFocus())
+      roundedChip(&painter, rect().adjusted(2, 2, -2, -2), QColor(), colors.color(QPalette::Highlight), 5);
+    auto bold = font();
+    bold.setBold(true);
+    painter.setFont(bold);
+    painter.setPen(background.isValid() ? contrastingText(background) : colors.color(QPalette::ButtonText));
+    painter.drawText(rect().adjusted(8, 0, -8, 0), Qt::AlignCenter, text());
     return;
   }
   QPainter painter(this);
@@ -182,8 +211,10 @@ void AlarmView::setModel(QAbstractItemModel* next) {
   connect(next, &QAbstractItemModel::rowsRemoved, this, [this] { scheduleExtent(); });
   connect(next, &QAbstractItemModel::dataChanged, this,
           [this](const QModelIndex& topLeft, const QModelIndex& bottomRight) {
-            if (!tree)
-              for (int row = topLeft.row(); row <= bottomRight.row(); ++row) extentRows.push_back(row);
+            const auto parent = topLeft.parent();
+            if (!extentFull && rowShown(topLeft))
+              for (int row = topLeft.row(); row <= bottomRight.row(); ++row)
+                extentRows.push_back(model()->index(row, 0, parent));
             scheduleExtent(false, false);
           });
   extentFull = extentRepaint = true;
@@ -202,6 +233,8 @@ int AlarmView::textAdvance(const QString& text, const QFont& font) const {
 }
 void AlarmView::invalidateTextWidths() {
   textWidths.clear();
+  staticTexts.clear();
+  chipImages.clear();
   doItemsLayout();
   scheduleExtent();
 }
@@ -212,28 +245,21 @@ std::array<QRect, 9> AlarmView::cells(const QModelIndex& row, const QRect& bound
     for (auto parent = row.parent(); parent.isValid(); parent = parent.parent())
       ++depth;
   if (!legacyAppearance()) {
-    const int height = alarmRowHeight(this) - 6;
-    int x = bounds.left() + 6 + (tree ? depth * (height / 2 + 4) : 0);
+    const int chip = chipSize(this);
+    int x = bounds.left() + 8 + (tree ? depth * (chip / 2 + 10) : 0);
     const int y = bounds.top() + 3;
     auto add = [&](int column, int width) {
-      result[column] = QRect(x, y, width, height);
+      result[column] = QRect(x, y, width, chip);
       x += width + 4;
     };
-    auto textWidth = [&](int column, bool button) {
-      auto font = field(row, column, Qt::FontRole).value<QFont>();
-      QFontMetrics metrics(font);
-      QSize contents(textAdvance(field(row, column).toString(), font), metrics.height());
-      QStyleOptionButton option;
-      option.initFrom(this);
-      option.fontMetrics = metrics;
-      return button ? style()->sizeFromContents(QStyle::CT_PushButton, &option, contents, this).width()
-                    : contents.width() + 6;
+    auto advance = [&](int column) {
+      return textAdvance(field(row, column).toString(), field(row, column, Qt::FontRole).value<QFont>());
     };
-    add(0, height); add(1, height);
-    add(2, qMax(height, textWidth(2, true)));
+    add(0, chip); add(1, chip);
+    add(2, qMax(chip, advance(2) + 12));
     for (int column : {3, 4, 5})
-      if (!field(row, column).toString().isEmpty()) add(column, qMax(height, textWidth(column, true)));
-    add(6, textWidth(6, false)); add(7, 10); add(8, textWidth(8, false));
+      if (!field(row, column).toString().isEmpty()) add(column, chip);
+    add(6, advance(6) + 10); add(7, qMax(10, advance(7) + 4)); add(8, advance(8) + 8);
     return result;
   }
   int x = bounds.left() + (tree ? 20 + depth * 12 : 14);
@@ -269,7 +295,32 @@ void AlarmView::dataChanged(const QModelIndex& topLeft, const QModelIndex& botto
     const auto first = QTreeView::visualRect(topLeft.sibling(topLeft.row(), 0));
     const auto last = QTreeView::visualRect(bottomRight.sibling(bottomRight.row(), 0));
     const auto rows = first.united(last);
-    if (!rows.isEmpty()) viewport()->update(rows);
+    const auto visible = viewport()->rect();
+    if (rows.isEmpty() || !rows.intersects(visible)) {
+      // Nothing on screen changed.
+    } else if (topLeft.column() == 0) {
+      viewport()->update(rows);
+    } else {
+      // Cells are laid out consecutively: repaint from the first changed cell
+      // to the end of each visible row, usually just the alarm counts.
+      QRegion region;
+      const int height = first.height();
+      int row = topLeft.row();
+      if (!tree && first.top() < 0) row += -first.top() / height;
+      for (; row <= bottomRight.row(); ++row) {
+        const auto index = topLeft.sibling(row, topLeft.column());
+        const auto rowRect = tree ? QTreeView::visualRect(index.sibling(row, 0))
+                                  : first.translated(0, (row - topLeft.row()) * height);
+        if (rowRect.isEmpty() || rowRect.bottom() < visible.top()) continue;
+        if (rowRect.top() > visible.bottom()) {
+          if (!tree) break;
+          continue;
+        }
+        const int left = cells(index, rowRect)[topLeft.column()].left();
+        region += QRect(left, rowRect.top(), rowRect.right() - left + 1, rowRect.height());
+      }
+      viewport()->update(region);
+    }
   }
 #if QT_CONFIG(accessibility)
   if (QAccessible::isActive()) {
@@ -326,7 +377,8 @@ void AlarmView::drawRow(QPainter* painter, const QStyleOptionViewItem& option,
   }
   for (int column = 0; column < 9; ++column) {
     const auto rect = rectangles[column];
-    if (rect.isEmpty())
+    // Partial updates repaint only the changed cells; skip the others.
+    if (rect.isEmpty() || !paintRegion.intersects(rect))
       continue;
     const auto text = field(row, column).toString();
     QColor color = field(row, column, Qt::BackgroundRole).value<QColor>();
@@ -391,9 +443,12 @@ void AlarmView::mousePressEvent(QMouseEvent* event) {
 void AlarmView::mouseReleaseEvent(QMouseEvent* event) {
   if (event->button() == Qt::MiddleButton) dragTarget = QModelIndex();
   if (event->button() == Qt::LeftButton) {
-    const auto index = mouseTarget;
+    auto index = mouseTarget;
     mouseTarget = QModelIndex();
     if (index.isValid() && index == indexAt(event->pos())) {
+      // Modern rows highlight as a whole, so their passive cells select like the name.
+      if (!legacyAppearance() && (index.column() == 1 || index.column() == 8))
+        index = index.sibling(index.row(), 2);
       // Commit selection only on release over the pressed cell, as in ALH.
       // Row controls act on their own target without moving the selected name.
       if (index.column() == 2 || index.column() == 6 || index.column() == 7) {
@@ -419,7 +474,9 @@ void AlarmView::mouseReleaseEvent(QMouseEvent* event) {
 void AlarmView::mouseDoubleClickEvent(QMouseEvent* event) {
   mouseTarget = QModelIndex(); // The following release must not repeat a single-click action.
   if (event->button() == Qt::LeftButton) {
-    const auto index = indexAt(event->pos());
+    auto index = indexAt(event->pos());
+    if (!legacyAppearance() && (index.column() == 1 || index.column() == 8))
+      index = index.sibling(index.row(), 2);
     if (index.column() == 3 && pendingArrow == index) {
       arrowTimer.stop();
       pendingArrow = QModelIndex();
@@ -477,6 +534,10 @@ bool AlarmView::event(QEvent* event) {
     updateRow(currentIndex());
   return result;
 }
+void AlarmView::paintEvent(QPaintEvent* event) {
+  paintRegion = event->region();
+  QTreeView::paintEvent(event);
+}
 void AlarmView::updateRow(const QModelIndex& index) {
   if (index.isValid()) viewport()->update(QTreeView::visualRect(index.sibling(index.row(), 0)));
 }
@@ -493,7 +554,7 @@ bool AlarmView::viewportEvent(QEvent* event) {
   if (!legacyAppearance() && (event->type() == QEvent::MouseMove ||
       event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonRelease ||
       event->type() == QEvent::Leave)) {
-    auto old = hovered;
+    const QModelIndex old = hovered, oldPressed = pressed;
     if (event->type() == QEvent::MouseMove || event->type() == QEvent::MouseButtonPress ||
         event->type() == QEvent::MouseButtonRelease) {
       hovered = indexAt(static_cast<QMouseEvent*>(event)->pos());
@@ -502,64 +563,145 @@ bool AlarmView::viewportEvent(QEvent* event) {
     } else if (event->type() == QEvent::Leave) {
       hovered = QModelIndex(); pressed = QModelIndex();
     }
-    if (old.isValid() && event->type() != QEvent::Paint) viewport()->update(QTreeView::visualRect(old.sibling(old.row(), 0)));
-    if (hovered.isValid() && event->type() != QEvent::Paint)
-      viewport()->update(QTreeView::visualRect(hovered.sibling(hovered.row(), 0)));
+    // Mouse motion within one cell changes nothing that is painted.
+    if (old != hovered || oldPressed != pressed) {
+      updateRow(old);
+      updateRow(hovered);
+      updateRow(oldPressed);
+      const int column = hovered.isValid() ? hovered.column() : -1;
+      const bool control = column == 0 || column == 3 || column == 4 || column == 5;
+      if (control != (viewport()->cursor().shape() == Qt::PointingHandCursor)) {
+        if (control) viewport()->setCursor(Qt::PointingHandCursor);
+        else viewport()->unsetCursor();
+      }
+    }
   }
   return QTreeView::viewportEvent(event);
+}
+void AlarmView::drawLabel(QPainter* painter, const QRect& rect, const QString& text,
+                          const QFont& font, bool centered) const {
+  if (text.isEmpty()) return;
+  const auto key = qMakePair(font, text);
+  auto prepared = staticTexts.object(key);
+  if (!prepared) {
+    prepared = new QStaticText(text);
+    prepared->setTextFormat(Qt::PlainText);
+    prepared->prepare(QTransform(), font);
+    staticTexts.insert(key, prepared);
+  }
+  const QSizeF size = prepared->size();
+  painter->setFont(font);
+  painter->drawStaticText(QPointF(centered ? rect.left() + (rect.width() - size.width()) / 2 : rect.left(),
+                                  rect.top() + qRound((rect.height() - size.height()) / 2)), *prepared);
+}
+void AlarmView::drawChip(QPainter* painter, const QRect& rect, const QColor& fill,
+                         const QColor& outline) const {
+  if (!fill.isValid() && !outline.isValid()) return;
+  const qreal ratio = painter->device()->devicePixelRatioF();
+  const auto key = qMakePair((quint64(fill.isValid() ? fill.rgba() : 0) << 32) |
+                                 (outline.isValid() ? outline.rgba() : 0),
+                             (quint64(rect.width()) << 32) | (quint64(rect.height()) << 16) |
+                                 quint64(qRound(ratio * 64)));
+  auto found = chipImages.constFind(key);
+  if (found == chipImages.cend()) {
+    // Only a few sizes and colors occur; bound the cache for palette or zoom changes.
+    if (chipImages.size() > 256) chipImages.clear();
+    QPixmap image(rect.size() * ratio);
+    image.setDevicePixelRatio(ratio);
+    image.fill(Qt::transparent);
+    QPainter chipPainter(&image);
+    chipPainter.setRenderHint(QPainter::Antialiasing);
+    roundedChip(&chipPainter, QRect(QPoint(), rect.size()), fill, outline);
+    chipPainter.end();
+    found = chipImages.insert(key, image);
+  }
+  painter->drawPixmap(rect.topLeft(), *found);
 }
 void AlarmView::drawStyledRow(QPainter* painter, const QStyleOptionViewItem& option,
                              const QModelIndex& row) const {
   painter->save();
-  auto panel = option;
-  panel.state.setFlag(QStyle::State_Selected, selectedRow(this, row));
-  painter->fillRect(option.rect, palette().base());
-  style()->drawPrimitive(QStyle::PE_PanelItemViewItem, &panel, painter, this);
+  const auto& colors = palette();
+  const QColor base = colors.color(QPalette::Base), text = colors.color(QPalette::Text);
+  const QColor accent = colors.color(QPalette::Highlight), muted = secondaryText(colors);
+  const QColor outline = blend(base, text, 0.24), hoverFill = blend(base, text, 0.08),
+               pressFill = blend(base, text, 0.16);
+  const bool selected = selectedRow(this, row);
+  const bool rowHovered = hovered.isValid() && hovered.parent() == row.parent() && hovered.row() == row.row();
+  // Selection is a tint plus an accent edge, leaving alarm colors untouched.
+  painter->fillRect(option.rect, selected ? blend(base, accent, hasFocus() ? 0.2 : 0.13)
+                                 : rowHovered ? blend(base, text, 0.04) : base);
+  if (selected)
+    painter->fillRect(QRect(option.rect.left(), option.rect.top() + 2, 3, option.rect.height() - 4), accent);
   const auto rectangles = cells(row, option.rect);
-  for (int column = 0; column < 9; ++column) {
-    auto rect = rectangles[column];
-    if (rect.isEmpty()) continue;
-    auto index = row.sibling(row.row(), column);
-    auto text = field(row, column).toString();
-    auto color = field(row, column, Qt::BackgroundRole).value<QColor>();
-    painter->setFont(field(row, column, Qt::FontRole).value<QFont>());
-    auto foreground = panel.state & QStyle::State_Selected ? palette().highlightedText() : palette().text();
-    if (column == 3) {
-      QStyleOption branch;
-      branch.initFrom(this); branch.rect = rect;
-      branch.state |= QStyle::State_Children;
-      branch.state.setFlag(QStyle::State_Open, tree && isExpanded(row));
-      if (hovered == index) branch.state |= QStyle::State_MouseOver;
-      style()->drawPrimitive(QStyle::PE_IndicatorBranch, &branch, painter, this);
-    } else if (column == 0 || column == 2 || column == 4 || column == 5) {
-      QStyleOptionButton button;
-      button.initFrom(this); button.rect = rect; button.text = text;
-      button.fontMetrics = QFontMetrics(painter->font());
-      button.state.setFlag(QStyle::State_MouseOver, hovered == index);
-      button.state.setFlag(QStyle::State_Sunken,
-                           pressed == index || (column == 2 && selectedRow(this, row)));
-      button.state.setFlag(QStyle::State_HasFocus, hasFocus() && currentIndex() == index);
-      style()->drawControl(QStyle::CE_PushButton, &button, painter, this);
-      if (column == 0 && color.isValid()) {
-        auto badge = rect.adjusted(4, 4, -4, -4);
-        painter->fillRect(badge, color); painter->setPen(contrastingText(color));
-        painter->drawRect(badge.adjusted(0, 0, -1, -1));
-        painter->drawText(badge, Qt::AlignCenter, text);
+  const int chip = chipSize(this);
+  if (tree && row.parent().isValid()) {
+    // Subtle connectors under the parent's acknowledgement chip, as in ALH's branch lines.
+    painter->setPen(QPen(blend(base, text, 0.2), 1));
+    const int middle = option.rect.top() + option.rect.height() / 2;
+    int x = rectangles[0].left() - 10;
+    bool leaf = true;
+    for (auto current = row; current.parent().isValid(); current = current.parent(), x -= chip / 2 + 10) {
+      const bool last = current.row() + 1 == model()->rowCount(current.parent());
+      if (leaf) {
+        painter->drawLine(x, option.rect.top(), x, middle);
+        painter->drawLine(x, middle, rectangles[0].left() - 3, middle);
       }
-    } else {
-      painter->setPen(foreground.color());
-      if (color.isValid() && !text.trimmed().isEmpty()) {
-        painter->fillRect(rect, color); painter->setPen(contrastingText(color));
-        painter->drawRect(rect.adjusted(0, 0, -1, -1));
-      }
-      painter->drawText(rect.adjusted(2, 0, -2, 0),
-          (column == 1 ? Qt::AlignCenter : Qt::AlignLeft | Qt::AlignVCenter), text);
+      if (!last) painter->drawLine(x, option.rect.top(), x, option.rect.bottom());
+      leaf = false;
     }
   }
-  if (hasFocus() && currentIndex().row() == row.row() && currentIndex().parent() == row.parent()) {
-    QStyleOptionFocusRect focus;
-    focus.initFrom(this); focus.rect = option.rect.adjusted(1, 1, -1, -1);
-    style()->drawPrimitive(QStyle::PE_FrameFocusRect, &focus, painter, this);
+  painter->setRenderHint(QPainter::Antialiasing);
+  for (int column = 0; column < 9; ++column) {
+    const auto rect = rectangles[column];
+    // Partial updates repaint only the changed cells; skip the others.
+    if (rect.isEmpty() || !paintRegion.intersects(rect)) continue;
+    const auto index = row.sibling(row.row(), column);
+    const auto value = field(row, column).toString();
+    const auto color = field(row, column, Qt::BackgroundRole).value<QColor>();
+    auto font = field(row, column, Qt::FontRole).value<QFont>();
+    const bool hot = hovered == index, down = pressed == index;
+    switch (column) {
+    case 0: case 1: {
+      // Acknowledgement and severity chips carry ALH's letters and colors.
+      const bool alarm = color.isValid() && !value.trimmed().isEmpty();
+      if (alarm) drawChip(painter, rect, down && column == 0 ? color.darker(112) : color, color.darker(125));
+      else if (column == 0) drawChip(painter, rect, down ? pressFill : hot ? hoverFill : QColor(), outline);
+      if (alarm) {
+        font.setBold(true);
+        painter->setPen(contrastingText(color));
+        drawLabel(painter, rect, value, font, true);
+      }
+      break;
+    }
+    case 2:
+      painter->setPen(text);
+      drawLabel(painter, rect.adjusted(6, 0, -4, 0), value, font, false);
+      break;
+    case 3:
+      if (hot || down) drawChip(painter, rect, down ? pressFill : hoverFill, QColor());
+      disclosure(painter, rect, tree && isExpanded(row.sibling(row.row(), 0)), blend(text, base, 0.2));
+      break;
+    case 4: case 5:
+      drawChip(painter, rect, down ? pressFill : hot ? hoverFill : blend(base, text, 0.04), outline);
+      font.setBold(true);
+      painter->setPen(text);
+      drawLabel(painter, rect, value, font, true);
+      break;
+    default: {
+      // Channel alarm data and configured masks stand out; group counts and
+      // the default <-----> mask are secondary.
+      QColor pen = muted;
+      if (column == 8 && value.startsWith('<')) pen = text;
+      if (column == 6 && std::any_of(value.begin(), value.end(), [](QChar c) { return c.isLetter(); }))
+        pen = text;
+      if (column == 6 && color.isValid()) {
+        drawChip(painter, rect.adjusted(0, 2, 0, -2), color, QColor());
+        pen = contrastingText(color);
+      }
+      painter->setPen(pen);
+      drawLabel(painter, rect.adjusted(column == 6 ? 5 : 2, 0, 0, 0), value, font, false);
+    }
+    }
   }
   painter->restore();
 }
@@ -578,41 +720,45 @@ void AlarmView::setRowExtent(const QModelIndex& index) {
   const int extent = cells(index, QRect(0, 0, 1, alarmRowHeight(this)))[8].right() + 10;
   auto found = rowExtents.find(index.internalPointer());
   if (found != rowExtents.end()) {
-    if (*found == extent) return;
-    auto count = extentCounts.find(*found);
+    found->generation = extentGeneration;
+    if (found->width == extent) return;
+    auto count = extentCounts.find(found->width);
     if (--*count == 0) extentCounts.erase(count);
-    *found = extent;
+    found->width = extent;
   } else {
-    rowExtents.insert(index.internalPointer(), extent);
+    rowExtents.insert(index.internalPointer(), {extent, extentGeneration});
   }
   ++extentCounts[extent];
+}
+bool AlarmView::rowShown(const QModelIndex& index) const {
+  for (auto parent = index.parent(); parent.isValid(); parent = parent.parent())
+    if (!isExpanded(parent)) return false;
+  return true;
 }
 void AlarmView::updateExtent() {
   if (!model())
     return;
-  int width = 0;
-  if (tree) {
-    std::function<void(QModelIndex)> visit = [&](QModelIndex parent) {
+  if (extentFull) {
+    ++extentGeneration;
+    std::function<void(const QModelIndex&)> visit = [&](const QModelIndex& parent) {
       for (int row = 0; row < model()->rowCount(parent); ++row) {
-        auto index = model()->index(row, 0, parent);
-        width = qMax(width, cells(index, QRect(0, 0, 1, alarmRowHeight(this)))[8].right() + 10);
-        if (isExpanded(index))
-          visit(index);
+        const auto index = model()->index(row, 0, parent);
+        setRowExtent(index);
+        if (tree && isExpanded(index)) visit(index);
       }
     };
     visit({});
-  } else {
-    const int rows = model()->rowCount();
-    if (extentFull) {
-      rowExtents.clear();
-      extentCounts.clear();
-      for (int row = 0; row < rows; ++row) setRowExtent(model()->index(row, 0));
-    } else {
-      for (int row : extentRows)
-        if (row < rows) setRowExtent(model()->index(row, 0));
+    for (auto it = rowExtents.begin(); it != rowExtents.end();) {
+      if (it->generation == extentGeneration) { ++it; continue; }
+      auto count = extentCounts.find(it->width);
+      if (--*count == 0) extentCounts.erase(count);
+      it = rowExtents.erase(it);
     }
-    width = extentCounts.isEmpty() ? 0 : qMax(0, extentCounts.lastKey());
+  } else {
+    for (const auto& index : extentRows)
+      if (index.isValid()) setRowExtent(index);
   }
+  int width = extentCounts.isEmpty() ? 0 : qMax(0, extentCounts.lastKey());
   extentFull = false;
   extentRows.clear();
   width = qMax(width, viewport()->width());

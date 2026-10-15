@@ -157,7 +157,8 @@ QString usage() {
   -s -p sound        Silent / audio file (formats depend on Qt media backend)
   -filter no|active|unack
   -mainwindow -maskcolor -noerrorpopup -desc_field -debug
-  -style name        Widget appearance: motif (default), fusion, or an installed Qt style
+  -style name        Widget appearance: modern (default), motif (classic ALH),
+                     fusion, or an installed Qt style
   -display display -geometry geometry -fn font
   -help -version     Show help / version without opening a display
   --validate        Validate the configuration without CA connections or GUI

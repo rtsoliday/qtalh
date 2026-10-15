@@ -79,11 +79,94 @@ The changes do not alter configuration, log, checkpoint, or queue formats:
   and its periodic poll scans channels only while access rechecks or connection
   deadlines are pending. Regular expressions are compiled once.
 
+## Modern appearance and second optimization pass (2026-10-14)
+
+The modern appearance became the default in this pass, together with a second
+round of CPU work. The same harness, host, CPU assignments and 1,000-channel IOC
+workload compared the previous build ("before", the classic appearance that was
+then the default) with the new build in its modern default and with
+`-style motif`. Trials ran for 30 seconds, giving 0.033 percentage-point
+resolution; values are medians of three alternating trials.
+
+| Workload | Before (classic) | After, modern default | After, `-style motif` |
+| --- | ---: | ---: | ---: |
+| Main window, idle | 0.2667% | 0.2333% (12.5% lower) | 0.2333% (12.5% lower) |
+| Updates, logging disabled | 0.6333% | 0.5333% (15.8% lower) | 0.6000% (5.3% lower) |
+| Updates, logging enabled | 0.9000% | 0.8000% (11.1% lower) | 0.8333% (3.8% lower) |
+
+Each after-build updates trial used less CPU than every before trial. Xvfb CPU
+stayed at 0.033–0.067% in all runs. Raw trials:
+[modern](benchmarks/qtalh-modern-before-after-2026-10-14.csv) and
+[`-style motif`](benchmarks/qtalh-motif-before-after-2026-10-14.csv).
+
+The in-process harness (`benchmark_cpu`, 10,000 channels, offscreen, medians of
+three 10-second trials on one performance core) isolates engine, model and
+painting costs from Channel Access and X11:
+
+| Workload | Before (classic) | After, modern | After, `-style motif` |
+| --- | ---: | ---: | ---: |
+| Idle | 0.068% | 0.037% (46% lower) | 0.032% (53% lower) |
+| Runtime window only | 0.069% | 0.038% (45% lower) | 0.034% (51% lower) |
+| 2,000 updates/s | 0.745% | 0.610% (18% lower) | 0.571% (23% lower) |
+| 2,000 updates/s, active filter | 0.877% | 0.755% (14% lower) | 0.752% (14% lower) |
+
+[Raw trials](benchmarks/qtalh-modern-inprocess-2026-10-14.csv). CPU time for the
+first three seconds of a runtime with 20,000 unreachable channels fell from
+0.18 s to 0.16 s (modern) or 0.17 s (`-style motif`), medians of five trials.
+
+The changes keep every feature and do not alter configuration, log, checkpoint,
+queue, or CSV formats:
+
+- **Partial row repaints.** Rows report the first column whose content changed,
+  and the views repaint from that cell to the end of the row. A group whose
+  severities are unchanged repaints only its counts. Cells outside the
+  repainted region are not drawn, which also shrinks X11 updates.
+- **Incremental tree measurement.** The tree pane now re-measures only changed
+  rows, as the contents pane already did. Full measurements (expansion, filter
+  changes) update retained rows in place instead of rebuilding their records.
+- **Cached row facts.** Labels and the presence of subgroups, guidance and
+  commands are cached per document rather than re-read from directives on each
+  refresh; nodes change only by document replacement, which resets the cache.
+  Filtered refreshes skip the row diff when membership is unchanged.
+- **Event path.** Each published alarm transition walks the snapshot metadata
+  once instead of twice. Analytics finds a channel through the engine's shared
+  identity string before falling back to the text lookup.
+- **Fewer idle wakeups.** Analytics polls once per second (every 100 ms only
+  while a dashboard report is being computed) instead of ten times a second.
+  The notification pump sleeps while notifications are paused and nothing is
+  queued or in flight, which is the state of every runtime at startup. Mouse
+  motion within one row cell no longer repaints rows. The status refresh uses
+  the notification configuration resolved when the runtime attached, instead of
+  resolving the file path on every refresh, and re-measures the compact runtime
+  window only when its text or font changes.
+- **Modern painting.** Rows draw cached text layouts (`QStaticText`) and
+  pre-rendered chips instead of shaping text and rasterizing rounded shapes on
+  every repaint. The modern appearance uses no style sheets. The classic
+  appearance's pane divider is now painted directly instead of through a style
+  sheet on the alarm panes.
+- **Startup.** Analytics channel-instance identifiers (still RFC 4122 version 4
+  UUIDs) come from Qt's seeded generator instead of the system hardware
+  generator, which was called once per channel.
+
+The source base was `5699a1e8fe652238b747abf26f48265759b3f7cf`. SHA-256 of the
+measured executables:
+
+```text
+before d9b8b3241e4a08e4adb6dcbc07d92688a7751cf3cc2615ef9d05219dd3bff589
+after  26595cb6bf8532070f6f33a5e13629761337692e39cc2c924e803e46bc88fec5
+```
+
+The `-style motif` runs launched the same after executable through a wrapper
+that adds the option. All runs passed the harness validation. The full core,
+UI (modern, classic and Fusion), IOC, helper, notification and analytics suites
+passed with the measured build.
+
 ## Workload and environment
 
 - 1,000 channels in ten groups; active records alternate normal/MAJOR every
   0.5 seconds, nominally 2,000 transitions/second.
-- Global acknowledgement mode, muted sound, default legacy appearance, and
+- Global acknowledgement mode, muted sound, the default appearance (classic
+  before 2026-10-14 modernization, modern after, unless noted), and
   1000×600 main windows. QtALH also displays its default 220×35 runtime indicator;
   ALH does not display an equivalent separate runtime window with `-mainwindow`.
 - Three-second warmup before timing. Each trial starts a fresh application;

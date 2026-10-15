@@ -10,7 +10,9 @@ AnalyticsService::AnalyticsService(QObject* parent) : QObject(parent) {
   lastMono = monotonicNow();
   lastUtc = utcNow();
   analytics.reset(lastMono, lastUtc);
-  timer.setInterval(100);
+  // Retention and clock checks need only a slow cadence; a pending dashboard
+  // report is collected quickly (see request()).
+  timer.setInterval(IdlePoll);
   connect(&timer, &QTimer::timeout, this, [this] { poll(); });
   timer.start();
 }
@@ -76,6 +78,7 @@ void AnalyticsService::poll() {
       work->result.reset();
     }
   }
+  if (!work->busy && timer.interval() != IdlePoll) timer.setInterval(IdlePoll);
   if (result && result->generation == analytics.generation() && reportReady)
     reportReady(std::move(*result));
 }
@@ -84,6 +87,7 @@ void AnalyticsService::request(const AnalyticsQuery& q) {
   if (now - lastRequest < 1000 || work->busy.exchange(true))
     return;
   lastRequest = now;
+  if (timer.interval() != ReportPoll) timer.start(ReportPoll);
   auto snapshot = analytics.snapshot(now, utcNow());
   auto state = work;
   QThreadPool::globalInstance()->start(

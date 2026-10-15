@@ -83,7 +83,7 @@ make -C qtalh QT_VERSION=5 test-ui test-ui-fusion test-gallery
 Copy the selected images from the build's `test-artifacts/` directory using the
 mapping in `docs/site/public/images/README.md`.
 Embed them with descriptive alt text, for example
-`![Fusion channel Properties](/images/fusion-properties.png)`, and explain the
+`![Modern channel Properties](/images/modern-properties.png)`, and explain the
 relevant controls beside the image. This Markdown image syntax also respects
 `DOCS_BASE` for sites hosted in a subdirectory. Rebuild with `make docs` and check
 that the generated pages reference image files present under `docs/html/images/`.

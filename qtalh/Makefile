@@ -37,7 +37,7 @@ test-$(1): $(OBJ_DIR)/test_$(1).exe
 endef
 $(foreach test,$(TESTS),$(eval $(call test_rules,$(test))))
 $(addprefix $(OBJ_DIR)/tests/test_,$(addsuffix .obj,$(TESTS))): CPPFLAGS += -DTEST_OUTPUT='"$(abspath $(OBJ_DIR)/test-artifacts)"' -DEPICS_TEST_BIN='"$(EPICS_BASE)/bin/$(EPICS_HOST_ARCH)"' -DTEST_BIN_DIR='"$(abspath $(BIN_DIR))"'
-test: all $(addprefix test-,$(TESTS))
+test: all $(addprefix test-,$(TESTS)) test-ui-motif
 test-visual:
 	@echo "Visual comparisons require Motif ALH and X11 on Linux/macOS."
 	@exit 1
@@ -49,13 +49,15 @@ $(OBJ_DIR)/tests/test_visual.obj: $(OBJ_DIR)/test_visual.moc
 $(OBJ_DIR)/tests/test_visual.obj: CPPFLAGS += -DTEST_OUTPUT='"$(abspath $(OBJ_DIR)/test-artifacts)"'
 $(OBJ_DIR)/test_visual.exe: $(OBJECTS) $(OBJ_DIR)/tests/test_visual.obj
 	$(LINKEXE) $(LDFLAGS) /OUT:$@ $^ $(LIBS) $(QT_TEST_LIBS)
-.PHONY: test-gallery test-ui-fusion
+.PHONY: test-gallery test-ui-fusion test-ui-motif
 test-gallery: $(OBJ_DIR)/test_visual.exe
 	QT_QPA_PLATFORM=offscreen QT_QPA_FONTDIR="$(QT_QPA_FONTDIR)" $< dialogGallery
-	QT_QPA_PLATFORM=offscreen QT_QPA_FONTDIR="$(QT_QPA_FONTDIR)" QTALH_TEST_STYLE=fusion $< dialogGallery
-test-ui test-ui-fusion: $(OBJ_DIR)/qtalh.exe
+	QT_QPA_PLATFORM=offscreen QT_QPA_FONTDIR="$(QT_QPA_FONTDIR)" QTALH_TEST_STYLE=motif $< dialogGallery
+test-ui test-ui-fusion test-ui-motif: $(OBJ_DIR)/qtalh.exe
 test-ui-fusion: $(OBJ_DIR)/test_ui.exe
 	QT_QPA_PLATFORM=offscreen QT_QPA_FONTDIR="$(QT_QPA_FONTDIR)" QTALH_TEST_STYLE=fusion $(OBJ_DIR)/test_ui.exe
+test-ui-motif: $(OBJ_DIR)/test_ui.exe
+	QT_QPA_PLATFORM=offscreen QT_QPA_FONTDIR="$(QT_QPA_FONTDIR)" QTALH_TEST_STYLE=motif $(OBJ_DIR)/test_ui.exe
 else
 OBJ_DIR = O.$(OS)-$(ARCH)-qt$(QT_VERSION)
 CXXFLAGS ?= -O2 -g -Wall -Wextra -std=c++17 -fPIC
@@ -126,7 +128,7 @@ $(OBJ_DIR)/test_helpers: $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o)) $(OBJ_DIR)/serv
 test-helpers: all $(OBJ_DIR)/test_helpers
 	$(OBJ_DIR)/test_helpers
 
-test: test-core test-ui test-ioc test-helpers test-notifications test-analytics
+test: test-core test-ui test-ui-motif test-ioc test-helpers test-notifications test-analytics
 
 $(OBJ_DIR)/test_analytics.moc: tests/test_analytics.cc
 	@mkdir -p $(OBJ_DIR)
@@ -160,12 +162,14 @@ $(OBJ_DIR)/tests/test_visual.o: $(OBJ_DIR)/test_visual.moc
 $(OBJ_DIR)/tests/test_visual.o: CPPFLAGS += -DTEST_BIN_DIR='"$(abspath $(BIN_DIR))"' -DEPICS_TEST_BIN='"$(EPICS_BASE)/bin/$(EPICS_HOST_ARCH)"' -DTEST_OUTPUT='"$(abspath $(OBJ_DIR)/test-artifacts)"'
 $(OBJ_DIR)/test_visual: $(filter-out $(OBJ_DIR)/main.o,$(OBJECTS)) $(OBJ_DIR)/tests/test_visual.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(call qt_libs,Test)
-.PHONY: test-visual test-gallery test-ui-fusion
+.PHONY: test-visual test-gallery test-ui-fusion test-ui-motif
 test-gallery: $(OBJ_DIR)/test_visual
 	QT_QPA_PLATFORM=offscreen $(OBJ_DIR)/test_visual dialogGallery
-	QT_QPA_PLATFORM=offscreen QTALH_TEST_STYLE=fusion $(OBJ_DIR)/test_visual dialogGallery
+	QT_QPA_PLATFORM=offscreen QTALH_TEST_STYLE=motif $(OBJ_DIR)/test_visual dialogGallery
 test-ui-fusion: $(OBJ_DIR)/qtalh $(OBJ_DIR)/test_ui
 	QT_QPA_PLATFORM=offscreen QTALH_TEST_STYLE=fusion $(OBJ_DIR)/test_ui
+test-ui-motif: $(OBJ_DIR)/qtalh $(OBJ_DIR)/test_ui
+	QT_QPA_PLATFORM=offscreen QTALH_TEST_STYLE=motif $(OBJ_DIR)/test_ui
 test-visual: $(OBJ_DIR)/test_visual
 	$(OBJ_DIR)/test_visual
 

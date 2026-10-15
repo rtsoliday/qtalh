@@ -21,7 +21,9 @@ private slots:
   void dialogGallery() {
     initializeAppearance(qEnvironmentVariable("QTALH_TEST_STYLE"));
     QTemporaryDir temp;
-    QString output = QString(TEST_OUTPUT) + (legacyAppearance() ? "/dialogs" : "/dialogs-fusion");
+    // The default modern gallery and the classic (motif) or other-style galleries.
+    const auto style = qEnvironmentVariable("QTALH_TEST_STYLE").toLower();
+    QString output = QString(TEST_OUTPUT) + (style.isEmpty() || style == "modern" ? "/dialogs" : "/dialogs-" + style);
     QVERIFY(QDir().mkpath(output));
     for (bool editor : {false, true}) {
       auto d = parseConfig("GROUP NULL QTALH_REFERENCE\n$GUIDANCE\nOperator guidance for the reference facility.\n"
@@ -137,7 +139,8 @@ private slots:
 #ifdef Q_OS_WIN
     QSKIP("The Motif reference comparison requires X11");
 #else
-    initializeAppearance();
+    // Compare like with like: the classic QtALH appearance beside Motif ALH.
+    initializeAppearance("motif");
     const QString output = QString(TEST_OUTPUT);
     QDir().mkpath(output);
     QTemporaryDir tmp;

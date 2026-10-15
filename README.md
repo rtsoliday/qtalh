@@ -4,9 +4,10 @@ The repository contains the original Motif programs in `alh/` and a C++17 Qt
 port in `qtalh/`. Both use GNU Make and shared EPICS discovery in
 `Makefile.rules`; neither requires an EPICS extensions tree or MEDM checkout.
 
-The default QtALH appearance retains the familiar Motif look. Add `-style fusion`
-to opt into modern controls and layouts, for example
-`qtalh -style fusion -mainwindow facility.alhConfig`. See the
+QtALH starts with a modern appearance that keeps ALH's layout, menus, shortcuts,
+alarm colors and notation, so ALH operators can work without relearning it.
+Add `-style motif` for the classic Motif look, for example
+`qtalh -style motif -mainwindow facility.alhConfig`. See the
 [appearance guide](docs/qtalh-appearance.md) for screenshots and details.
 
 ## Documentation
@@ -219,6 +220,7 @@ CDEV and CMLOG are outside the Qt port's scope.
 make -j4 test-qtalh              # core, offscreen UI, IOC, and helper tests
 make -C qtalh test-core
 make -C qtalh test-ui            # offscreen UI; native macOS child for audio
+make -C qtalh test-ui-motif      # the same UI suite with the classic appearance
 make -C qtalh test-ioc           # starts its own softIoc on loopback
 make -C qtalh test-helpers       # requires legacy binaries and local rpcbind
 make -C qtalh test-visual        # requires built legacy ALH, X11, xwininfo, softIoc

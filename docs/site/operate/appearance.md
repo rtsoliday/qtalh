@@ -1,49 +1,60 @@
 # Appearance & font size
 
-QtALH keeps its Motif-influenced appearance by default. Choose a Qt Widgets style
-at startup if you prefer modern controls. The same choice applies to the editor,
-its dialogs, and runtime windows activated from that editor.
+QtALH starts with a modern appearance that keeps everything ALH operators rely
+on: the two alarm panes, the order of each row's controls, the menus and their
+keyboard shortcuts, ALH's alarm colors and letters, the mask and count notation,
+and the buttons of every dialog. Only the presentation is updated. The same
+choice applies to the editor, its dialogs, and runtime windows activated from
+that editor.
 
-## Choose Fusion or keep Motif
+## Modern or classic
 
-Fusion is a portable choice for Qt 5.15 and Qt 6 on Linux, macOS, and Windows.
 From the repository root, launch the runtime or editor with:
 
 ```sh
-bin/Linux-x86_64/qtalh -style fusion -mainwindow examples/minimal.alhConfig
-bin/Linux-x86_64/qtalh -c -style fusion examples/minimal.alhConfig
+bin/Linux-x86_64/qtalh -mainwindow examples/minimal.alhConfig
+bin/Linux-x86_64/qtalh -c examples/minimal.alhConfig
 ```
 
 The runtime connects to the configured PVs; the editor does not start monitoring.
 On macOS or Windows, substitute your platform's executable path.
 
-`-style=Fusion` also works. Style names are case-insensitive; the last occurrence
-wins. Other styles depend on the Qt installation. An unknown name reports the
-available styles before connecting to PVs. Omit `-style`, or use `-style motif`,
-to restore the original appearance. Environment style settings alone do not
-select the redesigned interface.
+Add `-style motif` for the classic Motif-influenced appearance. `-style fusion`
+or another installed Qt Widgets style applies that style's controls and the
+desktop palette to the modern layouts; `-style modern` selects the default
+explicitly. `-style=name` also works. Style names are case-insensitive; the last
+occurrence wins. An unknown name reports the available styles before connecting
+to PVs. Environment style settings do not change the appearance.
 
-### Fusion
+### Modern
 
-![Fusion main window with the alarm tree, contents pane, Status section, and Alarm sound controls](/images/fusion-main.png)
+![Modern main window with the alarm tree, contents pane, status area, and alarm sound controls](/images/modern-main.png)
 
-The panes and alarm actions retain their behavior. Styled mode adds standard
-menus and controls, a labeled pane-width slider, and an **Alarm legend** that
-starts collapsed. Expand the legend to read the mask and alarm-count notation.
-The **Alarm sound** rows share a right-aligned text edge in every style.
+- Acknowledge and severity buttons are rounded chips with ALH's colors and
+  letters. Group names are bold. Configured masks and channel alarm data stand
+  out; the default `<----->` mask and group counts are secondary.
+- The selected row is tinted with an accent edge, so alarm colors stay
+  readable. Rows highlight under the pointer and clicking anywhere on a row
+  selects it.
+- Drag the divider between the panes to resize them.
+- The status area keeps ALH's lines. Expand **Alarm legend** to read the mask
+  and alarm-count notation. **Silence Forever: On** is shown in bold amber.
+- Errors also appear in a warning strip at the bottom of the window; dismiss it
+  with its **✕** button.
+- The palette is light, or dark when the desktop palette is dark.
 
-### Default Motif appearance
+### Classic Motif appearance
 
-![Default Motif-influenced main window using the same synthetic alarm fixture](/images/main-window.png)
+![Classic Motif-influenced main window using the same synthetic alarm fixture](/images/main-window.png)
 
 Both screenshots use repository test data rather than a live facility. Alarm
 colors, severity letters, mask meaning, blinking, and acknowledgement behavior
-are preserved across appearances. Typography and window decorations vary by
+are the same in both appearances. Typography and window decorations vary by
 platform.
 
 ## Adjust the font while running
 
-These shortcuts are available with any explicitly selected style other than Motif:
+These shortcuts are available in every appearance except Motif:
 
 | Action | Linux / Windows | macOS |
 | --- | --- | --- |
@@ -63,19 +74,36 @@ font. An explicit font starts at its requested size; the shortcuts adjust it
 relative to that size, and reset restores it.
 
 Style and font adjustments last for this process only. No appearance preference
-is saved. Colors come from the selected style and desktop palette; there is no
-separate light/dark option.
+is saved.
 
 ## Dialogs and compact runtime
 
-The compact window keeps its facility button and mask summary. Click it to open
-the main window; it grows with its content and font size.
+The compact window keeps its facility button and mask summary as one tile in the
+facility's alarm color. Click it to open the main window; it grows with its
+content and font size.
 
-![Fusion compact runtime facility button](/images/fusion-runtime.png)
+![Modern compact runtime facility tile](/images/modern-runtime.png)
 
-[Properties](/configure/editor#edit-properties-and-guidance) uses four tabs:
-General, Force PV, Commands, and Guidance. Styled forms use **Close** for the
-dismiss action. Apply and Cancel retain their existing meanings. File selection
-uses Qt's styled file dialog; printing uses the platform's print dialog.
+Dialogs keep their names, fields and buttons. In the modern appearance:
+
+- Actions keep ALH's order (Apply, Reset, Cancel, Close) on the right, with
+  **Help** on the left; **Close** replaces **Dismiss**.
+- **Modify Mask Settings** highlights the current setting of each mask field;
+  a group whose channels differ shows *Mixed (n of m)*. Choices still apply
+  immediately.
+
+![Modern Modify Mask Settings](/images/modern-mask.png)
+
+- [Properties](/configure/editor#edit-properties-and-guidance) uses four tabs:
+  General, Force PV, Commands, and Guidance. In the runtime, unset fields read
+  *Not set*.
+- **Current Alarm History** is a table with severity cells in alarm colors.
+- Text viewers and log browsers share a find bar: press Enter for the next
+  match or Shift+Enter for the previous one.
+- Send Message, Stop Alarm Logging and Reload Facility use task-specific
+  buttons (Send, Stop Logging, Reload).
+
+File selection uses Qt's styled file dialog; printing uses the platform's print
+dialog.
 
 For guidance and command previews, see [G and P buttons](/operate/alarms#open-guidance-or-a-related-process).

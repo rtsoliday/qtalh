@@ -6,6 +6,7 @@
 #include <QMap>
 #include <QDrag>
 #include <QPushButton>
+#include <QStaticText>
 #include <QTreeView>
 #include <QTimer>
 #include <array>
@@ -46,6 +47,7 @@ protected:
   bool event(QEvent*) override;
   void currentChanged(const QModelIndex&, const QModelIndex&) override;
   bool viewportEvent(QEvent*) override;
+  void paintEvent(QPaintEvent*) override;
   void drawStyledRow(QPainter*, const QStyleOptionViewItem&, const QModelIndex&) const;
   void drawRow(QPainter*, const QStyleOptionViewItem&, const QModelIndex&) const override;
   void drawBranches(QPainter*, const QRect&, const QModelIndex&) const override {}
@@ -56,20 +58,37 @@ private:
   QPoint dragOrigin;
   QTimer arrowTimer;
   bool tree;
+  // The region being painted; rows skip cells outside it.
+  QRegion paintRegion;
   bool extentPending = false;
   // Data-only changes repaint their own rows; other triggers repaint everything.
   bool extentRepaint = true;
-  // Group views can hold thousands of rows. Keep each row's extent so a data
-  // change re-measures only the reported rows; structural changes measure all.
+  // Views can hold thousands of rows. Keep each visible row's extent so a data
+  // change re-measures only the reported rows; structural changes (including
+  // tree expansion) measure all. Recorded indexes stay valid until then.
   bool extentFull = true;
-  QVector<int> extentRows;
-  QHash<const void*, int> rowExtents;
+  QVector<QModelIndex> extentRows;
+  bool rowShown(const QModelIndex&) const;
+  // A full measurement marks the rows it visits and then drops unvisited ones,
+  // so retained rows are updated in place rather than reallocated.
+  struct RowExtent {
+    int width = 0;
+    quint32 generation = 0;
+  };
+  QHash<const void*, RowExtent> rowExtents;
+  quint32 extentGeneration = 0;
   QMap<int, int> extentCounts;
   void setRowExtent(const QModelIndex&);
   void updateRow(const QModelIndex&);
   // Text/font values survive model refreshes; cap retained labels and measurements.
   mutable QCache<QPair<QFont, QString>, int> textWidths{256 * 1024};
   int textAdvance(const QString&, const QFont&) const;
+  // Modern rows repaint the same labels and chips repeatedly: keep prepared
+  // text layouts and rendered chips instead of shaping and rasterizing again.
+  mutable QCache<QPair<QFont, QString>, QStaticText> staticTexts{4096};
+  mutable QHash<QPair<quint64, quint64>, QPixmap> chipImages;
+  void drawLabel(QPainter*, const QRect&, const QString&, const QFont&, bool centered) const;
+  void drawChip(QPainter*, const QRect&, const QColor& fill, const QColor& outline) const;
   void invalidateTextWidths();
   std::array<QRect, 9> cells(const QModelIndex&, const QRect&) const;
   void updateExtent();

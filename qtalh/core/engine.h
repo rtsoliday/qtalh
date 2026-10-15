@@ -177,6 +177,7 @@ private:
   mutable quint64 snapshotMetadataRevision = 0;
   const SnapshotMetadata& snapshotMetadata(const Node*) const;
   ChannelUpdate snapshot(Node*, const State&, qint64 observedAt) const;
+  ChannelUpdate snapshot(const SnapshotMetadata&, const State&, qint64 observedAt) const;
   void publish(Node*, const State&, ObservationCause);
   qint64 nextStateDeadline = 0, nextShelfDeadline = 0;
   bool externalStateAccess = false;

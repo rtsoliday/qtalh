@@ -16,6 +16,7 @@
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QPushButton>
+#include <QTableWidget>
 #include <QTreeView>
 namespace alh {
 class AlarmModel : public QAbstractItemModel {
@@ -60,9 +61,20 @@ private:
              shelved == o.shelved && status == o.status && beep == o.beep && flags == o.flags &&
              label == o.label;
     }
+    // The first displayed column whose content differs. Cells are laid out
+    // consecutively, so everything from that column to the row's end repaints.
+    int firstDifference(const RowSignature& o) const;
   };
   QHash<Node*, RowSignature> signatures;
   RowSignature signature(Node*) const;
+  // Configuration facts shown on each row. Nodes change only through a
+  // document replacement, which resets the model and this cache.
+  struct NodeInfo {
+    QString label;
+    bool childGroups = false, guidance = false, command = false;
+  };
+  mutable QHash<Node*, NodeInfo> nodeInfo;
+  const NodeInfo& info(Node*) const;
   // Fonts are requested for every painted and measured cell.
   QFont font(int column, bool group) const;
   mutable QFont legacyText, legacyName, styledBase;
@@ -105,8 +117,10 @@ private:
   QLabel *execution = nullptr, *filename = nullptr, *messageArea = nullptr, *beepLabel = nullptr,
          *silenceForeverLabel = nullptr, *disabledForceLabel = nullptr, *shelvedLabel = nullptr,
          *notificationsEnabledLabel = nullptr;
-  QWidget* runtime = nullptr;
+  QWidget *runtime = nullptr, *messageBanner = nullptr;
   QPushButton* runtimeButton = nullptr;
+  QString runtimeSizedText;
+  QFont runtimeSizedFont;
   QCheckBox *silenceBox = nullptr, *currentBox = nullptr;
   QTimer refreshTimer, beepTimer, heartbeatTimer;
   int silenceMinutes = 30;
@@ -119,6 +133,10 @@ private:
   QPointer<QMessageBox> errorPopup, exitPopup;
   QVector<QPointer<QAction>> selectionActions;
   QPointer<QPlainTextEdit> historyText;
+  QPointer<QTableWidget> historyTable;
+  // The engine history last shown; unchanged history leaves the view untouched.
+  QVector<QString> shownHistory;
+  void refreshHistory();
   struct SelectionDialog {
     QPointer<QDialog> window;
     Node* node = nullptr;
@@ -151,6 +169,7 @@ private:
   void click(const QModelIndex&, AlarmModel*);
   void select(Node*);
   void error(const QString&);
+  void showMessage(const QString&);
   void open(bool insert = false);
   void save(bool as = false);
   void replace(Document, bool snapshot = true);
@@ -160,7 +179,7 @@ private:
   void related(Node* target = nullptr);
   void masks(bool forced = false);
   void beepSeverity(bool global);
-  void showText(const QString&, const QString&);
+  void showText(const QString&, const QString&, bool monospace = false);
   void showLiveLog(bool alarm);
   void selectLogFile(bool alarm);
   void showHistory();

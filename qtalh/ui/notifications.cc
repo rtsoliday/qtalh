@@ -343,6 +343,7 @@ void Window::showNotifications() {
   auto preview = new QPushButton("Preview message");
   for (auto b : {addRule, editRule, removeRule, preview})
     ruleRow->addWidget(b);
+  if (!legacyAppearance()) ruleRow->addStretch();
   auto editSubscription = [=](bool add) {
     NotificationSubscription r;
     r.id = notificationId();
@@ -430,6 +431,7 @@ void Window::showNotifications() {
   auto removeDest = new QPushButton("Remove");
   for (auto b : {addDest, editDest, removeDest, test})
     destRow->addWidget(b);
+  if (!legacyAppearance()) destRow->addStretch();
   auto editDestination = [=](bool add) {
     int i = destinations->currentRow();
     if (!add && i < 0)
@@ -474,8 +476,11 @@ void Window::showNotifications() {
   auto reload = new QPushButton("Reload saved settings");
   reload->setObjectName("reloadNotifications");
   auto close = new QPushButton("Close");
-  for (auto b : {save, reload, close})
+  for (auto b : {save, reload, close}) {
+    // Modern rows keep natural button widths with Close on the right.
+    if (b == close && !legacyAppearance()) bottom->addStretch();
     bottom->addWidget(b);
+  }
   connect(save, &QPushButton::clicked, dialog, [=] {
     try {
       notifications->store.save(*draft);

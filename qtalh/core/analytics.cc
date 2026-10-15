@@ -1,6 +1,7 @@
 #include "analytics.h"
 #include <QDateTime>
 #include <QTimeZone>
+#include <QRandomGenerator>
 #include <QUuid>
 #include <algorithm>
 namespace alh {
@@ -58,6 +59,18 @@ QString stamp(qint64 utc) {
              : QString();
 }
 QString number(qint64 ms) { return QString::number(ms / 1000.0, 'f', 3); }
+// Opaque RFC 4122 version 4 channel-instance identifiers. QUuid::createUuid
+// reads the system (hardware) generator for every channel, which dominated
+// startup with large configurations; the seeded global generator is enough here.
+QString instanceId() {
+  quint32 words[4];
+  QRandomGenerator::global()->fillRange(words);
+  const QUuid id(words[0], ushort(words[1] >> 16), ushort((words[1] & 0x0fff) | 0x4000),
+                 uchar(((words[2] >> 24) & 0x3f) | 0x80), uchar(words[2] >> 16), uchar(words[2] >> 8),
+                 uchar(words[2]), uchar(words[3] >> 24), uchar(words[3] >> 16), uchar(words[3] >> 8),
+                 uchar(words[3]));
+  return id.toString(QUuid::WithoutBraces);
+}
 QString field(QString value) {
   int i = 0;
   while (i < value.size() && value[i].isSpace())
@@ -93,6 +106,23 @@ void AlarmAnalytics::reset(qint64 now, qint64 utc) {
   data.started = data.coverage = now;
   data.startedUtc = utc;
   index.clear();
+  sharedIndex.clear();
+}
+int AlarmAnalytics::channelIndex(const QString& identity) {
+  const auto buffer = identity.constData();
+  const auto hint = sharedIndex.constFind(buffer);
+  // A stored identity keeps its buffer alive, so a matching address is the same
+  // string. Stale or reused addresses fail this check and use the text lookup.
+  if (hint != sharedIndex.cend() && *hint < data.channels.size() &&
+      data.channels[*hint].identity.constData() == buffer &&
+      data.channels[*hint].identity.size() == identity.size())
+    return *hint;
+  const int i = index.value(identity, -1);
+  if (i >= 0) {
+    data.channels[i].identity = identity;
+    sharedIndex.insert(buffer, i);
+  }
+  return i;
 }
 void AlarmAnalytics::append(int i, AnalyticsRecord r) {
   r.channel = i;
@@ -139,6 +169,7 @@ void AlarmAnalytics::gap(qint64 now, qint64 utc) {
 }
 void AlarmAnalytics::reconcile(const QVector<ChannelUpdate>& all, qint64 now, qint64 utc) {
   gap(now, utc);
+  sharedIndex.clear();
   for (auto& c : data.channels)
     c.removed = true;
   QHash<QString, int> counts;
@@ -160,7 +191,7 @@ void AlarmAnalytics::reconcile(const QVector<ChannelUpdate>& all, qint64 now, qi
     if (i < 0) {
       AnalyticsChannel c;
       c.identity = key;
-      c.key = QUuid::createUuid().toString(QUuid::WithoutBraces);
+      c.key = instanceId();
       c.path = s.path;
       c.pv = s.pv;
       c.ancestors = s.ancestors;
@@ -183,7 +214,7 @@ void AlarmAnalytics::reconcile(const QVector<ChannelUpdate>& all, qint64 now, qi
 }
 void AlarmAnalytics::observe(const AlarmObservation& o, qint64 now, qint64 utc) {
   const auto& s = o.after;
-  int i = index.value(s.identity, -1);
+  int i = channelIndex(s.identity);
   if (i < 0)
     return;
   auto& c = data.channels[i];

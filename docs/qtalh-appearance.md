@@ -1,65 +1,108 @@
 # QtALH appearance
 
-## Optional modern styling
+## Modern appearance (default)
 
-The default remains the Motif-influenced appearance described below. Use
-`qtalh -style fusion -mainwindow facility.alhConfig` for modern styling, or add
-`-c` for the configuration editor. `-style motif` explicitly restores the default.
-Both `-style name` and `-style=name` are accepted; names are case-insensitive and
-the last occurrence wins. Installed Qt Widgets styles are supported; Fusion is
-the portable recommendation for Qt 5.15 and Qt 6 on Linux, macOS, and Windows.
+QtALH starts with a modern appearance designed to stay familiar to ALH operators.
+The window layout, menus and menu items, keyboard shortcuts, row structure,
+severity letters and colors, mask and count notation, and every dialog's
+actions are the same as ALH's; only the presentation is updated. Use
+`-style motif` for the classic Motif-influenced appearance described in the
+historical sections below, or `-style fusion` (or another installed Qt Widgets
+style) to apply that style's controls and the desktop palette to the modern
+layouts. Both `-style name` and `-style=name` are accepted; names are
+case-insensitive and the last occurrence wins. `-style modern` selects the
+default explicitly.
 
-Styled mode retains the two alarm panes and content-sized rows. It uses styled
-buttons, disclosure indicators, focus/selection feedback, a standard splitter
-and width slider, and separate Status and Alarm sound sections. Alarm legend
-starts collapsed. Alarm colors and severity letters remain visible on both light
-and dark palettes; normal surfaces use the selected style and system palette.
-The Alarm sound captions and status lines share the same right-aligned text edge
-in every style. G tooltips preview guidance text or its configured external
-reference; P tooltips preview the effective command or menu of commands. These
-previews also work in Motif mode.
-Fonts and row hit targets scale together. No widgets are allocated per alarm row.
+![Modern main window](site/public/images/modern-main.png)
 
-Styled fonts default to one point smaller than the system font sizes (with a
-minimum of 6 points). An explicitly configured runtime-button font keeps its
-requested size. With any explicit style other than Motif, **Ctrl+-** decreases the font size,
-**Ctrl++** (or **Ctrl+=**) increases it, and **Ctrl+0** restores the startup size.
-Use **Command** instead of Ctrl on macOS. Each press changes the size by one
-point, with a UI range of 6–72 points. Changes apply throughout the process,
-including open dialogs and newly opened windows; monospace text and custom
-runtime-button fonts retain their families. Font sizes are not saved between
-launches. Bare `+` and `-` continue to expand and collapse the alarm tree.
-These font shortcuts are disabled in Motif mode.
+Main window:
 
-![Fusion main window](site/public/images/fusion-main.png)
+- The two alarm panes keep ALH's content-sized rows: acknowledge button,
+  severity, name, disclosure arrow, G, P, mask, beep severity, and counts or
+  channel alarm data, in that order. Acknowledge and severity are drawn as
+  rounded color chips with ALH's letters; group names are bold.
+- Selection is a tinted row with an accent edge, so alarm colors stay
+  readable. Rows highlight under the pointer, and clicking anywhere on a row
+  selects it; the controls keep their own actions and show a pointing cursor.
+- Configured masks (anything other than `<----->`) and channel alarm data use
+  the main text color; defaults and group counts are secondary.
+- The panes are resized by dragging the divider. The classic width slider is
+  shown only with `-style motif`.
+- The status area keeps the same lines without frames: execution status,
+  Disabled forcePVs and Shelved counts, the filename (selectable), and the
+  collapsible **Alarm legend** on the left; silence controls, Silence Forever,
+  ALH Beep Severity, and the notification indicator on the right.
+  **Silence Forever: On** is shown in bold amber so a permanently silenced
+  handler is obvious.
+- Errors appear in a dismissible warning strip at the bottom of the window,
+  as well as in the ALH Message popup.
+- The compact runtime window is one rounded tile in the facility's alarm color,
+  blinking for unacknowledged alarms as before.
 
-Properties groups all existing fields into General, Force PV, Commands, and
-Guidance tabs. Apply/Cancel/Close remain available below the tabs. The selected
-tab and scroll positions survive selection-driven rebuilding. Force PV has a
-scrollable grouped form with its action row always outside the scrolling area.
-Mask dialogs retain their existing immediate-action and Apply/Reset behavior.
-History and log text keep fixed-width fonts; prose uses the system UI font.
+The palette is light by default and becomes dark when the desktop's palette is
+dark. Alarm colors (MINOR yellow, MAJOR red, INVALID and ERROR white) keep their
+ALH meaning with slightly deeper tones for legible letters on either palette.
 
-![Fusion editor Properties](site/public/images/fusion-properties.png)
+Dialogs keep their names, fields and buttons, with clearer layouts:
+
+- Action rows keep ALH's order (Apply, Reset, Cancel, Close) on the right, with
+  Help on the left. Help also shows its text as a tooltip. **Close** replaces
+  the Motif **Dismiss** label.
+- **Modify Mask Settings** shows each field as a two-part toggle
+  (for example *Add | Cancel*) with the current setting highlighted, plus
+  Reset. For a group whose channels differ, neither part is highlighted and the
+  row shows *Mixed (n of m)*. Choices still apply immediately.
+- **Properties** groups the fields into General, Force PV, Commands and
+  Guidance tabs of aligned forms. In the runtime, values read as text and unset
+  fields say *Not set*; the editor keeps editable fields, with completion for
+  Beep Severity. The count filter reads *n alarms within s seconds*.
+- **Force Process Variable** and **Force Mask** arrange the mask choices in
+  two columns, so the whole form fits without scrolling.
+- **Beep Severity** shows a color sample beside each severity.
+- **Current Alarm History** is a table with Time, Process Variable, Status,
+  Severity and Value columns; severity cells use the alarm colors.
+- Guidance, configuration, live log and log-browser text share one find bar:
+  type, then press Enter (next) or Shift+Enter (previous), or use the Previous
+  and Next buttons. The log browser's ShowSelected button is labeled **Search**.
+- Send Message, Stop Alarm Logging and Reload Facility have task-specific
+  titles, prompts and buttons (Send, Stop Logging, Reload).
+- Exit asks "Exit Alarm Handler?" and names the facility whose monitoring stops.
+
+![Modern Modify Mask Settings](site/public/images/modern-mask.png)
+
+![Modern editor Properties](site/public/images/modern-properties.png)
+
+Fonts default to one point smaller than the system font sizes (with a minimum
+of 6 points). An explicitly configured runtime-button font keeps its requested
+size. Outside Motif mode, **Ctrl+-** decreases the font size, **Ctrl++** (or
+**Ctrl+=**) increases it, and **Ctrl+0** restores the startup size. Use
+**Command** instead of Ctrl on macOS. Each press changes the size by one point,
+with a UI range of 6–72 points. Changes apply throughout the process, including
+open dialogs and newly opened windows; monospace text and custom runtime-button
+fonts retain their families. Font sizes are not saved between launches. Bare
+`+` and `-` continue to expand and collapse the alarm tree. These font shortcuts
+are disabled in Motif mode. Fonts and row hit targets scale together. No
+widgets are allocated per alarm row.
 
 Open/Save/report/log selection uses the standard Qt file dialog with native
-file dialogs disabled, so it follows the selected style. Other dialogs, prompts,
-menus, and tooltips use the same appearance. Printing continues to use Qt's
-platform-specific print dialog, and external browser/process windows retain
-their own appearance.
+file dialogs disabled, so it follows the selected style. Printing continues to
+use Qt's platform-specific print dialog, and external browser/process windows
+retain their own appearance.
 
 Style selection is per launch, including windows created by the editor. Nothing
-is stored in the configuration. There is no explicit light/dark switch or extra
-theme dependency. `QT_STYLE_OVERRIDE` alone does not opt into modern layouts;
-`-fn`, `-font`, and `ALHMAINFONT` retain their runtime-button-only scope.
+is stored in the configuration. `QT_STYLE_OVERRIDE` does not change the
+appearance; use `-style`. `-fn`, `-font`, and `ALHMAINFONT` retain their
+runtime-button-only scope.
 
-Run `make -C qtalh QT_VERSION=5 test-ui-fusion test-gallery` for Fusion workflows
-and separate legacy/Fusion dialog galleries. The Qt-only gallery supports
-Windows without Motif/X11. See the [test guide](../qtalh/tests/README.md).
+Run `make -C qtalh QT_VERSION=5 test-ui test-ui-motif test-ui-fusion test-gallery`
+for the modern, classic and Fusion workflows and the modern and classic dialog
+galleries. The Qt-only gallery supports Windows without Motif/X11. See the
+[test guide](../qtalh/tests/README.md).
 
 ## Historical Motif comparison
 
-This section records historical comparisons and remaining appearance differences.
+This section records historical comparisons of the classic appearance
+(`-style motif`, the default before October 2026) and remaining differences.
 The initial Qt/Motif comparison used a site-local Radiation Monitors
 configuration (`Rad_Mon.alhConfig`) and an installed `bell.oga` sound. Those
 site files and the original log directories are not part of this repository.
@@ -158,10 +201,12 @@ specific. Help topics still open the external browser. Pixel-identical rendering
 is not expected across font libraries, Qt versions, and window managers.
 
 From `qtalh/`, `O.Linux-x86_64-qt5/test_visual dialogGallery` captures both
-runtime and editor windows plus their
-auxiliary dialogs in `qtalh/O.<OS>-<ARCH>-qt<version>/test-artifacts/dialogs/`.
-The full `test-visual` target also runs the loopback-only IOC comparison and
-writes the Motif/Qt main-window captures and alarm transition trace.
+runtime and editor windows plus their auxiliary dialogs in
+`qtalh/O.<OS>-<ARCH>-qt<version>/test-artifacts/dialogs/` (modern appearance);
+`QTALH_TEST_STYLE=motif` writes the classic captures to `dialogs-motif/`, and
+other styles to `dialogs-<style>/`. The full `test-visual` target also runs the
+loopback-only IOC comparison with the classic appearance and writes the Motif/Qt
+main-window captures and alarm transition trace.
 The gallery is an inspection artifact, not a pixel-diff assertion. UI regression
 checks exercise file filtering/selection/cancellation, property editing and
 undo, group mask operations, and Force PV Apply/Cancel behavior.

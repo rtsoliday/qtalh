@@ -78,6 +78,10 @@ public:
 private:
   AnalyticsSnapshot data;
   QHash<QString, int> index;
+  // Observations carry the engine's shared identity strings, so the string's
+  // buffer address finds the channel without hashing the identity text.
+  QHash<const QChar*, int> sharedIndex;
+  int channelIndex(const QString& identity);
   void append(int, AnalyticsRecord);
   void invalidate(int, qint64, qint64);
 };

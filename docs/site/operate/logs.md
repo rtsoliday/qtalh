@@ -32,11 +32,13 @@ historical browser to search older records.
 ## Read current history
 
 Choose **View → Current Alarm History** for the most recent in-memory entries.
-The reading area is resizable and uses a fixed-width font to align the columns.
-In a non-Motif style, the [font-size shortcuts](/operate/appearance#adjust-the-font-while-running)
+The modern appearance shows a table with Time, Process Variable, Status,
+Severity and Value columns, with severity cells in the alarm colors; the classic
+appearance shows aligned fixed-width text. Outside Motif mode, the
+[font-size shortcuts](/operate/appearance#adjust-the-font-while-running)
 also work while this dialog has focus.
 
-![Fusion current alarm history showing a synthetic HIHI/MAJOR transition](/images/fusion-history.png)
+![Modern current alarm history showing a synthetic HIHI/MAJOR transition](/images/modern-history.png)
 
 ## Understand circular files
 

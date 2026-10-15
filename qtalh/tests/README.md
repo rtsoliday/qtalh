@@ -22,9 +22,10 @@ Individual targets allow testing the Qt core/UI/CA without Motif:
 | Target (use `make -C qtalh TARGET`) | Coverage and extra prerequisites |
 | --- | --- |
 | `test-core` | Parser, options, alarm state, masks, fake clocks/PV callbacks, and queue encoding. No live IOC or display required. |
-| `test-ui` | Models, editor, dialogs, lifecycle, and muted audio playback. Uses `QT_QPA_PLATFORM=offscreen`; needs a functioning Qt media backend. On macOS the audio case starts a native Cocoa child. |
-| `test-ui-fusion` | Shared UI workflow suite in a fresh Fusion process, including style startup errors, font-size shortcuts across windows/dialogs, large-font geometry, and dark-palette indicators. Builds the GUI executable. |
-| `test-gallery` | Separate legacy and Fusion galleries, including every Properties tab and the Force PV scroll area; no Motif, IOC, or X11 dependency. Also available with the Windows Makefile. |
+| `test-ui` | Models, editor, dialogs, lifecycle, and muted audio playback in the default modern appearance, including style startup errors, font-size shortcuts across windows/dialogs, large-font geometry, and dark-palette indicators. Uses `QT_QPA_PLATFORM=offscreen`; needs a functioning Qt media backend. On macOS the audio case starts a native Cocoa child. |
+| `test-ui-motif` | The same UI suite with the classic Motif appearance (`QTALH_TEST_STYLE=motif`), including its bevels, row heights and width slider. Part of `make -C qtalh test`. |
+| `test-ui-fusion` | The same UI suite in a fresh Fusion process (`QTALH_TEST_STYLE=fusion`). Builds the GUI executable. |
+| `test-gallery` | Separate modern (`dialogs/`) and classic (`dialogs-motif/`) galleries, including every Properties tab and the Force PV scroll area; no Motif, IOC, or X11 dependency. Also available with the Windows Makefile. |
 | `test-ioc` | Real CA events, acknowledgements, outputs, reconnection, and access rights. Requires the built Base's `bin/<EPICS_HOST_ARCH>/softIoc`. |
 | `test-helpers` | Log rotation/recovery, broadcasts, locks, and Unix queue/TCP/RPC compatibility. On Linux/macOS, requires `alh_printer`, `alh_DB`, and local rpcbind in addition to the Qt helpers built by this target. |
 | `test-visual` | Motif/Qt screenshots, dialog gallery, and an ordered alarm-log comparison. Requires a built `alh`, `softIoc`, an X11 display, and `xwininfo`. Does not build the legacy application. |
@@ -104,27 +105,38 @@ the default regression target.
 
 ## Appearance validation
 
-Run `make -C qtalh QT_VERSION=5 test-core test-ui test-ui-fusion test-gallery`.
+Run `make -C qtalh QT_VERSION=5 test-core test-ui test-ui-motif test-ui-fusion test-gallery`.
 Use `QT_VERSION=6` with a matching installed Qt SDK to repeat the checks.
-The Fusion gallery is in `test-artifacts/dialogs-fusion/`; legacy captures remain
-in `test-artifacts/dialogs/`. `QTALH_TEST_STYLE` is a test/benchmark harness
-setting, not an application preference. Actual GUI launches use `-style`.
+The modern gallery is in `test-artifacts/dialogs/` and the classic gallery in
+`test-artifacts/dialogs-motif/`. Unset `QTALH_TEST_STYLE` selects the modern
+appearance; `motif`, `fusion` or another style name selects that appearance.
+UI screenshots are prefixed `modern-`, `classic-` or the style name. It is a
+test/benchmark harness setting, not an application preference. Actual GUI
+launches use `-style`.
 
 For display scaling, run the focused checks in separate processes:
 
 ```sh
 cd qtalh
-QT_QPA_PLATFORM=offscreen QTALH_TEST_STYLE=fusion QT_SCALE_FACTOR=1.5 \
+QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=1.5 \
   O.Linux-x86_64-qt5/test_ui motifLayoutAndHitTargets styledRowGeometryAndPalette dialogs
-QT_QPA_PLATFORM=offscreen QTALH_TEST_STYLE=fusion QT_SCALE_FACTOR=2 \
+QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=2 \
   O.Linux-x86_64-qt5/test_ui motifLayoutAndHitTargets styledRowGeometryAndPalette dialogs
 ```
 
 The geometry/interaction case exercises both appearances despite its historical
-name. The dedicated styled contract is skipped in legacy runs. Screenshots are
-review artifacts, not portable pixel-equivalence assertions. Compare legacy
+name. The dedicated styled contract is skipped in classic runs. Screenshots are
+review artifacts, not portable pixel-equivalence assertions. Compare classic
 captures against the original revision with the same Qt library, display backend,
-fonts, and scale. The existing CPU benchmark also accepts `QTALH_TEST_STYLE=fusion`.
+fonts, and scale. The CPU benchmark also accepts `QTALH_TEST_STYLE`.
+
+## Modern appearance verification (2026-10-14)
+
+On Linux with Qt 5.15.9, the modern default passed 221 UI checks, the classic
+appearance 220 (one styled-only check skipped), and Fusion 221, with 320 core,
+46 notification and 27 analytics checks. A temporary build of the previous
+revision produced a classic dialog gallery pixel-identical to the new
+`dialogs-motif/` captures, apart from temporary paths and timestamps.
 
 ## Styling verification (2026-09-11)
 
@@ -186,10 +198,10 @@ shelving one runtime leaves IOC acknowledgements, severity outputs, and a second
 client operating normally. The UI suites exercise reasons/durations, fixed
 selection targets, list changes, filters, reloads, and Save As.
 
-Run `test-core`, `test-ui`, `test-ui-fusion`, and `test-ioc` from `qtalh`.
-The shelving UI fixture writes `classic-shelve-dialog.png`,
-`classic-shelved-main.png`, and `classic-shelved-list.png`, with corresponding
-`fusion-` captures, under the build's `test-artifacts` directory. These are
+Run `test-core`, `test-ui`, `test-ui-motif`, and `test-ioc` from `qtalh`.
+The shelving UI fixture writes `modern-shelve-dialog.png`,
+`modern-shelved-main.png`, and `modern-shelved-list.png`, with corresponding
+`classic-` captures, under the build's `test-artifacts` directory. These are
 synthetic local fixtures; their clocks are controlled by the tests.
 
 ### Notification subscriptions
@@ -200,7 +212,7 @@ corruption handling, MIME/header validation, a local fake mailer, and loopback
 HTTP retry/redirect/timeout tests. No real email or external webhook is used.
 The target is included in `test` on Unix and Windows. UI tests exercise settings,
 match preview, explicit runtime enable, and paused restart in both appearances;
-screenshots are `classic-notifications.png` and `fusion-notifications.png`.
+screenshots are `modern-notifications.png` and `classic-notifications.png`.
 
 ### Session analytics
 
@@ -211,4 +223,4 @@ under 10,000 channels / 300,000 transitions. It is included in `test` on Unix an
 Windows. UI tests exercise all four tabs, charts, scope/search, CSV export,
 reset, and the 10,000-channel dashboard in both appearances. IOC tests check
 confirmed/requested/external acknowledgement and access gaps. Screenshots are
-`classic-analytics-0.png` through `-3.png` and their `fusion-analytics-*` equivalents.
+`modern-analytics-0.png` through `-3.png` and their `classic-analytics-*` equivalents.

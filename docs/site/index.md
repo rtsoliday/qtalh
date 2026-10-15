@@ -33,11 +33,12 @@ The example contains two placeholder PVs. [Open your first configuration](./get-
 
 ## Choose your appearance
 
-Keep the default Motif appearance, or start with `-style fusion` for modern
-controls. [Appearance & font size](./operate/appearance) shows both looks and
-explains the font-size shortcuts.
+QtALH starts with a modern appearance that keeps ALH's layout, menus, shortcuts
+and alarm colors. Add `-style motif` for the classic Motif look.
+[Appearance & font size](./operate/appearance) shows both looks and explains
+the font-size shortcuts.
 
-![QtALH main window with Fusion styling](/images/fusion-main.png)
+![QtALH main window in the modern appearance](/images/modern-main.png)
 
 ## Working on QtALH
 

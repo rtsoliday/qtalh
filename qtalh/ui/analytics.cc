@@ -353,6 +353,10 @@ void Window::showAnalytics() {
     table->sortByColumn(t == 1 ? 3 : 1, Qt::DescendingOrder);
     table->horizontalHeader()->setStretchLastSection(true);
     table->verticalHeader()->hide();
+    if (!legacyAppearance()) {
+      table->setAlternatingRowColors(true);
+      table->setShowGrid(false);
+    }
     split->addWidget(table);
     auto plot = new AnalyticsPlot(t);
     plot->setObjectName("analyticsPlot" + QString::number(t));
@@ -374,8 +378,10 @@ void Window::showAnalytics() {
   auto reset = new QPushButton("Reset Analytics");
   reset->setObjectName("analyticsReset");
   auto close = new QPushButton("Close");
-  for (auto b : {details, exportTable, exportChart, reset, close})
+  for (auto b : {details, exportTable, exportChart, reset, close}) {
+    if (b == close && !legacyAppearance()) actions->addStretch();
     actions->addWidget(b);
+  }
   auto report = std::make_shared<AnalyticsReport>();
   auto query = [=] {
     AnalyticsQuery q;

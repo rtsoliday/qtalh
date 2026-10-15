@@ -1072,12 +1072,18 @@ void Engine::publish(Node* n, const State& before, ObservationCause cause) {
   observers.erase(std::remove_if(observers.begin(), observers.end(),
       [](const Observer& o) { return o.lifetime.expired(); }), observers.end());
   if (!channelUpdated && observers.isEmpty()) return;
-  // Both snapshots describe the same observation instant.
+  // Both snapshots describe the same observation instant and share one
+  // metadata lookup. Build them before any callback can grow the cache.
   const auto time = now();
-  auto after = snapshot(n, state(n), time);
+  const auto& metadata = snapshotMetadata(n);
+  auto after = snapshot(metadata, state(n), time);
+  const bool observed = !observers.isEmpty();
+  auto prior = observed ? snapshot(metadata, before, time) : ChannelUpdate();
   if (channelUpdated) channelUpdated(after);
   if (observers.isEmpty()) return;
-  AlarmObservation observation{snapshot(n, before, time), after, cause};
+  // An observer added by the compatibility callback still sees a full observation.
+  if (!observed) prior = snapshot(n, before, time);
+  AlarmObservation observation{std::move(prior), after, cause};
   const auto listeners = observers;
   for (const auto& listener : listeners)
     if (!listener.lifetime.expired()) listener.callback(observation);
@@ -1114,7 +1120,9 @@ const Engine::SnapshotMetadata& Engine::snapshotMetadata(const Node* n) const {
   return snapshotMetadataCache.insert(n, std::move(metadata)).value();
 }
 ChannelUpdate Engine::snapshot(Node* n, const State& s, qint64 observedAt) const {
-  const auto& metadata = snapshotMetadata(n);
+  return snapshot(snapshotMetadata(n), s, observedAt);
+}
+ChannelUpdate Engine::snapshot(const SnapshotMetadata& metadata, const State& s, qint64 observedAt) const {
   ChannelUpdate u;
   u.identity = metadata.identity; u.path = metadata.path; u.pv = metadata.pv;
   u.ancestors = metadata.ancestors; u.value = s.value;

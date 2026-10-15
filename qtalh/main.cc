@@ -45,8 +45,9 @@ int main(int argc, char** argv) {
     QApplication::setApplicationName("qtalh");
     QApplication::setOrganizationName("EPICS");
     alh::initializeAppearance(options.style);
+    const bool modern = options.style.isEmpty() || options.style.compare("modern", Qt::CaseInsensitive) == 0;
     alh::debugLog(options.debug, "appearance", alh::legacyAppearance() ? "style=motif" :
-                  "style=" + QApplication::style()->objectName());
+                  modern ? "style=modern" : "style=" + QApplication::style()->objectName());
     alh::Document doc;
     if (options.editor && options.config.isEmpty())
       doc = alh::parseConfig("GROUP NULL NewGroup\n");

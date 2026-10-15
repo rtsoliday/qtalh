@@ -62,19 +62,12 @@ void Window::showLiveLog(bool alarm) {
   status->setObjectName("liveLogStatus"); status->setWordWrap(true);
   layout->addWidget(status);
   const QString limit = "Live view: latest 1,000 records, up to 256 KiB. Use the log browser for older records.";
-  auto row = dialogRow(layout);
-  row->addWidget(new QLabel("Search:"));
-  auto search = new QLineEdit; row->addWidget(search, 1);
-  for (bool reverse : {false, true}) {
-    auto button = new QPushButton(reverse ? "Reverse" : "Forward"); row->addWidget(button);
-    connect(button, &QPushButton::clicked, dialog, [=] {
-      auto flags = reverse ? QTextDocument::FindBackward : QTextDocument::FindFlags();
-      if (!text->find(search->text(), flags)) {
-        text->moveCursor(reverse ? QTextCursor::End : QTextCursor::Start);
-        text->find(search->text(), flags);
-      }
-    });
+  if (!legacyAppearance()) {
+    filename->setForegroundRole(QPalette::PlaceholderText);
+    filename->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    status->setForegroundRole(QPalette::PlaceholderText);
   }
+  findBar(layout, text);
   struct ViewState {
     LiveLogCursor cursor;
     QString path;
@@ -134,18 +127,13 @@ void Window::showLogBrowser(bool alarm) {
   dialog->setWindowTitle(alarm ? "Browser for Alarm Log" : "Browser for Operation Log");
   dialog->resize(800, 420);
   auto layout = dialogColumn(dialog);
-  auto fileRow = dialogRow(layout);
-  fileRow->addWidget(new QLabel("Log file:"));
   auto path = new QLineEdit(alarm ? logging->alarmPath() : logging->opmodPath());
   path->setObjectName("logPath");
-  fileRow->addWidget(path, 1);
   auto browse = new QPushButton("Browse...");
-  fileRow->addWidget(browse);
   connect(browse, &QPushButton::clicked, dialog, [=] {
     auto chosen = chooseFile(dialog, "Log File", path->text(), "All files (*)");
     if (!chosen.isEmpty()) path->setText(chosen);
   });
-  auto interval = dialogRow(layout);
   auto from = new QDateTimeEdit(QDateTime(QDate::currentDate(), QTime(0, 0)));
   auto to = new QDateTimeEdit(QDateTime(QDate::currentDate(), QTime(23, 59)));
   from->setObjectName("logFrom");
@@ -154,20 +142,53 @@ void Window::showLogBrowser(bool alarm) {
     field->setDisplayFormat("yyyy-MM-dd HH:mm");
     field->setCalendarPopup(true);
   }
-  interval->addWidget(new QLabel("From:")); interval->addWidget(from);
-  interval->addWidget(new QLabel("To:")); interval->addWidget(to);
-  interval->addStretch();
-  auto filterRow = dialogRow(layout);
-  filterRow->addWidget(new QLabel("With:"));
   auto contains = new QLineEdit;
   contains->setObjectName("logContains");
-  filterRow->addWidget(contains, 1);
-  auto search = new QPushButton("ShowSelected");
+  // ALH's ShowSelected; the modern label says what it does.
+  auto search = new QPushButton(legacyAppearance() ? "ShowSelected" : "Search");
   search->setObjectName("logSearch");
-  filterRow->addWidget(search);
   auto stop = new QPushButton("Stop");
   stop->setEnabled(false);
-  filterRow->addWidget(stop);
+  if (legacyAppearance()) {
+    auto fileRow = dialogRow(layout);
+    fileRow->addWidget(new QLabel("Log file:"));
+    fileRow->addWidget(path, 1);
+    fileRow->addWidget(browse);
+    auto interval = dialogRow(layout);
+    interval->addWidget(new QLabel("From:")); interval->addWidget(from);
+    interval->addWidget(new QLabel("To:")); interval->addWidget(to);
+    interval->addStretch();
+    auto filterRow = dialogRow(layout);
+    filterRow->addWidget(new QLabel("With:"));
+    filterRow->addWidget(contains, 1);
+    filterRow->addWidget(search);
+    filterRow->addWidget(stop);
+  } else {
+    auto form = new QFormLayout;
+    form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    form->setHorizontalSpacing(12);
+    form->setVerticalSpacing(8);
+    auto fileRow = new QHBoxLayout;
+    fileRow->addWidget(path, 1);
+    fileRow->addWidget(browse);
+    form->addRow("Log file", fileRow);
+    auto interval = new QHBoxLayout;
+    interval->addWidget(from);
+    interval->addWidget(new QLabel("to"));
+    interval->addWidget(to);
+    interval->addStretch();
+    form->addRow("From", interval);
+    auto filterRow = new QHBoxLayout;
+    contains->setPlaceholderText("Optional text (case-sensitive)");
+    contains->setClearButtonEnabled(true);
+    filterRow->addWidget(contains, 1);
+    search->setDefault(true);
+    filterRow->addWidget(search);
+    filterRow->addWidget(stop);
+    form->addRow("With", filterRow);
+    layout->addLayout(form);
+    connect(contains, &QLineEdit::returnPressed, search, &QPushButton::click);
+  }
   auto text = new QPlainTextEdit;
   text->setObjectName("logResults");
   text->setReadOnly(true);
@@ -177,22 +198,9 @@ void Window::showLogBrowser(bool alarm) {
   auto status = new QLabel;
   status->setObjectName("logSearchStatus");
   status->setWordWrap(true);
+  if (!legacyAppearance()) status->setForegroundRole(QPalette::PlaceholderText);
   layout->addWidget(status);
-  auto findRow = dialogRow(layout);
-  findRow->addWidget(new QLabel("Search:"));
-  auto find = new QLineEdit;
-  findRow->addWidget(find, 1);
-  for (bool backwards : {false, true}) {
-    auto button = new QPushButton(backwards ? "Reverse" : "Forward");
-    findRow->addWidget(button);
-    connect(button, &QPushButton::clicked, dialog, [=] {
-      auto flags = backwards ? QTextDocument::FindBackward : QTextDocument::FindFlags();
-      if (!text->find(find->text(), flags)) {
-        text->moveCursor(backwards ? QTextCursor::End : QTextCursor::Start);
-        text->find(find->text(), flags);
-      }
-    });
-  }
+  findBar(layout, text);
   auto running = std::make_shared<QPointer<QThread>>();
   connect(search, &QPushButton::clicked, dialog, [=] {
     if (*running) return;
@@ -260,6 +268,12 @@ void Window::shelveDialog(Node* target, bool change) {
       "commands and output PVs continue. Shelves survive reloads, but end when this runtime closes.");
   explanation->setWordWrap(true);
   layout->addWidget(explanation);
+  if (!legacyAppearance()) {
+    QFont weight;
+    weight.setBold(true);
+    targetLabel->setFont(weight);
+    explanation->setForegroundRole(QPalette::PlaceholderText);
+  }
   auto form = new QFormLayout;
   auto duration = new QComboBox;
   duration->setObjectName("shelfDuration");
@@ -277,9 +291,19 @@ void Window::shelveDialog(Node* target, bool change) {
   custom->setSuffix(" minutes");
   custom->setValue(60);
   custom->setEnabled(false);
-  form->addRow("Duration", duration);
-  auto customLabel = new QLabel("Custom minutes");
-  form->addRow(customLabel, custom);
+  QLabel* customLabel = nullptr;
+  if (legacyAppearance()) {
+    form->addRow("Duration", duration);
+    customLabel = new QLabel("Custom minutes");
+    form->addRow(customLabel, custom);
+  } else {
+    // The custom amount appears beside Duration only when a custom unit is chosen.
+    auto durationRow = new QHBoxLayout;
+    durationRow->addWidget(duration, 1);
+    durationRow->addWidget(custom, 1);
+    custom->hide();
+    form->addRow("Duration", durationRow);
+  }
   auto username = new QLineEdit;
   username->setObjectName("shelfUsername");
   username->setMaxLength(120);
@@ -320,6 +344,7 @@ void Window::shelveDialog(Node* target, bool change) {
           [=] {
             const int value = duration->currentData().toInt();
             custom->setEnabled(value <= 0);
+            if (!customLabel) custom->setVisible(value <= 0);
             if (value > 0) return;
             const int unit = qMax(1, -value);
             const int minutes = custom->value() * custom->property("minutesPerUnit").toInt();
@@ -327,7 +352,7 @@ void Window::shelveDialog(Node* target, bool change) {
             custom->setValue((minutes + unit - 1) / unit);
             custom->setProperty("minutesPerUnit", unit);
             custom->setSuffix(unit == 1440 ? " days" : unit == 60 ? " hours" : " minutes");
-            customLabel->setText(duration->currentText());
+            if (customLabel) customLabel->setText(duration->currentText());
           });
   auto timer = new QTimer(dialog);
   connect(timer, &QTimer::timeout, dialog, update);
@@ -367,6 +392,11 @@ void Window::showShelvedAlarms() {
   table->setSelectionMode(QAbstractItemView::ExtendedSelection);
   table->setEditTriggers(QAbstractItemView::NoEditTriggers);
   table->horizontalHeader()->setStretchLastSection(false);
+  if (!legacyAppearance()) {
+    table->verticalHeader()->hide();
+    table->setAlternatingRowColors(true);
+    table->setShowGrid(false);
+  }
   layout->addWidget(table);
   auto row = new QHBoxLayout;
   auto remove = new QPushButton("Unshelve Selected"); remove->setObjectName("unshelveSelected");

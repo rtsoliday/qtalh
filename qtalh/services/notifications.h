@@ -37,6 +37,8 @@ public:
   void sendTest(const QString& destination);
   void pump();
   QString status() const;
+  // The canonical configuration this runtime's subscriptions belong to.
+  QString configurationPath() const { return configuration; }
   QVector<ChannelUpdate> channels() const;
   static QByteArray mailMessage(const NotificationDestination&, const NotificationEnvelope&);
   static QString validateWebhook(const NotificationDestination&);
@@ -52,6 +54,9 @@ private:
   QSet<QString> unique;
   int inFlight = 0, failed = 0;
   void watch();
+  // The pump runs only while notifications are enabled or deliveries remain;
+  // a paused runtime (the startup state) has no periodic wakeups.
+  void schedulePump();
   void record(const QString&);
   void dispatch(NotificationEnvelope);
   void finish(NotificationEnvelope, bool accepted, bool retryable, const QString&,

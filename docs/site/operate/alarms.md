@@ -16,7 +16,7 @@ bin/Linux-x86_64/qtalh -mainwindow /path/to/facility.alhConfig
 
 The compact facility window remains available. Its indication summarizes the facility; clicking the facility button opens the main window. Closing the main window hides it while monitoring continues. Close the compact window or choose File Exit/Close and confirm to stop the runtime.
 
-For modern controls, add `-style fusion`. See [Appearance & font size](/operate/appearance) for screenshots and font shortcuts.
+For the classic Motif look, add `-style motif`. See [Appearance & font size](/operate/appearance) for screenshots and font shortcuts.
 
 ## Navigate the hierarchy
 
@@ -94,7 +94,7 @@ Passive mode prevents acknowledgement. In global mode, the IOC must allow the wr
   open its action menu. Hovering never launches a process.
 - Properties and action dialogs follow the selected group/channel. Selecting another node changes their target; background updates preserve unfinished edits where supported.
 
-These previews work in both Motif and styled presentations. Related processes
+These previews work in both the modern and Motif appearances. Related processes
 run configured commands on your host; their syntax depends on the operating
 system. A leading `medm` executable is replaced with `qtedm` from `PATH`, keeping
 its arguments. The P tooltip shows this effective command, while the saved

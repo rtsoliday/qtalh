@@ -3,7 +3,7 @@
 #include <cmath>
 namespace alh {
 namespace {
-bool legacy = true;
+bool legacy = false;
 constexpr auto baseFontProperty = "_qtalhBaseFont";
 
 qreal pointSize(const QFont& font) {
@@ -118,16 +118,56 @@ public:
     painter->restore();
   }
 };
+// Modern default: Fusion with a neutral palette that follows a dark desktop.
+QPalette modernPalette(bool dark) {
+  QPalette p;
+  auto set = [&p](QPalette::ColorRole role, const char* color, const char* disabled = nullptr) {
+    p.setColor(QPalette::All, role, QColor(color));
+    if (disabled) p.setColor(QPalette::Disabled, role, QColor(disabled));
+  };
+  if (dark) {
+    set(QPalette::Window, "#202227"); set(QPalette::Base, "#17181c", "#1d1f23");
+    set(QPalette::AlternateBase, "#1d1f23"); set(QPalette::Button, "#2c2f35");
+    set(QPalette::WindowText, "#e5e7eb", "#6b7280"); set(QPalette::Text, "#e5e7eb", "#6b7280");
+    set(QPalette::ButtonText, "#e5e7eb", "#6b7280"); set(QPalette::BrightText, "#ffffff");
+    set(QPalette::Light, "#3a3e45"); set(QPalette::Midlight, "#31343a");
+    set(QPalette::Mid, "#4b5058"); set(QPalette::Dark, "#121316"); set(QPalette::Shadow, "#000000");
+    set(QPalette::Highlight, "#3b82f6", "#3a3e45"); set(QPalette::HighlightedText, "#ffffff");
+    set(QPalette::Link, "#60a5fa"); set(QPalette::LinkVisited, "#a78bfa");
+    set(QPalette::ToolTipBase, "#2c2f35"); set(QPalette::ToolTipText, "#f3f4f6");
+#if QT_VERSION >= QT_VERSION_CHECK(5, 12, 0)
+    set(QPalette::PlaceholderText, "#9ca3af");
+#endif
+  } else {
+    set(QPalette::Window, "#f3f4f6"); set(QPalette::Base, "#ffffff", "#f3f4f6");
+    set(QPalette::AlternateBase, "#f6f7f9"); set(QPalette::Button, "#fbfbfc");
+    set(QPalette::WindowText, "#1f2329", "#9ca3af"); set(QPalette::Text, "#1f2329", "#9ca3af");
+    set(QPalette::ButtonText, "#1f2329", "#9ca3af"); set(QPalette::BrightText, "#ffffff");
+    set(QPalette::Light, "#ffffff"); set(QPalette::Midlight, "#eceef1");
+    set(QPalette::Mid, "#c9cdd3"); set(QPalette::Dark, "#9aa1aa"); set(QPalette::Shadow, "#6b7280");
+    set(QPalette::Highlight, "#2563eb", "#c9cdd3"); set(QPalette::HighlightedText, "#ffffff");
+    set(QPalette::Link, "#1d4ed8"); set(QPalette::LinkVisited, "#6d28d9");
+    set(QPalette::ToolTipBase, "#1f2329"); set(QPalette::ToolTipText, "#f9fafb");
+#if QT_VERSION >= QT_VERSION_CHECK(5, 12, 0)
+    set(QPalette::PlaceholderText, "#636a75");
+#endif
+  }
+  return p;
+}
 }
 void initializeAppearance(const QString& name) {
   delete fontScaling.data();
-  legacy = name.isEmpty() || name.compare("motif", Qt::CaseInsensitive) == 0;
+  legacy = name.compare("motif", Qt::CaseInsensitive) == 0;
   if (!legacy) {
-    auto style = QStyleFactory::create(name);
+    const bool modern = name.isEmpty() || name.compare("modern", Qt::CaseInsensitive) == 0;
+    // Sample the desktop palette before a style can replace it.
+    const bool dark = QGuiApplication::palette().color(QPalette::Window).lightness() < 128;
+    auto style = QStyleFactory::create(modern ? QString("Fusion") : name);
     if (!style)
-      throw ParseError("Unknown widget style: " + name + ". Available styles: motif, " +
+      throw ParseError("Unknown widget style: " + name + ". Available styles: modern, motif, " +
                        QStyleFactory::keys().join(", "));
     QApplication::setStyle(style);
+    if (modern) QApplication::setPalette(modernPalette(dark));
     QApplication::setFont(smallerDefaultFont(QApplication::font()));
     fontScaling = new FontScaling(qApp);
     qApp->installEventFilter(fontScaling);
@@ -160,6 +200,25 @@ void initializeAppearance(const QString& name) {
 }
 
 bool legacyAppearance() { return legacy; }
+QColor severityColor(int severity) {
+  static const QColor classic[] = {QColor("#b0c3ca"), QColor("yellow"), QColor("red"),
+                                   QColor("white"), QColor("white")};
+  // Slightly deeper tones keep the ALH meanings with readable letters on both palettes.
+  static const QColor modern[] = {QColor(), QColor("#facc15"), QColor("#dc2626"),
+                                  QColor("#ffffff"), QColor("#ffffff")};
+  const int index = qBound(0, severity, 4);
+  return legacy ? classic[index] : modern[index];
+}
+QColor blend(const QColor& from, const QColor& to, qreal amount) {
+  return QColor::fromRgbF(from.redF() + (to.redF() - from.redF()) * amount,
+                          from.greenF() + (to.greenF() - from.greenF()) * amount,
+                          from.blueF() + (to.blueF() - from.blueF()) * amount);
+}
+QColor secondaryText(const QPalette& palette) {
+  // Counts and default masks are secondary but still read at a glance:
+  // this keeps about 5:1 contrast on either modern palette.
+  return blend(palette.color(QPalette::Text), palette.color(QPalette::Base), 0.32);
+}
 QColor contrastingText(const QColor& color) {
   auto linear = [](double c) { return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4); };
   double luminance = 0.2126 * linear(color.redF()) + 0.7152 * linear(color.greenF()) +

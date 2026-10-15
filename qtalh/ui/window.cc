@@ -19,11 +19,6 @@
 #include <cmath>
 namespace alh {
 namespace {
-QColor severityColor(int s) {
-  static const QColor c[] = {QColor("#b0c3ca"), QColor("yellow"), QColor("red"), QColor("white"),
-                             QColor("white")};
-  return !legacyAppearance() && s == 0 ? QColor() : c[qBound(0, s, 4)];
-}
 // Used by both command execution and its tooltip preview.
 QString launchCommand(QString command) {
   if (command.startsWith("MASTER_ONLY")) command = command.mid(11).trimmed();
@@ -104,6 +99,62 @@ void applyInitialGeometry(QWidget* window, const QString& geometry) {
     position.setY(match.captured(4).startsWith('-')
         ? available.bottom() + 1 - frame.height() + offsets[1] : available.top() + offsets[1]);
   window->move(position);
+}
+// Pane divider drawn directly: classic ALH uses a black rule, the modern view a
+// one-pixel line that highlights while hovered. No style sheet reaches the views.
+class PaneSplitter : public QSplitter {
+public:
+  using QSplitter::QSplitter;
+protected:
+  QSplitterHandle* createHandle() override { return new Handle(orientation(), this); }
+private:
+  class Handle : public QSplitterHandle {
+  public:
+    Handle(Qt::Orientation orientation, QSplitter* parent) : QSplitterHandle(orientation, parent) {
+      setAttribute(Qt::WA_Hover);
+    }
+  protected:
+    void paintEvent(QPaintEvent*) override {
+      QPainter painter(this);
+      if (legacyAppearance()) { painter.fillRect(rect(), Qt::black); return; }
+      const auto& colors = palette();
+      painter.fillRect(rect(), colors.color(QPalette::Base));
+      const bool hot = underMouse();
+      const int line = hot ? 2 : 1;
+      painter.fillRect(QRect((width() - line) / 2, 0, line, height()),
+                       hot ? colors.color(QPalette::Highlight)
+                           : blend(colors.color(QPalette::Window), colors.color(QPalette::WindowText), 0.16));
+    }
+  };
+};
+// A one-pixel rule that follows the current palette.
+class SeparatorLine : public QWidget {
+public:
+  explicit SeparatorLine(Qt::Orientation orientation) {
+    setObjectName("separatorLine");
+    if (orientation == Qt::Horizontal) setFixedHeight(1);
+    else setFixedWidth(1);
+  }
+protected:
+  void paintEvent(QPaintEvent*) override {
+    QPainter painter(this);
+    const auto& colors = palette();
+    painter.fillRect(rect(), blend(colors.color(QPalette::Window), colors.color(QPalette::WindowText), 0.16));
+  }
+};
+QWidget* separatorLine(Qt::Orientation orientation) { return new SeparatorLine(orientation); }
+// A small rounded sample of an ALH severity color for menus and choices.
+QIcon severitySwatch(int severity) {
+  QPixmap pixmap(28, 28);
+  pixmap.setDevicePixelRatio(2);
+  pixmap.fill(Qt::transparent);
+  QPainter painter(&pixmap);
+  painter.setRenderHint(QPainter::Antialiasing);
+  const auto color = severityColor(severity);
+  painter.setPen(QPen(color.darker(130), 1));
+  painter.setBrush(color);
+  painter.drawRoundedRect(QRectF(1.5, 1.5, 11, 11), 3, 3);
+  return QIcon(pixmap);
 }
 QString code(int s) {
   static const QString codes[] = {QStringLiteral(" "), QStringLiteral("Y"), QStringLiteral("R"),
@@ -228,18 +279,14 @@ QVariant AlarmModel::data(const QModelIndex& i, int role) const {
   case 1:
     return code(severity);
   case 2:
-    return n->label() + (s.shelf.until ? " [Shelved]" :
+    return info(n).label + (s.shelf.until ? " [Shelved]" :
         shown.shelved ? QString(" [%1 shelved]").arg(shown.shelved) : QString());
   case 3:
-    return n->group && std::any_of(n->children.begin(), n->children.end(),
-                                   [](const auto& c) { return c->group; })
-               ? QStringLiteral("\u25B6")
-               : QString();
+    return info(n).childGroups ? QStringLiteral("\u25B6") : QString();
   case 4:
-    return !n->option("GUIDANCE").isEmpty() || !n->option("GUIDANCE_TEXT").isEmpty()
-               ? QStringLiteral("G") : QString();
+    return info(n).guidance ? QStringLiteral("G") : QString();
   case 5:
-    return n->option("COMMAND").isEmpty() ? QString() : QStringLiteral("P");
+    return info(n).command ? QStringLiteral("P") : QString();
   case 6: {
     QString m = s.mask.text();
     if (n->group) {
@@ -312,15 +359,39 @@ AlarmModel::RowSignature AlarmModel::signature(Node* n) const {
     if (n->group ? s.maskCounts[bit] != 0 : s.mask[bit]) result.flags |= 1 << bit;
   if (s.noAckUntil) result.flags |= 1 << 5;
   if (s.shelf.until) result.flags |= 1 << 6;
-  if (n->group && std::any_of(n->children.begin(), n->children.end(),
-                              [](const auto& c) { return c->group; }))
-    result.flags |= 1 << 7;
-  if (!n->option("GUIDANCE").isEmpty() || !n->option("GUIDANCE_TEXT").isEmpty())
-    result.flags |= 1 << 8;
-  if (!n->option("COMMAND").isEmpty()) result.flags |= 1 << 9;
+  const auto& facts = info(n);
+  if (facts.childGroups) result.flags |= 1 << 7;
+  if (facts.guidance) result.flags |= 1 << 8;
+  if (facts.command) result.flags |= 1 << 9;
   if (coloredMasks) result.flags |= 1 << 10;
-  result.label = n->label();
+  result.label = facts.label;
   return result;
+}
+int AlarmModel::RowSignature::firstDifference(const RowSignature& o) const {
+  // Columns: 0 unacknowledged, 1 severity, 2 name, 3 arrow, 4 G, 5 P, 6 mask,
+  // 7 beep, 8 counts or channel alarm data (which also shows both severities).
+  if (unack != o.unack) return 0;
+  if (severity != o.severity) return 1;
+  constexpr int shelf = 1 << 6, arrow = 1 << 7, guidance = 1 << 8, command = 1 << 9;
+  const int changedFlags = flags ^ o.flags;
+  if (label != o.label || shelved != o.shelved || (changedFlags & shelf)) return 2;
+  if (changedFlags & arrow) return 3;
+  if (changedFlags & guidance) return 4;
+  if (changedFlags & command) return 5;
+  if (changedFlags) return 6;
+  if (beep != o.beep) return 7;
+  return 8;
+}
+const AlarmModel::NodeInfo& AlarmModel::info(Node* n) const {
+  auto found = nodeInfo.find(n);
+  if (found != nodeInfo.end()) return found.value();
+  NodeInfo facts;
+  facts.label = n->label();
+  facts.childGroups = n->group && std::any_of(n->children.begin(), n->children.end(),
+                                              [](const auto& c) { return c->group; });
+  facts.guidance = !n->option("GUIDANCE").isEmpty() || !n->option("GUIDANCE_TEXT").isEmpty();
+  facts.command = !n->option("COMMAND").isEmpty();
+  return nodeInfo.insert(n, std::move(facts)).value();
 }
 Qt::ItemFlags AlarmModel::flags(const QModelIndex& i) const {
   if (!i.isValid()) return Qt::NoItemFlags;
@@ -344,6 +415,7 @@ void AlarmModel::reset(Document* d, Engine* e) {
   beginResetModel();
   childCache.clear();
   signatures.clear();
+  nodeInfo.clear();
   doc = d;
   engine = e;
   group = d->root.get();
@@ -375,52 +447,58 @@ void AlarmModel::refresh() {
       childCache.remove(key);
       const auto desired = children(key);
       childCache[key] = previous;
-      QSet<Node*> retained;
-      for (auto n : desired) retained.insert(n);
-      for (int last = previous.size() - 1; last >= 0;) {
-        if (retained.contains(previous[last])) { --last; continue; }
-        int first = last;
-        while (first > 0 && !retained.contains(previous[first - 1])) --first;
-        beginRemoveRows(p, first, last);
-        previous.remove(first, last - first + 1);
-        childCache[key] = previous;
-        endRemoveRows();
-        last = first - 1;
-      }
-      for (int first = 0; first < desired.size();) {
-        if (first < previous.size() && previous[first] == desired[first]) { ++first; continue; }
-        int last = first;
-        while (last + 1 < desired.size() &&
-               (first == previous.size() || desired[last + 1] != previous[first])) ++last;
-        beginInsertRows(p, first, last);
-        for (int i = first; i <= last; ++i) previous.insert(i, desired[i]);
-        childCache[key] = previous;
-        endInsertRows();
-        first = last + 1;
+      // Membership is usually unchanged; only a change needs the row diff.
+      if (desired != previous) {
+        QSet<Node*> retained;
+        for (auto n : desired) retained.insert(n);
+        for (int last = previous.size() - 1; last >= 0;) {
+          if (retained.contains(previous[last])) { --last; continue; }
+          int first = last;
+          while (first > 0 && !retained.contains(previous[first - 1])) --first;
+          beginRemoveRows(p, first, last);
+          previous.remove(first, last - first + 1);
+          childCache[key] = previous;
+          endRemoveRows();
+          last = first - 1;
+        }
+        for (int first = 0; first < desired.size();) {
+          if (first < previous.size() && previous[first] == desired[first]) { ++first; continue; }
+          int last = first;
+          while (last + 1 < desired.size() &&
+                 (first == previous.size() || desired[last + 1] != previous[first])) ++last;
+          beginInsertRows(p, first, last);
+          for (int i = first; i <= last; ++i) previous.insert(i, desired[i]);
+          childCache[key] = previous;
+          endInsertRows();
+          first = last + 1;
+        }
       }
     }
-    // Report each run of changed rows. Unchanged rows keep their pixels.
+    // Report each run of changed rows, starting at the first changed column
+    // (counts alone, typically). Unchanged rows and cells keep their pixels.
     const auto rows = children(node(p));
     const int count = rows.size();
-    int first = -1;
+    int first = -1, column = 8;
     for (int row = 0; row <= count; ++row) {
-      bool changed = false;
+      int changed = -1;
       if (row < count) {
         auto next = signature(rows[row]);
         auto previous = signatures.find(rows[row]);
         if (previous == signatures.end()) {
           signatures.insert(rows[row], std::move(next));
-          changed = true;
+          changed = 0;
         } else if (!(*previous == next)) {
+          changed = next.firstDifference(*previous);
           *previous = std::move(next);
-          changed = true;
         }
       }
-      if (changed && first < 0) {
-        first = row;
-      } else if (!changed && first >= 0) {
-        emit dataChanged(index(first, 0, p), index(row - 1, 8, p));
+      if (changed >= 0) {
+        if (first < 0) first = row;
+        column = qMin(column, changed);
+      } else if (first >= 0) {
+        emit dataChanged(index(first, column, p), index(row - 1, 8, p));
         first = -1;
+        column = 8;
       }
     }
     if (tree)
@@ -620,12 +698,10 @@ void Window::buildUi() {
   auto layout = new QVBoxLayout(central);
   layout->setContentsMargins(0, 0, 0, 0);
   layout->setSpacing(0);
-  auto splitter = new QSplitter;
+  auto splitter = new PaneSplitter;
   splitter->setObjectName("alarmPanes");
-  if (legacyAppearance()) {
-    splitter->setHandleWidth(2);
-    splitter->setStyleSheet("QSplitter::handle {background:black;}");
-  }
+  // Classic ALH divides the panes with a black rule; the modern rule is subtle.
+  splitter->setHandleWidth(legacyAppearance() ? 2 : 5);
   treeView = new AlarmView(true);
   groupView = new AlarmView(false);
   treeView->setObjectName("alarmTree");
@@ -639,38 +715,34 @@ void Window::buildUi() {
     splitter->addWidget(view);
   splitter->setSizes({500, 500});
   layout->addWidget(splitter, 1);
-  auto divider = new QSlider(Qt::Horizontal);
-  divider->setObjectName("paneWidth");
-  divider->setRange(5, 95);
-  divider->setValue(50);
-  if (legacyAppearance()) divider->setFixedHeight(17);
-  divider->setToolTip("Tree/group window width");
-  if (legacyAppearance()) divider->setStyleSheet(
-      "QSlider {background:#b0c3ca; border:1px solid; border-top-color:#dde6e9; "
-      "border-left-color:#dde6e9; border-bottom-color:#5f696d; border-right-color:#5f696d;}"
-      "QSlider::groove:horizontal {height:11px; margin:1px; background:#b0c3ca; "
-      "border:1px solid; border-top-color:#5f696d; border-left-color:#5f696d; "
-      "border-bottom-color:#dde6e9; border-right-color:#dde6e9;}"
-      "QSlider::handle:horizontal {width:28px; margin:1px 0; background:#b0c3ca; "
-      "border:1px solid; border-top-color:#dde6e9; border-left-color:#dde6e9; "
-      "border-bottom-color:#5f696d; border-right-color:#5f696d;}");
-  connect(divider, &QSlider::valueChanged, splitter, [splitter](int value) {
-    int width = splitter->width() - splitter->handleWidth();
-    splitter->setSizes({width * value / 100, width * (100 - value) / 100});
-  });
-  connect(splitter, &QSplitter::splitterMoved, divider, [splitter, divider](int, int) {
-    auto sizes = splitter->sizes();
-    QSignalBlocker block(divider);
-    if (sizes[0] + sizes[1])
-      divider->setValue(100 * sizes[0] / (sizes[0] + sizes[1]));
-  });
-  if (legacyAppearance()) layout->addWidget(divider);
-  else {
-    auto row = new QHBoxLayout;
-    row->setContentsMargins(8, 0, 8, 0);
-    auto label = new QLabel("Pane width:"); label->setBuddy(divider);
-    row->addWidget(label); row->addWidget(divider, 1);
-    layout->addLayout(row);
+  if (legacyAppearance()) {
+    // ALH's width slider; the modern splitter handle is dragged directly.
+    auto divider = new QSlider(Qt::Horizontal);
+    divider->setObjectName("paneWidth");
+    divider->setRange(5, 95);
+    divider->setValue(50);
+    divider->setFixedHeight(17);
+    divider->setToolTip("Tree/group window width");
+    divider->setStyleSheet(
+        "QSlider {background:#b0c3ca; border:1px solid; border-top-color:#dde6e9; "
+        "border-left-color:#dde6e9; border-bottom-color:#5f696d; border-right-color:#5f696d;}"
+        "QSlider::groove:horizontal {height:11px; margin:1px; background:#b0c3ca; "
+        "border:1px solid; border-top-color:#5f696d; border-left-color:#5f696d; "
+        "border-bottom-color:#dde6e9; border-right-color:#dde6e9;}"
+        "QSlider::handle:horizontal {width:28px; margin:1px 0; background:#b0c3ca; "
+        "border:1px solid; border-top-color:#dde6e9; border-left-color:#dde6e9; "
+        "border-bottom-color:#5f696d; border-right-color:#5f696d;}");
+    connect(divider, &QSlider::valueChanged, splitter, [splitter](int value) {
+      int width = splitter->width() - splitter->handleWidth();
+      splitter->setSizes({width * value / 100, width * (100 - value) / 100});
+    });
+    connect(splitter, &QSplitter::splitterMoved, divider, [splitter, divider](int, int) {
+      auto sizes = splitter->sizes();
+      QSignalBlocker block(divider);
+      if (sizes[0] + sizes[1])
+        divider->setValue(100 * sizes[0] / (sizes[0] + sizes[1]));
+    });
+    layout->addWidget(divider);
   }
   if (!options.editor) {
     for (auto view : {treeView, groupView}) {
@@ -735,70 +807,18 @@ void Window::buildUi() {
               selection = n;
             scheduleDialogSync();
           });
-  auto footer = new QWidget;
-  if (legacyAppearance()) footer->setFixedHeight(114);
-  auto bottom = new QHBoxLayout(footer);
-  if (legacyAppearance()) bottom->setContentsMargins(10, 4, 4, 17);
-  auto info = new QVBoxLayout;
-  if (legacyAppearance()) info->setSpacing(2);
   execution = new QLabel;
-  auto statusRow = new QHBoxLayout;
-  statusRow->addWidget(execution, legacyAppearance() ? 0 : 1);
-  if (legacyAppearance()) statusRow->addStretch();
+  execution->setObjectName("executionStatus");
   disabledForceLabel = new QLabel;
   disabledForceLabel->setObjectName("disabledForcePvCount");
-  statusRow->addWidget(disabledForceLabel);
   shelvedLabel = new QLabel;
   shelvedLabel->setObjectName("shelvedCount");
   shelvedLabel->setTextFormat(Qt::RichText);
-  statusRow->addWidget(shelvedLabel);
   connect(shelvedLabel, &QLabel::linkActivated, this, [this] { showShelvedAlarms(); });
-  info->addLayout(statusRow);
-  QWidget* legend = nullptr;
-  auto legendLayout = info;
-  if (!legacyAppearance()) {
-    legend = new QWidget;
-    legend->setObjectName("alarmLegend");
-    legendLayout = new QVBoxLayout(legend);
-    legendLayout->setContentsMargins(0, 0, 0, 0);
-  }
-  legendLayout->addWidget(
-      new QLabel("Mask <CDATL>:  <Cancel,Disable,noAck,noackT,noLog>     H=noAck 1hr timer"));
-  legendLayout->addWidget(new QLabel("Group Alarm Counts:  (ERROR,INVALID,MAJOR,MINOR,NOALARM)"));
-  legendLayout->addWidget(new QLabel("Channel Alarm Data: <Status,Severity> (<Unack Severity>)"));
-  if (!legacyAppearance()) {
-    for (auto label : legend->findChildren<QLabel*>()) label->setWordWrap(true);
-    auto toggle = new QToolButton;
-    toggle->setText("Alarm legend"); toggle->setCheckable(true);
-    toggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    toggle->setArrowType(Qt::RightArrow);
-    legend->hide();
-    connect(toggle, &QToolButton::toggled, legend, [toggle, legend](bool open) {
-      toggle->setArrowType(open ? Qt::DownArrow : Qt::RightArrow); legend->setVisible(open);
-    });
-    info->addWidget(toggle); info->addWidget(legend);
-  }
   filename = new QLabel;
   filename->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-  if (legacyAppearance()) { info->addWidget(filename); bottom->addLayout(info, 1); }
-  else {
-    info->insertWidget(1, filename);
-    execution->setWordWrap(true);
-    auto status = new QGroupBox("Status"); status->setLayout(info);
-    bottom->addWidget(status, 1);
-  }
-  auto silence = new QVBoxLayout;
-  silence->setSpacing(4);
-  silence->setAlignment(Qt::AlignRight);
-  QFont toggleFont("monospace");
-  toggleFont.setPixelSize(13);
-  toggleFont.setStretch(100);
   silenceBox = new MotifCheckBox("Silence 30 minutes");
   currentBox = new MotifCheckBox("Silence current");
-  if (legacyAppearance()) {
-    silenceBox->setFont(toggleFont);
-    currentBox->setFont(toggleFont);
-  }
   silenceBox->setObjectName("silenceInterval");
   currentBox->setObjectName("silenceCurrent");
   silenceForeverLabel = new QLabel;
@@ -807,22 +827,103 @@ void Window::buildUi() {
   beepLabel->setObjectName("beepSeverity");
   notificationsEnabledLabel = new QLabel;
   notificationsEnabledLabel->setObjectName("notificationsEnabledStatus");
-  notificationsEnabledLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
   notificationsEnabledLabel->setToolTip("Automatic notifications in this runtime. Change in Setup → Notifications….");
-  silenceForeverLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-  beepLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-  // Each line occupies the same height, including the status labels.
-  for (QWidget* row :
-       {static_cast<QWidget*>(silenceBox), static_cast<QWidget*>(currentBox),
-        static_cast<QWidget*>(silenceForeverLabel), static_cast<QWidget*>(beepLabel),
-        static_cast<QWidget*>(notificationsEnabledLabel)}) {
-    if (legacyAppearance()) row->setFixedHeight(20);
-    silence->addWidget(row, 0, Qt::AlignRight);
-  }
-  if (legacyAppearance()) bottom->addLayout(silence);
-  else {
-    auto sound = new QGroupBox("Alarm sound"); sound->setLayout(silence);
-    bottom->addWidget(sound);
+  const QStringList legendLines = {
+      "Mask <CDATL>:  <Cancel,Disable,noAck,noackT,noLog>     H=noAck 1hr timer",
+      "Group Alarm Counts:  (ERROR,INVALID,MAJOR,MINOR,NOALARM)",
+      "Channel Alarm Data: <Status,Severity> (<Unack Severity>)"};
+  QWidget* footer = nullptr;
+  if (legacyAppearance()) {
+    footer = new QWidget;
+    footer->setFixedHeight(114);
+    auto bottom = new QHBoxLayout(footer);
+    bottom->setContentsMargins(10, 4, 4, 17);
+    auto info = new QVBoxLayout;
+    info->setSpacing(2);
+    auto statusRow = new QHBoxLayout;
+    statusRow->addWidget(execution);
+    statusRow->addStretch();
+    statusRow->addWidget(disabledForceLabel);
+    statusRow->addWidget(shelvedLabel);
+    info->addLayout(statusRow);
+    for (const auto& line : legendLines) info->addWidget(new QLabel(line));
+    info->addWidget(filename);
+    bottom->addLayout(info, 1);
+    auto silence = new QVBoxLayout;
+    silence->setSpacing(4);
+    silence->setAlignment(Qt::AlignRight);
+    QFont toggleFont("monospace");
+    toggleFont.setPixelSize(13);
+    toggleFont.setStretch(100);
+    silenceBox->setFont(toggleFont);
+    currentBox->setFont(toggleFont);
+    // Each line occupies the same height, including the status labels.
+    for (QWidget* row : {static_cast<QWidget*>(silenceBox), static_cast<QWidget*>(currentBox),
+                         static_cast<QWidget*>(silenceForeverLabel), static_cast<QWidget*>(beepLabel),
+                         static_cast<QWidget*>(notificationsEnabledLabel)}) {
+      if (auto label = qobject_cast<QLabel*>(row)) label->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+      row->setFixedHeight(20);
+      silence->addWidget(row, 0, Qt::AlignRight);
+    }
+    bottom->addLayout(silence);
+  } else {
+    // Flat status area: facility state on the left, alarm sound on the right.
+    footer = new QWidget;
+    footer->setObjectName("statusFooter");
+    footer->setAutoFillBackground(true);
+    auto bottom = new QHBoxLayout(footer);
+    bottom->setContentsMargins(12, 8, 12, 8);
+    bottom->setSpacing(16);
+    auto info = new QVBoxLayout;
+    info->setSpacing(4);
+    auto statusRow = new QHBoxLayout;
+    statusRow->setSpacing(14);
+    execution->setWordWrap(true);
+    statusRow->addWidget(execution, 1);
+    statusRow->addWidget(disabledForceLabel);
+    statusRow->addWidget(shelvedLabel);
+    info->addLayout(statusRow);
+    filename->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    info->addWidget(filename);
+    auto legend = new QWidget;
+    legend->setObjectName("alarmLegend");
+    auto legendLayout = new QVBoxLayout(legend);
+    legendLayout->setContentsMargins(18, 0, 0, 0);
+    legendLayout->setSpacing(2);
+    for (const auto& line : legendLines) {
+      auto label = new QLabel(line);
+      label->setWordWrap(true);
+      label->setForegroundRole(QPalette::PlaceholderText);
+      legendLayout->addWidget(label);
+    }
+    auto toggle = new QToolButton;
+    toggle->setObjectName("alarmLegendToggle");
+    toggle->setText("Alarm legend");
+    toggle->setCheckable(true);
+    toggle->setAutoRaise(true);
+    toggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    toggle->setArrowType(Qt::RightArrow);
+    legend->hide();
+    connect(toggle, &QToolButton::toggled, legend, [toggle, legend](bool open) {
+      toggle->setArrowType(open ? Qt::DownArrow : Qt::RightArrow);
+      legend->setVisible(open);
+    });
+    info->addWidget(toggle, 0, Qt::AlignLeft);
+    info->addWidget(legend);
+    info->addStretch();
+    bottom->addLayout(info, 1);
+    bottom->addWidget(separatorLine(Qt::Vertical));
+    auto silence = new QVBoxLayout;
+    silence->setSpacing(2);
+    for (QWidget* row : {static_cast<QWidget*>(silenceBox), static_cast<QWidget*>(currentBox),
+                         static_cast<QWidget*>(silenceForeverLabel), static_cast<QWidget*>(beepLabel),
+                         static_cast<QWidget*>(notificationsEnabledLabel)}) {
+      if (auto label = qobject_cast<QLabel*>(row)) label->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+      silence->addWidget(row, 0, Qt::AlignRight);
+    }
+    silence->addStretch();
+    bottom->addLayout(silence);
+    layout->addWidget(separatorLine(Qt::Horizontal));
   }
   layout->addWidget(footer);
   connect(silenceBox, &QCheckBox::toggled, this, [this](bool yes) {
@@ -831,9 +932,37 @@ void Window::buildUi() {
   connect(currentBox, &QCheckBox::toggled, this,
           [this](bool yes) { engine->setSilenceCurrent(yes); });
   messageArea = new QLabel;
+  messageArea->setObjectName("messageArea");
   messageArea->setWordWrap(true);
-  messageArea->hide();
-  layout->addWidget(messageArea);
+  if (legacyAppearance()) {
+    messageBanner = messageArea;
+  } else {
+    // Errors appear in a dismissible warning strip instead of a bare line.
+    auto banner = new QFrame;
+    banner->setObjectName("messageBanner");
+    banner->setAutoFillBackground(true);
+    auto colors = banner->palette();
+    const bool dark = colors.color(QPalette::Window).lightness() < 128;
+    colors.setColor(QPalette::Window, QColor(dark ? "#3d2e0a" : "#fff4d6"));
+    colors.setColor(QPalette::WindowText, QColor(dark ? "#fde68a" : "#5c3d00"));
+    banner->setPalette(colors);
+    auto row = new QHBoxLayout(banner);
+    row->setContentsMargins(12, 6, 6, 6);
+    auto icon = new QLabel;
+    icon->setPixmap(style()->standardIcon(QStyle::SP_MessageBoxWarning).pixmap(16, 16));
+    row->addWidget(icon, 0, Qt::AlignTop);
+    row->addWidget(messageArea, 1);
+    auto dismiss = new QToolButton;
+    dismiss->setObjectName("dismissMessage");
+    dismiss->setAutoRaise(true);
+    dismiss->setText(QStringLiteral("✕"));
+    dismiss->setToolTip("Dismiss message");
+    connect(dismiss, &QToolButton::clicked, banner, &QWidget::hide);
+    row->addWidget(dismiss, 0, Qt::AlignTop);
+    messageBanner = banner;
+  }
+  messageBanner->hide();
+  layout->addWidget(messageBanner);
   setCentralWidget(central);
   treeModel->setFilter(options.filter);
   groupModel->setFilter(options.filter);
@@ -856,6 +985,8 @@ void Window::buildUi() {
   rlayout->addWidget(runtimeButton);
   if (legacyAppearance()) runtime->resize(220, 35);
   else {
+    rlayout->setContentsMargins(4, 4, 4, 4);
+    runtimeButton->setToolTip("Show the Alarm Handler main window");
     runtime->setMinimumSize(220, 35);
     runtime->adjustSize();
   }
@@ -897,10 +1028,7 @@ void Window::error(const QString& s) {
     logging->operation(nullptr, s);
   }
   qWarning("QtALH: %s", qPrintable(s));
-  if (messageArea) {
-    messageArea->setText(s);
-    messageArea->show();
-  }
+  showMessage(s);
   if (!options.noErrorPopup && (isVisible() || (runtime && runtime->isVisible()))) {
     if (!errorPopup) {
       auto popup = new QMessageBox(QMessageBox::Warning, "ALH Message", s, QMessageBox::Ok, this);
@@ -910,6 +1038,11 @@ void Window::error(const QString& s) {
     } else
       errorPopup->setDetailedText((errorPopup->detailedText() + "\n" + s).right(16000));
   }
+}
+void Window::showMessage(const QString& text) {
+  if (!messageArea) return;
+  messageArea->setText(text);
+  messageBanner->show();
 }
 void Window::refresh() {
   dirty = false;
@@ -951,25 +1084,7 @@ void Window::refresh() {
                                             : QString());
   refreshStatus();
   refreshShelfList();
-  if (historyText) {
-    QStringList rows;
-    if (!legacyAppearance())
-      rows << QString("%1 %2 %3 %4 %5").arg("TIME_STAMP", -21).arg("PROCESS_VARIABLE_NAME", -32)
-                  .arg("STATUS", -10).arg("SEVERITY", -10).arg("VALUE");
-    const QRegularExpression fields("^(\\S+ \\S+) (\\S+) (\\S+) (\\S+) (.*)$");
-    for (const auto& entry : engine->history) {
-      const auto match = fields.match(entry);
-      rows << (match.hasMatch()
-                   ? QString("%1 %2 %3 %4 %5")
-                         .arg(match.captured(1), -21).arg(match.captured(2), -32)
-                         .arg(match.captured(3), -10).arg(match.captured(4), -10)
-                         .arg(match.captured(5))
-                   : entry);
-    }
-    const auto text = rows.join('\n');
-    if (historyText->toPlainText() != text)
-      historyText->setPlainText(text);
-  }
+  refreshHistory();
   scheduleDialogSync();
   if (undoAction)
     undoAction->setEnabled(!undo.isEmpty());
@@ -987,10 +1102,25 @@ void Window::refreshStatus() {
   filename->setToolTip(doc.filename);
   silenceForeverLabel->setText(
       QString("Silence Forever: %1").arg(engine->silenceForever ? "On" : "Off"));
+  // Modern displays flag a permanently silenced handler in a warning color.
+  if (!legacyAppearance() && silenceForeverLabel->property("warning").toBool() != engine->silenceForever) {
+    silenceForeverLabel->setProperty("warning", engine->silenceForever);
+    // Only the changed attributes are set, so zoom and palette changes still apply.
+    QPalette colors;
+    if (engine->silenceForever) {
+      const bool dark = palette().color(QPalette::Window).lightness() < 128;
+      colors.setColor(QPalette::WindowText, QColor(dark ? "#fbbf24" : "#b45309"));
+    }
+    silenceForeverLabel->setPalette(colors);
+    QFont weight;
+    if (engine->silenceForever) weight.setBold(true);
+    silenceForeverLabel->setFont(weight);
+  }
   beepLabel->setText(QString("ALH Beep Severity: %1").arg(severityName(doc.beepSeverity)));
   bool configuredNotifications = false;
   if (notifications) {
-    const auto configuration = notificationConfiguration(doc.filename);
+    // Resolved once at attach; this runs on every refresh and status tick.
+    const auto configuration = notifications->configurationPath();
     for (const auto& subscription : notifications->policy.settings().subscriptions)
       if (subscription.configuration == configuration) {
         configuredNotifications = true;
@@ -1025,7 +1155,12 @@ void Window::refreshStatus() {
       mask[bit] = QString("CDATL")[bit];
   runtimeButton->setText(doc.root->label() + (mask == "-----" ? QString() : "  <" + mask + ">") +
       (shown.shelved ? QString("  [Shelved: %1]").arg(shown.shelved) : QString()));
-  if (!legacyAppearance()) {
+  // Grow the compact window for longer text or a larger font; neither changes
+  // on most status ticks, so skip the layout query then.
+  if (!legacyAppearance() && (runtimeSizedText != runtimeButton->text() ||
+                              runtimeSizedFont != runtimeButton->font())) {
+    runtimeSizedText = runtimeButton->text();
+    runtimeSizedFont = runtimeButton->font();
     auto desired = runtime->sizeHint().expandedTo(QSize(220, 35));
     if (runtime->width() < desired.width() || runtime->height() < desired.height()) runtime->resize(desired);
   }
@@ -1295,7 +1430,7 @@ void Window::menus() {
   if (!options.editor) {
     action(view, "Current Alarm History", [this] { showHistory(); });
     action(view, "Configuration File",
-           [this] { showText("Configuration File", writeConfig(doc)); });
+           [this] { showText("Configuration File", writeConfig(doc), true); });
     action(view, "Alarm Log File", [this] { showLiveLog(true); });
     action(view, "Browser for Alarm Log",
            [this] { showLogBrowser(true); });
@@ -1417,6 +1552,17 @@ void Window::menus() {
     QDesktopServices::openUrl(QUrl("https://ops.aps.anl.gov/manuals/QtALH/"));
   });
   action(help, "About QtALH", [this] {
+    if (!legacyAppearance()) {
+      QMessageBox::about(this, "About QtALH",
+          "<h3>QtALH</h3><p>Qt port of ALH 1.2.35<br>EPICS Alarm Handler and Alarm "
+          "Configuration Tool<br>Developed at Argonne National Laboratory</p>"
+          "<p><b>Qt port development and maintenance</b><br>Robert Soliday</p>"
+          "<p><b>Original ALH authors</b><br>Ben-Chin Cha, Janet Anderson, Mark Anderson, "
+          "Marty Kraimer, and Albert Kagarmanov</p>"
+          "<p><b>Additional ALH contributors</b><br>John Sinclair and Kay Kasemir (SNS), "
+          "Andreas Luedeke (PSI)</p><p>Qt " + QString(qVersion()).toHtmlEscaped() + "</p>");
+      return;
+    }
     QMessageBox::about(this, "About QtALH",
                        "QtALH — Qt port of ALH 1.2.35\nEPICS Alarm Handler and Alarm Configuration "
                        "Tool\nDeveloped at Argonne National Laboratory\n\n"
@@ -1526,8 +1672,7 @@ void Window::replace(Document d, bool snapshot) {
       auto dialog = selectionDialogs.value(key).window;
       if (dialog) dialog->close();
     }
-    messageArea->setText("The selected alarm was removed or is ambiguous after reload. Select an alarm to continue.");
-    messageArea->show();
+    showMessage("The selected alarm was removed or is ambiguous after reload. Select an alarm to continue.");
   } else {
     // Restore the visible highlight as well as the action target.
     const QSignalBlocker treeSignals(treeView->selectionModel());
@@ -1846,145 +1991,17 @@ void Window::properties() {
                                      [this] { properties(); });
   if (!dialog) return;
   auto layout = dialogColumn(dialog);
-  auto scroll = new QScrollArea;
-  scroll->setWidgetResizable(true);
-  scroll->setFrameShape(QFrame::NoFrame);
-  auto body = new QWidget;
-  auto form = dialogColumn(body);
-  scroll->setWidget(body);
-  auto forceForm = form, commandForm = form, guidanceForm = form;
-  if (legacyAppearance()) layout->addWidget(scroll);
-  else {
-    auto tabs = new QTabWidget;
-    tabs->setObjectName("propertyTabs");
-    scroll->setObjectName("propertyGeneralScroll");
-    tabs->addTab(scroll, "General");
-    auto page = [&](const QString& title, const QString& name) {
-      auto area = new QScrollArea;
-      area->setObjectName(name); area->setWidgetResizable(true);
-      area->setFrameShape(QFrame::NoFrame);
-      auto widget = new QWidget;
-      auto column = dialogColumn(widget);
-      area->setWidget(widget); tabs->addTab(area, title);
-      return column;
-    };
-    forceForm = page("Force PV", "propertyForceScroll");
-    commandForm = page("Commands", "propertyCommandsScroll");
-    guidanceForm = page("Guidance", "propertyGuidanceScroll");
-    layout->addWidget(tabs, 1);
-  }
   QHash<QString, QLineEdit*> edits;
   auto field = [&](const QString& key, const QString& value) {
-    auto edit = new QLineEdit(value, body);
+    auto edit = new QLineEdit(value, dialog);
     edit->setObjectName("property" + key);
-    edit->setReadOnly(!options.editor);
+    // Count filtering applies to channels only.
+    edit->setReadOnly(!options.editor || (original->group && (key == "COUNT" || key == "SECONDS")));
     edits[key] = edit;
     return edit;
   };
-  QFormLayout* generalFields = nullptr;
-  auto line = [&](QVBoxLayout* target, const QString& label, const QString& key) {
-    if (!legacyAppearance()) {
-      if (!generalFields) {
-        generalFields = new QFormLayout;
-        generalFields->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-        generalFields->setRowWrapPolicy(QFormLayout::WrapLongRows);
-        target->addLayout(generalFields);
-      }
-      auto edit = field(key, original->option(key));
-      generalFields->addRow(label, edit);
-      return edit;
-    }
-    auto row = dialogRow(target);
-    row->addWidget(new QLabel(label));
-    auto edit = field(key, original->option(key));
-    row->addWidget(edit, 1);
-    return edit;
-  };
-  auto top = dialogRow(form);
-  top->addWidget(new QLabel(original->group ? "Group" : "Channel"));
-  auto name = field("NAME", original->name); top->addWidget(name, 1);
-  auto masks = dialogRow(form);
-  auto maskColumn = new QVBoxLayout;
-  auto mask = field("MASK", original->mask.text());
-  if (legacyAppearance()) mask->setMaximumWidth(65);
-  if (options.editor && !original->group) {
-    auto row = new QHBoxLayout;
-    row->addWidget(new QLabel("Alarm Mask")); row->addWidget(mask); row->addStretch();
-    maskColumn->addLayout(row);
-  } else {
-    mask->hide();
-    QString summary = engine->state(original).mask.text();
-    if (original->group)
-      for (int i = 0; i < 5; ++i)
-        summary[i] = engine->state(original).maskCounts[i] ? QString("CDATL")[i] : QChar('-');
-    maskColumn->addWidget(new QLabel("Current Mask " + summary));
-    maskColumn->addWidget(new QLabel("Reset Mask   " + (original->group ? QString() : original->mask.text())));
-  }
-  masks->addLayout(maskColumn, 1);
-  auto filterWidget = new QWidget;
-  auto filterLayout = dialogColumn(filterWidget);
-  auto filterFrame = dialogFrame(filterLayout, "Alarm Count Filter");
-  auto filterRow = dialogRow(filterFrame);
-  auto countParts = original->option("ALARMCOUNTFILTER").split(' ', Qt::SkipEmptyParts);
-  auto count = field("COUNT", countParts.value(0)), seconds = field("SECONDS", countParts.value(1));
-  if (legacyAppearance()) { count->setMaximumWidth(42); seconds->setMaximumWidth(42); }
-  count->setReadOnly(!options.editor || original->group);
-  seconds->setReadOnly(!options.editor || original->group);
-  filterRow->addWidget(new QLabel("Count")); filterRow->addWidget(count);
-  filterRow->addWidget(new QLabel("Seconds")); filterRow->addWidget(seconds);
-  masks->addWidget(filterWidget, 1);
-  auto forceFrame = dialogFrame(forceForm, "Force Process Variable");
-  auto forceParts = original->option("FORCEPV").split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-  auto forceRow = dialogRow(forceFrame);
-  forceRow->addWidget(new QLabel("PV Name"));
-  auto forceName = field("FORCE_NAME", forceParts.value(0)); forceRow->addWidget(forceName, 1);
-  QHBoxLayout* forceValues = nullptr;
-  QFormLayout* forceValueForm = nullptr;
-  if (legacyAppearance()) forceValues = dialogRow(forceFrame);
-  else {
-    forceValueForm = new QFormLayout;
-    forceValueForm->setRowWrapPolicy(QFormLayout::WrapLongRows);
-    forceValueForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
-    forceFrame->addLayout(forceValueForm);
-  }
-  for (int i = 1; i <= 3; ++i) {
-    auto label = QStringList{"Force Mask", "Force Value", "Reset Value"}[i - 1];
-    auto edit = field("FORCE_" + QString::number(i), forceParts.value(i));
-    if (legacyAppearance()) {
-      forceValues->addWidget(new QLabel(label));
-      edit->setMaximumWidth(65); forceValues->addWidget(edit);
-    } else forceValueForm->addRow(label, edit);
-  }
-  auto calc = dialogFrame(forceForm, legacyAppearance() ? QString() : "Force CALC");
-  auto expressionRow = dialogRow(calc);
-  expressionRow->addWidget(new QLabel("Force CALC     Expression"));
-  expressionRow->addWidget(field("FORCEPV_CALC", original->option("FORCEPV_CALC")), 1);
-  auto grid = new QGridLayout;
-  for (int i = 0; i < 6; ++i) {
-    QString letter(QChar('A' + i)), key = "FORCEPV_CALC_" + letter;
-    grid->addWidget(new QLabel(letter), i % 3, (i / 3) * 2);
-    grid->addWidget(field(key, original->option(key)), i % 3, (i / 3) * 2 + 1);
-  }
-  calc->addLayout(grid);
-  auto beep = line(form, "Beep Severity", "BEEPSEVR");
-  if (!options.editor && beep->text().isEmpty())
-    beep->setText(severityName(engine->state(original).beepThreshold));
-  if (legacyAppearance()) beep->setMaximumWidth(80);
-  // Keep the short severity field next to its label, as in the Motif form.
-  if (legacyAppearance()) {
-    auto beepRow = qobject_cast<QHBoxLayout*>(form->itemAt(form->count() - 1)->layout());
-    beepRow->setStretch(1, 0);
-    beepRow->addStretch();
-  }
-  line(form, "Severity PV Name", "SEVRPV");
-  if (!original->group) line(form, "Acknowledgement PV / Value", "ACKPV");
-  if (!original->parent) line(form, "Heartbeat PV / Interval / Value", "HEARTBEATPV");
-  line(form, "Alias", "ALIAS");
-  commandForm->addWidget(new QLabel("Related Process Command"));
-  commandForm->addWidget(field("COMMAND", original->option("COMMAND")));
-  auto area = [&](const QString& label, const QString& key, int height) {
-    auto target = key.startsWith("GUIDANCE") ? guidanceForm : commandForm;
-    target->addWidget(new QLabel(label));
+  QVector<QPlainTextEdit*> areas;
+  auto textArea = [&](const QString& key, int legacyHeight) {
     QStringList lines;
     for (const auto& directive : original->directives)
       if (directive.key == key) lines << directive.value;
@@ -1992,18 +2009,247 @@ void Window::properties() {
     edit->setObjectName("property" + key);
     edit->setReadOnly(!options.editor);
     edit->setLineWrapMode(QPlainTextEdit::NoWrap);
-    if (legacyAppearance()) edit->setFixedHeight(height);
-    else edit->setMinimumHeight(edit->fontMetrics().height() * (key == "GUIDANCE_TEXT" ? 6 : 3));
-    target->addWidget(edit);
-    if (!legacyAppearance() && key != "GUIDANCE_TEXT") setPresentationFont(edit, contentFont());
+    if (legacyAppearance()) edit->setFixedHeight(legacyHeight);
+    else {
+      const int lines = key == "GUIDANCE_TEXT" ? 6 : key == "GUIDANCE" ? 2 : 3;
+      edit->setMinimumHeight(edit->fontMetrics().height() * lines + 10);
+      if (key != "GUIDANCE_TEXT") setPresentationFont(edit, contentFont());
+      if (edit->isReadOnly()) {
+        // Read-only values read as text, like the single-line fields.
+        edit->setFrameShape(QFrame::NoFrame);
+        QPalette flat;
+        flat.setColor(QPalette::Base, Qt::transparent);
+        edit->setPalette(flat);
+        edit->setPlaceholderText("Not set");
+        if (edit->document()->isEmpty()) edit->setFixedHeight(edit->fontMetrics().height() + 10);
+      }
+    }
+    areas << edit;
     return edit;
   };
-  auto severity = area("Alarm Severity Commands", "SEVRCOMMAND", 52);
-  auto status = area("Alarm Status Commands", "STATCOMMAND", 52);
-  auto url = area("Guidance URL", "GUIDANCE", 30);
-  auto guidance = area("Guidance Text", "GUIDANCE_TEXT", 100);
-  form->addStretch();
-  if (!legacyAppearance()) forceForm->addStretch();
+  QString currentMask = engine->state(original).mask.text();
+  if (original->group)
+    for (int i = 0; i < 5; ++i)
+      currentMask[i] = engine->state(original).maskCounts[i] ? QString("CDATL")[i] : QChar('-');
+  const auto countParts = original->option("ALARMCOUNTFILTER").split(' ', Qt::SkipEmptyParts);
+  const auto forceParts = original->option("FORCEPV").split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+  QLineEdit *name = nullptr, *mask = nullptr, *count = nullptr, *seconds = nullptr, *forceName = nullptr,
+            *beep = nullptr;
+  QPlainTextEdit *severity = nullptr, *status = nullptr, *url = nullptr, *guidance = nullptr;
+  if (legacyAppearance()) {
+    auto scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    auto body = new QWidget;
+    auto form = dialogColumn(body);
+    scroll->setWidget(body);
+    layout->addWidget(scroll);
+    auto line = [&](const QString& label, const QString& key) {
+      auto row = dialogRow(form);
+      row->addWidget(new QLabel(label));
+      auto edit = field(key, original->option(key));
+      row->addWidget(edit, 1);
+      return edit;
+    };
+    auto top = dialogRow(form);
+    top->addWidget(new QLabel(original->group ? "Group" : "Channel"));
+    name = field("NAME", original->name); top->addWidget(name, 1);
+    auto masks = dialogRow(form);
+    auto maskColumn = new QVBoxLayout;
+    mask = field("MASK", original->mask.text());
+    mask->setMaximumWidth(65);
+    if (options.editor && !original->group) {
+      auto row = new QHBoxLayout;
+      row->addWidget(new QLabel("Alarm Mask")); row->addWidget(mask); row->addStretch();
+      maskColumn->addLayout(row);
+    } else {
+      mask->hide();
+      maskColumn->addWidget(new QLabel("Current Mask " + currentMask));
+      maskColumn->addWidget(new QLabel("Reset Mask   " + (original->group ? QString() : original->mask.text())));
+    }
+    masks->addLayout(maskColumn, 1);
+    auto filterWidget = new QWidget;
+    auto filterLayout = dialogColumn(filterWidget);
+    auto filterFrame = dialogFrame(filterLayout, "Alarm Count Filter");
+    auto filterRow = dialogRow(filterFrame);
+    count = field("COUNT", countParts.value(0)); seconds = field("SECONDS", countParts.value(1));
+    count->setMaximumWidth(42); seconds->setMaximumWidth(42);
+    filterRow->addWidget(new QLabel("Count")); filterRow->addWidget(count);
+    filterRow->addWidget(new QLabel("Seconds")); filterRow->addWidget(seconds);
+    masks->addWidget(filterWidget, 1);
+    auto forceFrame = dialogFrame(form, "Force Process Variable");
+    auto forceRow = dialogRow(forceFrame);
+    forceRow->addWidget(new QLabel("PV Name"));
+    forceName = field("FORCE_NAME", forceParts.value(0)); forceRow->addWidget(forceName, 1);
+    auto forceValues = dialogRow(forceFrame);
+    for (int i = 1; i <= 3; ++i) {
+      auto edit = field("FORCE_" + QString::number(i), forceParts.value(i));
+      forceValues->addWidget(new QLabel(QStringList{"Force Mask", "Force Value", "Reset Value"}[i - 1]));
+      edit->setMaximumWidth(65); forceValues->addWidget(edit);
+    }
+    auto calc = dialogFrame(form);
+    auto expressionRow = dialogRow(calc);
+    expressionRow->addWidget(new QLabel("Force CALC     Expression"));
+    expressionRow->addWidget(field("FORCEPV_CALC", original->option("FORCEPV_CALC")), 1);
+    auto grid = new QGridLayout;
+    for (int i = 0; i < 6; ++i) {
+      QString letter(QChar('A' + i)), key = "FORCEPV_CALC_" + letter;
+      grid->addWidget(new QLabel(letter), i % 3, (i / 3) * 2);
+      grid->addWidget(field(key, original->option(key)), i % 3, (i / 3) * 2 + 1);
+    }
+    calc->addLayout(grid);
+    beep = line("Beep Severity", "BEEPSEVR");
+    beep->setMaximumWidth(80);
+    // Keep the short severity field next to its label, as in the Motif form.
+    auto beepRow = qobject_cast<QHBoxLayout*>(form->itemAt(form->count() - 1)->layout());
+    beepRow->setStretch(1, 0);
+    beepRow->addStretch();
+    line("Severity PV Name", "SEVRPV");
+    if (!original->group) line("Acknowledgement PV / Value", "ACKPV");
+    if (!original->parent) line("Heartbeat PV / Interval / Value", "HEARTBEATPV");
+    line("Alias", "ALIAS");
+    form->addWidget(new QLabel("Related Process Command"));
+    form->addWidget(field("COMMAND", original->option("COMMAND")));
+    auto area = [&](const QString& label, const QString& key, int height) {
+      form->addWidget(new QLabel(label));
+      auto edit = textArea(key, height);
+      form->addWidget(edit);
+      return edit;
+    };
+    severity = area("Alarm Severity Commands", "SEVRCOMMAND", 52);
+    status = area("Alarm Status Commands", "STATCOMMAND", 52);
+    url = area("Guidance URL", "GUIDANCE", 30);
+    guidance = area("Guidance Text", "GUIDANCE_TEXT", 100);
+    form->addStretch();
+  } else {
+    // Modern Properties: the same fields grouped into tabs of aligned forms.
+    auto tabs = new QTabWidget;
+    tabs->setObjectName("propertyTabs");
+    tabs->setDocumentMode(false);
+    auto page = [&](const QString& title, const QString& objectName) {
+      auto area = new QScrollArea;
+      area->setObjectName(objectName);
+      area->setWidgetResizable(true);
+      area->setFrameShape(QFrame::NoFrame);
+      auto widget = new QWidget;
+      auto column = dialogColumn(widget);
+      column->setContentsMargins(12, 12, 12, 12);
+      column->setSpacing(10);
+      area->setWidget(widget);
+      tabs->addTab(area, title);
+      return column;
+    };
+    auto form = [](QVBoxLayout* parent) {
+      auto result = new QFormLayout;
+      result->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+      result->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+      result->setHorizontalSpacing(14);
+      result->setVerticalSpacing(8);
+      parent->addLayout(result);
+      return result;
+    };
+    auto monospace = [](const QString& text) {
+      auto label = new QLabel(text.isEmpty() ? QString("—") : text);
+      setPresentationFont(label, contentFont());
+      label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+      return label;
+    };
+    auto generalPage = page("General", "propertyGeneralScroll");
+    auto general = form(generalPage);
+    name = field("NAME", original->name);
+    general->addRow(original->group ? "Group" : "Channel", name);
+    general->addRow("Alias", field("ALIAS", original->option("ALIAS")));
+    mask = field("MASK", original->mask.text());
+    if (options.editor && !original->group) {
+      mask->setMaximumWidth(mask->fontMetrics().horizontalAdvance("CDATL") + 24);
+      general->addRow("Alarm Mask", mask);
+    } else {
+      mask->hide();
+      general->addRow("Current Mask", monospace(currentMask));
+      general->addRow("Reset Mask", monospace(original->group ? QString() : original->mask.text()));
+    }
+    count = field("COUNT", countParts.value(0));
+    seconds = field("SECONDS", countParts.value(1));
+    auto filterRow = new QHBoxLayout;
+    filterRow->setSpacing(6);
+    for (auto edit : {count, seconds}) edit->setMaximumWidth(edit->fontMetrics().horizontalAdvance("00000") + 20);
+    filterRow->addWidget(count);
+    // An unset filter reads "Not set" instead of a sentence with two blanks.
+    if (options.editor || !countParts.isEmpty()) {
+      filterRow->addWidget(new QLabel("alarms within"));
+      filterRow->addWidget(seconds);
+      filterRow->addWidget(new QLabel("seconds"));
+    } else {
+      seconds->hide();
+    }
+    filterRow->addStretch();
+    general->addRow("Alarm Count Filter", filterRow);
+    beep = field("BEEPSEVR", original->option("BEEPSEVR"));
+    if (options.editor) {
+      auto names = new QCompleter(QStringList{"MINOR", "MAJOR", "INVALID", "ERROR"}, beep);
+      names->setCaseSensitivity(Qt::CaseInsensitive);
+      beep->setCompleter(names);
+      beep->setPlaceholderText("MINOR, MAJOR, INVALID or ERROR");
+    }
+    general->addRow("Beep Severity", beep);
+    general->addRow("Severity PV Name", field("SEVRPV", original->option("SEVRPV")));
+    if (!original->group)
+      general->addRow("Acknowledgement PV / Value", field("ACKPV", original->option("ACKPV")));
+    if (!original->parent)
+      general->addRow("Heartbeat PV / Interval / Value", field("HEARTBEATPV", original->option("HEARTBEATPV")));
+    generalPage->addStretch();
+    auto forcePage = page("Force PV", "propertyForceScroll");
+    forcePage->addWidget(sectionHeading("Force Process Variable"));
+    auto forceFields = form(forcePage);
+    forceName = field("FORCE_NAME", forceParts.value(0));
+    forceFields->addRow("PV Name", forceName);
+    for (int i = 1; i <= 3; ++i)
+      forceFields->addRow(QStringList{"Force Mask", "Force Value", "Reset Value"}[i - 1],
+                          field("FORCE_" + QString::number(i), forceParts.value(i)));
+    forcePage->addWidget(sectionHeading("Force CALC"));
+    auto calcFields = form(forcePage);
+    calcFields->addRow("Expression", field("FORCEPV_CALC", original->option("FORCEPV_CALC")));
+    auto grid = new QGridLayout;
+    grid->setHorizontalSpacing(10);
+    grid->setVerticalSpacing(8);
+    for (int i = 0; i < 6; ++i) {
+      QString letter(QChar('A' + i)), key = "FORCEPV_CALC_" + letter;
+      grid->addWidget(new QLabel(letter), i % 3, (i / 3) * 2);
+      grid->addWidget(field(key, original->option(key)), i % 3, (i / 3) * 2 + 1);
+    }
+    forcePage->addLayout(grid);
+    forcePage->addStretch();
+    auto labeled = [](QVBoxLayout* parent, const QString& label, QWidget* widget, int stretch) {
+      auto caption = new QLabel(label);
+      caption->setBuddy(widget);
+      parent->addWidget(caption);
+      // Empty read-only text takes one line; content and editors share the space.
+      auto text = qobject_cast<QPlainTextEdit*>(widget);
+      if (text && text->isReadOnly() && text->document()->isEmpty()) stretch = 0;
+      parent->addWidget(widget, stretch);
+    };
+    auto commandPage = page("Commands", "propertyCommandsScroll");
+    labeled(commandPage, "Related Process Command", field("COMMAND", original->option("COMMAND")), 0);
+    labeled(commandPage, "Alarm Severity Commands", severity = textArea("SEVRCOMMAND", 0), 1);
+    labeled(commandPage, "Alarm Status Commands", status = textArea("STATCOMMAND", 0), 1);
+    commandPage->addStretch(0);
+    auto guidancePage = page("Guidance", "propertyGuidanceScroll");
+    labeled(guidancePage, "Guidance URL", url = textArea("GUIDANCE", 0), 1);
+    labeled(guidancePage, "Guidance Text", guidance = textArea("GUIDANCE_TEXT", 0), 3);
+    guidancePage->addStretch(0);
+    layout->addWidget(tabs, 1);
+    // Read-only values read as text rather than empty input boxes.
+    for (auto edit : edits)
+      if (edit->isReadOnly()) {
+        edit->setFrame(false);
+        QPalette flat;
+        flat.setColor(QPalette::Base, Qt::transparent);
+        edit->setPalette(flat);
+        edit->setPlaceholderText("Not set");
+      }
+  }
+  if (!options.editor && beep->text().isEmpty())
+    beep->setText(severityName(engine->state(original).beepThreshold));
   auto buttons = dialogActions(layout, dialog,
       options.editor ? QDialogButtonBox::Apply | QDialogButtonBox::Cancel | QDialogButtonBox::Close
                      : QDialogButtonBox::Close,
@@ -2072,21 +2318,31 @@ void Window::masks(bool forced) {
     return value;
   };
   if (forced) {
+    const auto alignment = legacyAppearance() ? Qt::AlignCenter : Qt::AlignLeft | Qt::AlignVCenter;
     auto current = new QLabel("Current Mask Summary: " + summary());
     current->setObjectName("currentMaskSummary");
-    current->setAlignment(Qt::AlignCenter);
+    current->setAlignment(alignment);
     layout->addWidget(current);
     auto reset = new QLabel("Reset Mask: " + (n->group ? QString() : n->mask.text()));
-    reset->setAlignment(Qt::AlignCenter);
+    reset->setAlignment(alignment);
     layout->addWidget(reset);
     auto value = new QLabel("Mask: " + summary());
-    value->setAlignment(Qt::AlignCenter);
-    layout->addWidget(value);
-    auto choicesColumn = dialogRow(layout);
-    choicesColumn->addStretch(1);
-    auto choicesPanel = new QVBoxLayout;
-    choicesColumn->addLayout(choicesPanel, 3);
-    auto choices = maskChoices(choicesPanel, summary(), options.engine.passive);
+    value->setAlignment(alignment);
+    QVector<QCheckBox*> choices;
+    if (legacyAppearance()) {
+      layout->addWidget(value);
+      auto choicesColumn = dialogRow(layout);
+      choicesColumn->addStretch(1);
+      auto choicesPanel = new QVBoxLayout;
+      choicesColumn->addLayout(choicesPanel, 3);
+      choices = maskChoices(choicesPanel, summary(), options.engine.passive);
+    } else {
+      if (!n->group) reset->setToolTip("The configured mask restored by Reset");
+      choices = maskChoices(layout, summary(), options.engine.passive, 2);
+      value->setObjectName("forceMaskPreview");
+      layout->addWidget(value);
+      for (auto label : {current, reset, value}) setPresentationFont(label, contentFont());
+    }
     for (auto choice : choices)
       connect(choice, &QCheckBox::toggled, dialog,
               [choices, value] { value->setText("Mask: " + selectedMask(choices)); });
@@ -2115,18 +2371,47 @@ void Window::masks(bool forced) {
     sizeDialog(dialog, QSize(277, 244));
   } else {
     auto grid = new QGridLayout;
-    grid->setHorizontalSpacing(6); grid->setVerticalSpacing(6);
     const QStringList labels = {"Add/Cancel Alarms", "Enable/Disable Alarms", "Ack/NoAck Alarms",
                                  "Ack/NoAck Transient Alarms", "Log/NoLog Alarms"};
     const QStringList off = {"Add", "Enable", "Ack", "AckT", "Log"};
     const QStringList on = {"Cancel", "Disable", "NoAck", "NoAckT", "NoLog"};
+    int channels = 0;
+    if (n->group && !legacyAppearance())
+      for (auto channel : doc.channels())
+        for (auto parent = channel->parent; parent; parent = parent->parent)
+          if (parent == n) { ++channels; break; }
+    if (legacyAppearance()) {
+      grid->setHorizontalSpacing(6); grid->setVerticalSpacing(6);
+    } else {
+      grid->setHorizontalSpacing(12); grid->setVerticalSpacing(8);
+      auto hint = new QLabel(n->group ? "Highlighted choices are the current setting of every "
+                                        "channel in the group. Changes apply immediately."
+                                      : "Highlighted choices are the current setting. "
+                                        "Changes apply immediately.");
+      hint->setWordWrap(true);
+      hint->setForegroundRole(QPalette::PlaceholderText);
+      layout->addWidget(hint);
+    }
+    const auto& state = engine->state(n);
     for (int bit = 0; bit < 5; ++bit) {
       grid->addWidget(new QLabel(labels[bit]), bit, 0);
+      // Modern rows show the active setting as a selected segment.
+      auto segments = legacyAppearance() ? nullptr : new QButtonGroup(dialog);
+      auto pair = new QHBoxLayout;
+      pair->setSpacing(0);
       for (int choice = 0; choice < 3; ++choice) {
-        auto button = new QPushButton(choice == 0 ? off[bit] : choice == 1 ? on[bit] : "Reset");
+        const QString text = choice == 0 ? off[bit] : choice == 1 ? on[bit] : QString("Reset");
+        auto button = segments && choice < 2 ? segmentButton(text, choice == 0, choice == 1)
+                                             : new QPushButton(text);
         button->setObjectName(QString("maskAction%1_%2").arg(bit).arg(choice));
         button->setEnabled(!options.engine.passive || bit != AckT);
-        grid->addWidget(button, bit, choice + 1);
+        if (!segments) grid->addWidget(button, bit, choice + 1);
+        else if (choice < 2) { segments->addButton(button, choice); pair->addWidget(button); }
+        else {
+          button->setToolTip("Restore the configured setting");
+          grid->addLayout(pair, bit, 1);
+          grid->addWidget(button, bit, 2);
+        }
         connect(button, &QPushButton::clicked, dialog, [this, n, bit, choice] {
           if (bit == Ack) engine->cancelNoAckTimer(n);
           engine->modifyMask(n, bit, choice);
@@ -2134,11 +2419,25 @@ void Window::masks(bool forced) {
           refresh();
         });
       }
+      if (segments) {
+        const int set = n->group ? state.maskCounts[bit] : state.mask[bit] ? 1 : 0;
+        const int total = n->group ? channels : 1;
+        if (set == 0) segments->button(0)->setChecked(true);
+        else if (set >= total) segments->button(1)->setChecked(true);
+        else {
+          auto mixed = new QLabel(QString("Mixed (%1 of %2)").arg(set).arg(total));
+          mixed->setForegroundRole(QPalette::PlaceholderText);
+          grid->addWidget(mixed, bit, 3);
+        }
+      }
     }
+    if (!legacyAppearance()) grid->setColumnStretch(3, 1);
     layout->addLayout(grid);
-    dialogActions(layout, dialog, QDialogButtonBox::Close,
+    auto actions = dialogActions(layout, dialog, QDialogButtonBox::Close,
                   "Change one mask field for the selected channel or group. Reset uses each "
                   "channel's configured value. Other mask fields are preserved.");
+    // Start on Close so no segment looks different from the other settings.
+    if (!legacyAppearance()) actions->button(QDialogButtonBox::Close)->setFocus();
     sizeDialog(dialog, QSize(336, 202));
   }
   finishSelectionDialog(dialog);
@@ -2160,49 +2459,81 @@ void Window::forceDialog() {
     settingsParent = dialogColumn(body);
     scroll->setWidget(body); layout->addWidget(scroll, 1);
   }
-  auto settings = dialogFrame(settingsParent, legacyAppearance() ? QString() : "Force settings");
+  auto settings = dialogFrame(settingsParent);
   auto disabled = new QCheckBox("ForcePV Disabled");
   disabled->setChecked(engine->state(n).forceDisabled);
   settings->addWidget(disabled);
-  settings->addSpacing(8);
-  settings->addWidget(new QLabel("Force Process Variable Name (or CALC):"));
+  settings->addSpacing(legacyAppearance() ? 8 : 2);
   auto words = n->option("FORCEPV").split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
   auto pvName = new QLineEdit(words.value(0));
   pvName->setObjectName("forcePvName");
-  settings->addWidget(pvName);
   auto value = new QLabel("Force Mask " + words.value(1, "-----"));
-  settings->addWidget(value);
-  auto choices = maskChoices(settings, words.value(1, "-----"));
-  for (auto box : choices)
-    connect(box, &QCheckBox::toggled, dialog,
-            [value, choices] { value->setText("Force Mask " + selectedMask(choices)); });
   auto force = new QLineEdit(words.value(2, "1")), reset = new QLineEdit(words.value(3, "0"));
   force->setObjectName("forceValue"); reset->setObjectName("forceReset");
-  auto values = new QFormLayout;
-  values->setFieldGrowthPolicy(legacyAppearance() ? QFormLayout::FieldsStayAtSizeHint : QFormLayout::AllNonFixedFieldsGrow);
-  if (legacyAppearance()) { force->setMaximumWidth(75); reset->setMaximumWidth(75); }
-  values->addRow("Force Value", force); values->addRow("Reset Value", reset);
-  settings->addLayout(values);
-  auto calc = dialogFrame(settings, "Force CALC");
-  calc->addWidget(new QLabel("Expression:"));
   auto expression = new QLineEdit(n->option("FORCEPV_CALC"));
   expression->setObjectName("forceExpression");
-  calc->addWidget(expression);
+  QVector<QCheckBox*> choices;
   QVector<QLineEdit*> inputs;
-  auto inputGrid = legacyAppearance() ? nullptr : new QGridLayout;
-  if (inputGrid) calc->addLayout(inputGrid);
   for (int i = 0; i < 6; ++i) {
-    auto label = new QLabel(QString(QChar('A' + i)));
     auto field = new QLineEdit(n->option("FORCEPV_CALC_" + QString(QChar('A' + i))));
     field->setObjectName("forceInput" + QString(QChar('A' + i)));
     inputs << field;
-    if (inputGrid) {
-      inputGrid->addWidget(label, i % 3, (i / 3) * 2);
-      inputGrid->addWidget(field, i % 3, (i / 3) * 2 + 1);
-    } else {
-      auto row = dialogRow(calc); row->addWidget(label); row->addWidget(field);
-    }
   }
+  if (legacyAppearance()) {
+    settings->addWidget(new QLabel("Force Process Variable Name (or CALC):"));
+    settings->addWidget(pvName);
+    settings->addWidget(value);
+    choices = maskChoices(settings, words.value(1, "-----"));
+    auto values = new QFormLayout;
+    values->setFieldGrowthPolicy(QFormLayout::FieldsStayAtSizeHint);
+    force->setMaximumWidth(75); reset->setMaximumWidth(75);
+    values->addRow("Force Value", force); values->addRow("Reset Value", reset);
+    settings->addLayout(values);
+    auto calc = dialogFrame(settings, "Force CALC");
+    calc->addWidget(new QLabel("Expression:"));
+    calc->addWidget(expression);
+    for (int i = 0; i < 6; ++i) {
+      auto row = dialogRow(calc); row->addWidget(new QLabel(QString(QChar('A' + i)))); row->addWidget(inputs[i]);
+    }
+  } else {
+    auto nameLabel = new QLabel("Force Process Variable Name (or CALC):");
+    nameLabel->setBuddy(pvName);
+    settings->addWidget(nameLabel);
+    settings->addWidget(pvName);
+    settings->addWidget(value);
+    choices = maskChoices(settings, words.value(1, "-----"), false, 2);
+    auto values = new QHBoxLayout;
+    values->setSpacing(8);
+    for (auto pair : {qMakePair(QString("Force Value"), force), qMakePair(QString("Reset Value"), reset)}) {
+      auto label = new QLabel(pair.first);
+      label->setBuddy(pair.second);
+      values->addWidget(label);
+      values->addWidget(pair.second, 1);
+    }
+    settings->addLayout(values);
+    auto calc = dialogFrame(settings, "Force CALC");
+    auto expressionRow = dialogRow(calc);
+    expressionRow->addWidget(new QLabel("Expression"));
+    expressionRow->addWidget(expression, 1);
+    auto inputGrid = new QGridLayout;
+    inputGrid->setHorizontalSpacing(10);
+    inputGrid->setVerticalSpacing(6);
+    calc->addLayout(inputGrid);
+    for (int i = 0; i < 6; ++i) {
+      inputGrid->addWidget(new QLabel(QString(QChar('A' + i))), i % 3, (i / 3) * 2);
+      inputGrid->addWidget(inputs[i], i % 3, (i / 3) * 2 + 1);
+    }
+    settingsParent->addStretch();
+  }
+  for (auto box : choices)
+    connect(box, &QCheckBox::toggled, dialog,
+            [value, choices] { value->setText("Force Mask " + selectedMask(choices)); });
+  // Keyboard order follows the form: name, mask, values, then CALC inputs.
+  QVector<QWidget*> order{disabled, pvName};
+  for (auto box : choices) order << box;
+  order << force << reset << expression;
+  for (auto input : inputs) order << input;
+  for (int i = 1; i < order.size(); ++i) QWidget::setTabOrder(order[i - 1], order[i]);
   auto buttons = dialogActions(layout, dialog,
       QDialogButtonBox::Apply | QDialogButtonBox::Cancel | QDialogButtonBox::Close,
       "A Force PV applies the selected mask at the force value and restores configured masks "
@@ -2241,7 +2572,7 @@ void Window::forceDialog() {
       QMessageBox::warning(dialog, "Invalid Force PV", e.what());
     }
   });
-  sizeDialog(dialog, legacyAppearance() ? QSize(276, 494) : QSize(560, 600));
+  sizeDialog(dialog, legacyAppearance() ? QSize(276, 494) : QSize(520, 480));
   finishSelectionDialog(dialog);
 }
 void Window::beepSeverity(bool global) {
@@ -2262,6 +2593,7 @@ void Window::beepSeverity(bool global) {
   auto buttons = new QButtonGroup(dialog);
   for (int severity = 1; severity < 5; ++severity) {
     auto button = new QRadioButton(severityName(severity));
+    if (!legacyAppearance()) button->setIcon(severitySwatch(severity));
     button->setObjectName("beepSeverity" + QString::number(severity));
     button->setChecked((global ? doc.beepSeverity : engine->state(n).beepThreshold) == severity);
     frame->addWidget(button); buttons->addButton(button, severity);
@@ -2321,7 +2653,7 @@ void Window::related(Node* target) {
   } else
     engine->command(entries.front().trimmed());
 }
-void Window::showText(const QString& title, const QString& content) {
+void Window::showText(const QString& title, const QString& content, bool monospace) {
   auto dialog = new QDialog(this);
   dialog->setAttribute(Qt::WA_DeleteOnClose);
   dialog->setWindowTitle(title);
@@ -2330,27 +2662,15 @@ void Window::showText(const QString& title, const QString& content) {
   auto text = new QPlainTextEdit;
   text->setReadOnly(true);
   if (legacyAppearance()) text->setFont(font());
-  text->setLineWrapMode(legacyAppearance() ? QPlainTextEdit::NoWrap : QPlainTextEdit::WidgetWidth);
+  else if (monospace) setPresentationFont(text, contentFont());
+  // Configuration text keeps its lines; prose wraps in the modern viewer.
+  text->setLineWrapMode(legacyAppearance() || monospace ? QPlainTextEdit::NoWrap
+                                                        : QPlainTextEdit::WidgetWidth);
   text->setPlainText(content);
   l->addWidget(text);
-  auto row = new QHBoxLayout;
-  row->addWidget(new QLabel("Search:"));
-  auto search = new QLineEdit;
-  row->addWidget(search);
-  for (bool reverse : {false, true}) {
-    auto b = new QPushButton(reverse ? "Reverse" : "Forward");
-    row->addWidget(b);
-    connect(b, &QPushButton::clicked, dialog, [text, search, reverse] {
-      if (!text->find(search->text(),
-                      reverse ? QTextDocument::FindBackward : QTextDocument::FindFlags())) {
-        text->moveCursor(reverse ? QTextCursor::End : QTextCursor::Start);
-        text->find(search->text(),
-                   reverse ? QTextDocument::FindBackward : QTextDocument::FindFlags());
-      }
-    });
-  }
-  l->addLayout(row);
+  findBar(l, text, -1);
   dialogActions(l, dialog, QDialogButtonBox::Close);
+  if (!legacyAppearance()) dialog->resize(monospace ? 720 : 600, monospace ? 520 : 340);
   dialog->show();
 }
 void Window::showHistory() {
@@ -2360,34 +2680,98 @@ void Window::showHistory() {
   d->setObjectName("historyDialog");
   d->setWindowTitle("Alarm Handler: Current Alarm History");
   auto l = dialogColumn(d);
+  historyDialog = d;
+  shownHistory.clear();
   if (legacyAppearance()) {
     auto heading = dialogRow(l);
     auto close = new QPushButton("Close");
     heading->addWidget(close);
     heading->addWidget(new QLabel("TIME_STAMP       PROCESS_VARIABLE_NAME          STATUS     SEVERITY   VALUE"), 1);
     connect(close, &QPushButton::clicked, d, &QDialog::close);
+    auto text = new QPlainTextEdit;
+    auto historyFont = font();
+    historyFont.setStretch(100);
+    setPresentationFont(text, historyFont);
+    text->setReadOnly(true);
+    text->setFrameShape(QFrame::NoFrame);
+    text->setLineWrapMode(QPlainTextEdit::NoWrap);
+    l->addWidget(text);
+    historyText = text;
+  } else {
+    // The latest alarm transitions as a table; severity cells use alarm colors.
+    auto table = new QTableWidget(0, 5);
+    table->setObjectName("historyTable");
+    table->setHorizontalHeaderLabels({"Time", "Process Variable", "Status", "Severity", "Value"});
+    table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    table->setAlternatingRowColors(true);
+    table->setShowGrid(false);
+    table->setWordWrap(false);
+    table->verticalHeader()->hide();
+    table->horizontalHeader()->setStretchLastSection(true);
+    table->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    setPresentationFont(table, contentFont());
+    l->addWidget(table, 1);
+    historyTable = table;
   }
-  auto text = new QPlainTextEdit;
-  auto historyFont = legacyAppearance() ? font() : contentFont();
-  historyFont.setStretch(100);
-  setPresentationFont(text, historyFont);
-  text->setReadOnly(true);
-  text->setFrameShape(QFrame::NoFrame);
-  text->setLineWrapMode(QPlainTextEdit::NoWrap);
-  l->addWidget(text);
-  historyDialog = d; historyText = text;
   refresh();
-  if (!legacyAppearance()) dialogActions(l, d, QDialogButtonBox::Close);
-  sizeDialog(d, QSize(720, 225)); d->show();
+  if (!legacyAppearance()) {
+    auto buttons = dialogActions(l, d, QDialogButtonBox::Close);
+    buttons->button(QDialogButtonBox::Close)->setFocus();
+  }
+  sizeDialog(d, legacyAppearance() ? QSize(720, 225) : QSize(860, 360)); d->show();
+}
+void Window::refreshHistory() {
+  if ((!historyText && !historyTable) || engine->history == shownHistory) return;
+  shownHistory = engine->history;
+  static const QRegularExpression fields("^(\\S+ \\S+) (\\S+) (\\S+) (\\S+) (.*)$");
+  if (historyText) {
+    QStringList rows;
+    for (const auto& entry : shownHistory) {
+      const auto match = fields.match(entry);
+      rows << (match.hasMatch()
+                   ? QString("%1 %2 %3 %4 %5")
+                         .arg(match.captured(1), -21).arg(match.captured(2), -32)
+                         .arg(match.captured(3), -10).arg(match.captured(4), -10)
+                         .arg(match.captured(5))
+                   : entry);
+    }
+    historyText->setPlainText(rows.join('\n'));
+    return;
+  }
+  historyTable->setRowCount(shownHistory.size());
+  for (int row = 0; row < shownHistory.size(); ++row) {
+    const auto match = fields.match(shownHistory[row]);
+    for (int column = 0; column < 5; ++column) {
+      auto item = historyTable->item(row, column);
+      if (!item) historyTable->setItem(row, column, item = new QTableWidgetItem);
+      item->setText(match.hasMatch() ? match.captured(column + 1) : column ? QString() : shownHistory[row]);
+      item->setData(Qt::BackgroundRole, QVariant());
+      item->setData(Qt::ForegroundRole, QVariant());
+    }
+    if (!match.hasMatch()) continue;
+    for (int severity = 1; severity < 5; ++severity)
+      if (match.captured(4) == severityName(severity)) {
+        const auto color = severityColor(severity);
+        historyTable->item(row, 3)->setBackground(color);
+        historyTable->item(row, 3)->setForeground(contrastingText(color));
+      }
+  }
+  historyTable->resizeColumnsToContents();
 }
 void Window::broadcast(int mode) {
   if (!logging) return;
   auto dialog = new QDialog(this);
   dialog->setAttribute(Qt::WA_DeleteOnClose);
   dialog->setObjectName("broadcastDialog");
-  dialog->setWindowTitle("ALH MessageEntryDialog");
+  const bool legacy = legacyAppearance();
+  const QStringList titles = {"Send Message", "Stop Alarm Logging", "Reload Facility"};
+  dialog->setWindowTitle(legacy ? QString("ALH MessageEntryDialog") : titles.value(mode));
   auto layout = dialogColumn(dialog);
-  layout->addWidget(new QLabel("Type message (See help for detail):"));
+  const QStringList prompts = {"Message for other Alarm Handlers using this configuration:",
+                               "Reason for stopping alarm logging:",
+                               "Reason for reloading the facility configuration:"};
+  layout->addWidget(new QLabel(legacy ? QString("Type message (See help for detail):") : prompts.value(mode)));
   auto text = new QLineEdit(mode == 2 ? "Reload config. Reason: " : "");
   text->setObjectName("broadcastMessage");
   layout->addWidget(text);
@@ -2395,7 +2779,14 @@ void Window::broadcast(int mode) {
   minutes->setRange(1, 10); minutes->setValue(1);
   if (mode == 1) {
     auto row = dialogRow(layout);
-    row->addWidget(new QLabel("Minutes without alarm logging:")); row->addWidget(minutes);
+    if (legacy) {
+      row->addWidget(new QLabel("Minutes without alarm logging:")); row->addWidget(minutes);
+    } else {
+      minutes->setSuffix(minutes->value() == 1 ? " minute" : " minutes");
+      connect(minutes, QOverload<int>::of(&QSpinBox::valueChanged), minutes,
+              [minutes](int value) { minutes->setSuffix(value == 1 ? " minute" : " minutes"); });
+      row->addWidget(new QLabel("Stop alarm logging for")); row->addWidget(minutes); row->addStretch();
+    }
   } else {
     minutes->setParent(dialog);
     minutes->hide();
@@ -2403,11 +2794,12 @@ void Window::broadcast(int mode) {
   auto buttons = dialogActions(layout, dialog, QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
       "Messages are delivered to other ALH instances using the same facility configuration. "
       "Stop Logging suspends alarm logging for the chosen duration. Reload rereads the facility configuration.");
+  if (!legacy) buttons->button(QDialogButtonBox::Ok)->setText(QStringList{"Send", "Stop Logging", "Reload"}.value(mode));
   connect(buttons, &QDialogButtonBox::accepted, dialog, [this, dialog, text, minutes, mode] {
     if (logging->sendBroadcast(text->text(), mode == 1 ? minutes->value() : 0, mode == 2)) dialog->close();
     else error("Could not broadcast message");
   });
-  sizeDialog(dialog, QSize(390, mode == 1 ? 135 : 105)); dialog->show();
+  sizeDialog(dialog, legacy ? QSize(390, mode == 1 ? 135 : 105) : QSize(460, 0)); dialog->show();
 }
 void Window::exitApplication() {
   if (exitPopup) {
@@ -2416,8 +2808,13 @@ void Window::exitApplication() {
     return;
   }
   auto parent = isVisible() ? static_cast<QWidget*>(this) : runtime;
-  exitPopup = new QMessageBox(QMessageBox::Warning, "Alarm Handler", "Exit Alarm Handler?",
+  exitPopup = new QMessageBox(legacyAppearance() ? QMessageBox::Warning : QMessageBox::Question,
+                              "Alarm Handler", "Exit Alarm Handler?",
                               QMessageBox::Ok | QMessageBox::Cancel, parent);
+  if (!legacyAppearance()) {
+    exitPopup->setInformativeText("Alarm monitoring and logging for " + doc.root->label() + " will stop.");
+    exitPopup->button(QMessageBox::Ok)->setText("Exit");
+  }
   exitPopup->setObjectName("exitConfirmation");
   exitPopup->setDefaultButton(QMessageBox::Cancel);
   exitPopup->setAttribute(Qt::WA_DeleteOnClose);

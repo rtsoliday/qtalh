@@ -3,6 +3,7 @@
 #include "test_compat.h"
 #include <QElapsedTimer>
 #include <QTemporaryDir>
+#include <QUuid>
 using namespace alh;
 namespace {
 ChannelUpdate sample(QString id = "pv", int severity = 0, int unack = 0) {
@@ -67,6 +68,23 @@ private slots:
     QCOMPARE(r.rows[0].chatterMaximum, 5);
     QVERIFY(r.rows[0].chattering);
     QCOMPARE(report(a, 110000).rows[0].currentActivations, 0);
+  }
+  void channelInstanceIdentifiers() {
+    // Exported as channel_instance: unique RFC 4122 version 4 identifiers.
+    AlarmAnalytics a(0, 1700000000000);
+    QVector<ChannelUpdate> all;
+    for (int i = 0; i < 1000; ++i) all << sample("pv" + QString::number(i));
+    a.reconcile(all, 0, 1700000000000);
+    QSet<QString> keys;
+    for (const auto& c : a.snapshot(0, 1700000000000).channels) {
+      const QUuid id(c.key);
+      QVERIFY(!id.isNull());
+      QCOMPARE(id.version(), QUuid::Random);
+      QCOMPARE(id.variant(), QUuid::DCE);
+      QCOMPARE(id.toString(QUuid::WithoutBraces), c.key);
+      keys << c.key;
+    }
+    QCOMPARE(keys.size(), 1000);
   }
   void chatterBoundaryAndQueryChange() {
     AlarmAnalytics a;
