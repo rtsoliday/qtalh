@@ -691,6 +691,9 @@ void Window::setupEngine() {
       error("Cannot start command: " + command);
   };
   selection = selectedGroup = doc.root.get();
+  configuredBeepSeverity = doc.beepSeverity;
+  configuredBeep.clear();
+  for (auto n : doc.nodes()) configuredBeep.insert(n, engine->state(n).beepThreshold);
   dirty = true;
 }
 void Window::buildUi() {
@@ -995,6 +998,17 @@ void Window::buildUi() {
     raise();
     activateWindow();
   });
+  runtimeButton->setContextMenuPolicy(Qt::CustomContextMenu);
+  connect(runtimeButton, &QWidget::customContextMenuRequested, this, [this](const QPoint& point) {
+    QMenu menu(runtimeButton);
+    menu.setObjectName("runtimeContextMenu");
+    connect(menu.addAction("Open Main Window"), &QAction::triggered, this, [this] {
+      show(); raise(); activateWindow();
+    });
+    connect(menu.addAction("Active Alarms..."), &QAction::triggered, this, [this] { showActiveAlarms(); });
+    connect(menu.addAction("Alarm Summary Panel..."), &QAction::triggered, this, [this] { showSummary(); });
+    menu.exec(runtimeButton->mapToGlobal(point));
+  });
   runtime->installEventFilter(this);
   if (!options.font.isEmpty()) {
     QFont f;
@@ -1157,6 +1171,7 @@ void Window::refreshStatus() {
       (shown.shelved ? QString("  [Shelved: %1]").arg(shown.shelved) : QString()));
   // Grow the compact window for longer text or a larger font; neither changes
   // on most status ticks, so skip the layout query then.
+  refreshTools();
   if (!legacyAppearance() && (runtimeSizedText != runtimeButton->text() ||
                               runtimeSizedFont != runtimeButton->font())) {
     runtimeSizedText = runtimeButton->text();
@@ -1331,6 +1346,8 @@ void Window::menus() {
       }
     });
   }
+  action(file, "Import Phoebus XML...", [this] { importPhoebus(); });
+  action(file, "Export Phoebus XML...", [this] { exportPhoebus(); });
   action(file, "Print...", [this] {
     QPrinter printer;
     QPrintDialog dialog(&printer, this);
@@ -1412,9 +1429,15 @@ void Window::menus() {
   }
   auto view = menuBar()->addMenu("&View");
   if (!options.editor) {
+    action(view, "Active Alarms...", [this] { showActiveAlarms(); }, QKeySequence("Ctrl+L"));
+    action(view, "Alarm Summary Panel...", [this] { showSummary(); });
+    action(view, "Alarm Details...", [this] { alarmDetails(); }, QKeySequence("Ctrl+D"));
+    action(view, "Runtime Overrides...", [this] { showOverrides(); });
     action(view, "Shelved Alarms...", [this] { showShelvedAlarms(); });
     action(view, "Alarm Analytics...", [this] { showAnalytics(); });
   }
+  action(view, "Find Alarm...", [this] { findAlarm(); }, QKeySequence("Ctrl+F"));
+  view->addSeparator();
   action(
       view, "Expand One Level", [this] { expandOneLevel(treeView->currentIndex()); },
       QKeySequence("+"));
@@ -1518,7 +1541,7 @@ void Window::menus() {
   // Menu actions are created only here; selection changes enable them often.
   const QStringList selectedActions = {"Acknowledge Alarm", "Display Guidance", "Start Related Process",
       "Force Process Variable...", "Force Mask...", "Modify Mask Settings...", "Beep Severity...",
-      "Shelve Alarms...", "Unshelve Alarms", "NoAck for One Hour", "Properties Window"};
+      "Shelve Alarms...", "Unshelve Alarms", "NoAck for One Hour", "Properties Window", "Alarm Details..."};
   selectionActions.clear();
   for (auto a : findChildren<QAction*>())
     if (selectedActions.contains(a->text())) selectionActions.push_back(a);
@@ -1575,6 +1598,8 @@ void Window::menus() {
   });
 }
 void Window::replace(Document d, bool snapshot) {
+  // The summary's tiles name the old top-level groups; rebuild it after the reload.
+  const bool summaryOpen = summaryDialog && summaryDialog->isVisible();
   const bool sameRuntime = !options.editor && !snapshot &&
       QFileInfo(d.filename).absoluteFilePath() == QFileInfo(doc.filename).absoluteFilePath();
   const auto savedShelves = sameRuntime ? engine->shelves() : QVector<ShelfSnapshot>();
@@ -1616,6 +1641,11 @@ void Window::replace(Document d, bool snapshot) {
     redo.clear();
     modified = true;
   }
+  // These tools retain raw node pointers. WA_DeleteOnClose defers destruction
+  // until the event loop, so dispose of them before replacing the document or
+  // refreshing/reopening the summary against the new engine.
+  for (auto dialog : {activeAlarmsDialog, findDialog, overridesDialog, summaryDialog})
+    delete dialog.data();
   // Detach views before old model objects are released.
   for (auto dialog : findChildren<QDialog*>(QString(), Qt::FindDirectChildrenOnly)) {
     if (selectionDialogs.contains(dialog->objectName()) &&
@@ -1689,6 +1719,7 @@ void Window::replace(Document d, bool snapshot) {
     engine->start();
   scheduleHeartbeat();
   refresh();
+  if (summaryOpen) showSummary();
 }
 void Window::open(bool insert) {
   if (insert && !selection) {

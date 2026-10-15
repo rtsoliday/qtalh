@@ -27,6 +27,11 @@ public:
   void cancel(const QString&, const void* owner = nullptr) override;
   void clear() override;
   void poll();
+  // One-shot DBR_STRING reads for display-only details such as alarm limits.
+  // Each name maps to its value; a missing field, unreachable PV or timeout
+  // leaves the name out. No diagnostics are reported.
+  void readStrings(const QStringList& names, std::function<void(QHash<QString, QString>)> done,
+                   int timeoutMs = 1500);
   void setInitialAckT(const QString&, bool);
   // Configure before connecting. All fields of a record share ALH's
   // subgroup-first startup precedence and one successful ACKT submission.
@@ -66,6 +71,26 @@ private:
   void subscribe(Channel*);
   void report(int, const QString&);
   void numericUnavailable(Channel*, const QString&);
+  struct Read;
+  struct ReadItem {
+    ChannelAccess* owner = nullptr;
+    Read* read = nullptr;
+    QString name;
+    chid id = nullptr;
+    bool requested = false;
+  };
+  struct Read {
+    QHash<QString, QString> values;
+    std::vector<std::unique_ptr<ReadItem>> items;
+    std::function<void(QHash<QString, QString>)> done;
+    int pending = 0;
+    quint64 id = 0;
+  };
+  std::vector<std::unique_ptr<Read>> reads;
+  quint64 nextRead = 0;
+  void finishRead(quint64 id);
+  static void readConnection(connection_handler_args);
+  static void readValue(event_handler_args);
   static void connection(connection_handler_args);
   static void access(access_rights_handler_args);
   static void update(event_handler_args);

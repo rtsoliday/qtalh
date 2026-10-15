@@ -11,6 +11,9 @@ struct Options {
   QString config, configDir, logDir = ".", alarmFile = "ALH-default.alhAlarm",
                              opmodFile = "ALH-default.alhOpmod", lockFile, sound, font, geometry;
   QString display, platform, style;
+  // Conversions that exit without a GUI: the configuration (ALH, or Phoebus XML
+  // for fromPhoebus) is written to this output file.
+  QString toPhoebus, fromPhoebus;
   int filter = 0, maxRecords = 2000, printerKey = 0, databaseKey = 0;
 };
 Options parseOptions(const QStringList&);

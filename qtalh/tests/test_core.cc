@@ -1,11 +1,13 @@
 #include "test_compat.h"
 #include "core/engine.h"
 #include "core/model.h"
+#include "core/phoebus.h"
 #include "services/ipc.h"
 #include "services/options.h"
 #include <QElapsedTimer>
 #include <QFile>
 #include <QTemporaryDir>
+#include <QXmlStreamReader>
 #include <alarm.h>
 #include <cstring>
 #include <limits>
@@ -3075,6 +3077,214 @@ $GUIDANCE https://example.invalid/guide
     QVERIFY(commands.contains("root-alarm"));
     e.event(n, {0, 0, 2, 1, "0"});
     QVERIFY(commands.contains("clear"));
+  }
+  void phoebusExport() {
+    auto d = parseConfig(
+        "$BEEPSEVERITY MAJOR\nGROUP NULL ring\n$GUIDANCE\nCall the physicist.\n$END\n"
+        "GROUP ring vacuum\n$GUIDANCE https://example.invalid/vacuum\n"
+        "$COMMAND !Overview!medm vac.adl!Gauges!MASTER_ONLY medm gauges.adl!\n"
+        "CHANNEL vacuum gauge1 -D-T-\n$ALIAS Gauge 1 & <pressure>\n$ALARMCOUNTFILTER -1 10\n"
+        "CHANNEL vacuum gauge2 --A-L\n$ALARMCOUNTFILTER 3 20\n$SEVRCOMMAND UP_MAJOR echo up\n"
+        "CHANNEL vacuum gauge3 C----\n$ACKPV gauge3:ack 1\n");
+    QStringList notes;
+    const auto xml = writePhoebusXml(d, &notes);
+    QXmlStreamReader reader(xml);
+    QVERIFY(reader.readNextStartElement());
+    QCOMPARE(reader.name().toString(), QString("config"));
+    QCOMPARE(reader.attributes().value("name").toString(), QString("ring"));
+    const QString text = QString::fromUtf8(xml);
+    QVERIFY(text.contains("<component name=\"vacuum\">"));
+    QVERIFY(text.contains("<pv name=\"gauge1\">"));
+    QVERIFY(text.contains("<description>Gauge 1 &amp; &lt;pressure&gt;</description>"));
+    // Disable or Cancel -> not enabled; NoAckT -> not latching; delay-only filter.
+    const auto gauge1 = text.mid(text.indexOf("<pv name=\"gauge1\">"), text.indexOf("<pv name=\"gauge2\">") - text.indexOf("<pv name=\"gauge1\">"));
+    QVERIFY(gauge1.contains("<enabled>false</enabled>"));
+    QVERIFY(gauge1.contains("<latching>false</latching>"));
+    QVERIFY(gauge1.contains("<delay>10</delay>"));
+    QVERIFY(!gauge1.contains("<count>"));
+    const auto gauge2 = text.mid(text.indexOf("<pv name=\"gauge2\">"), text.indexOf("<pv name=\"gauge3\">") - text.indexOf("<pv name=\"gauge2\">"));
+    QVERIFY(gauge2.contains("<enabled>true</enabled>"));
+    QVERIFY(gauge2.contains("<delay>20</delay>") && gauge2.contains("<count>3</count>"));
+    QVERIFY(text.contains("<pv name=\"gauge3\">\n      <enabled>false</enabled>"));
+    QVERIFY(text.contains("<title>Overview</title>") && text.contains("<details>medm gauges.adl</details>"));
+    QVERIFY(text.contains("<display>") && text.contains("https://example.invalid/vacuum"));
+    QVERIFY(text.contains("<details>Call the physicist.</details>"));
+    for (const auto& kind : {"NoAck (A)", "NoLog (L)", "SEVRCOMMAND", "ACKPV", "MASTER_ONLY",
+                             "$BEEPSEVERITY", "Facility guidance"}) {
+      bool found = false;
+      for (const auto& note : notes) found |= note.contains(kind);
+      QVERIFY2(found, kind);
+    }
+  }
+  void phoebusImport() {
+    QTemporaryDir dir;
+    QFile include(dir.filePath("rf.xml"));
+    QVERIFY(include.open(QIODevice::WriteOnly));
+    include.write("<component name=\"RF\"><pv name=\"rf:cavity\"><enabled>true</enabled></pv></component>");
+    include.close();
+    const QByteArray xml =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+        "<config name=\"Storage Ring\" xmlns:xi=\"http://www.w3.org/2001/XInclude\">\n"
+        "  <component name=\"Vacuum\">\n"
+        "    <guidance><title>Who</title><details>Call vacuum on-call.</details></guidance>\n"
+        "    <guidance><title>What</title><details>Check pumps.\n"
+        "$END is not a terminator here.</details></guidance>\n"
+        "    <display><title>Overview</title><details>/opt/displays/vac.bob</details></display>\n"
+        "    <display><title>Wiki</title><details>https://example.invalid/wiki</details></display>\n"
+        "    <command><title>Strip chart</title><details>striptool vac.stp</details></command>\n"
+        "    <command><title>Panel</title><details>qtedm -x vac.adl</details></command>\n"
+        "    <pv name=\"vac:gauge1\">\n"
+        "      <description>Gauge 1</description>\n"
+        "      <enabled>false</enabled>\n"
+        "      <latching>false</latching>\n"
+        "      <annunciating>true</annunciating>\n"
+        "      <delay>10</delay>\n"
+        "      <count>3</count>\n"
+        "      <filter>vac:interlock &gt; 0</filter>\n"
+        "      <automated_action><title>Mail</title><details>mailto:ops@example.invalid</details><delay>60</delay></automated_action>\n"
+        "    </pv>\n"
+        "    <pv name=\"vac:gauge2\"><enabled>2030-01-01T00:00</enabled><delay>5</delay></pv>\n"
+        "    <component name=\"Vacuum\"><pv name=\"vac:nested\"/></component>\n"
+        "  </component>\n"
+        "  <xi:include href=\"rf.xml\"/>\n"
+        "</config>";
+    QStringList notes;
+    auto d = parsePhoebusXml(xml, dir.path(), &notes);
+    QCOMPARE(d.root->name, QString("Storage_Ring"));
+    QCOMPARE(d.channels().size(), 4);
+    Node *vacuum = nullptr, *gauge1 = nullptr, *gauge2 = nullptr, *nested = nullptr;
+    for (auto n : d.nodes()) {
+      if (n->name == "Vacuum") vacuum = n;
+      if (n->name == "vac:gauge1") gauge1 = n;
+      if (n->name == "vac:gauge2") gauge2 = n;
+      if (n->name == "vac:nested") nested = n;
+    }
+    QVERIFY(vacuum && gauge1 && gauge2 && nested);
+    QCOMPARE(gauge1->mask.text(), QString("-D-T-"));
+    QCOMPARE(gauge1->option("ALIAS"), QString("Gauge 1"));
+    QCOMPARE(gauge1->option("ALARMCOUNTFILTER"), QString("3 10"));
+    QCOMPARE(gauge2->mask.text(), QString("-D---"));
+    QCOMPARE(gauge2->option("ALARMCOUNTFILTER"), QString("-1 5"));
+    // A component repeating its ancestor's name is renamed for ALH.
+    QCOMPARE(nested->parent->name, QString("Vacuum_2"));
+    QVERIFY(vacuum->option("GUIDANCE_TEXT").contains("Who:\nCall vacuum on-call."));
+    QVERIFY(vacuum->option("GUIDANCE_TEXT").contains("Display Overview: /opt/displays/vac.bob"));
+    QVERIFY(vacuum->option("GUIDANCE_TEXT").contains("\n$ END is not a terminator here."));
+    QCOMPARE(vacuum->option("GUIDANCE"), QString("https://example.invalid/wiki"));
+    QCOMPARE(vacuum->option("COMMAND"),
+             QString("!Strip chart!striptool vac.stp!Panel!qtedm -x vac.adl!"));
+    bool rf = false;
+    for (auto n : d.nodes()) rf |= n->name == "rf:cavity" && n->parent->name == "RF";
+    QVERIFY(rf);
+    for (const auto& kind : {"Disable-until", "Enabling filters", "Automated actions", "Annunciation",
+                             "Phoebus displays", "renamed"}) {
+      bool found = false;
+      for (const auto& note : notes) found |= note.contains(kind);
+      QVERIFY2(found, kind);
+    }
+    QVERIFY_THROWS_EXCEPTION(ParseError, parsePhoebusXml("<component name=\"x\"/>"));
+    QVERIFY_THROWS_EXCEPTION(ParseError, parsePhoebusXml("<config name=\"x\"><pv/></config>"));
+    QVERIFY_THROWS_EXCEPTION(ParseError, parsePhoebusXml("<config name=\"x\"><pv"));
+  }
+  void phoebusRoundTrip() {
+    const auto original = parseConfig(
+        "GROUP NULL facility\nGROUP facility area\nCHANNEL area pv1 -D---\n$ALIAS First PV\n"
+        "$GUIDANCE\nLine one\nLine two\n$END\n$COMMAND striptool pv1.stp\n$ALARMCOUNTFILTER 2 30\n"
+        "CHANNEL area pv2 ---T-\nGROUP area inner\nCHANNEL inner pv3\n");
+    QStringList notes;
+    const auto back = parsePhoebusXml(writePhoebusXml(original, &notes));
+    QCOMPARE(notes.size(), 1);
+    QVERIFY(notes[0].contains("also delay clearing"));
+    // Directive order within a node is not significant.
+    auto normalized = [](const Document& d) {
+      QStringList lines;
+      for (auto n : d.nodes()) {
+        QStringList directives;
+        for (const auto& directive : n->directives)
+          if (!directive.value.isEmpty()) directives << directive.key + '=' + directive.value;
+        directives.sort();
+        lines << Engine::channelPath(n) + ' ' + n->mask.text() + ' ' + directives.join(';');
+      }
+      return lines;
+    };
+    QCOMPARE(normalized(back), normalized(original));
+  }
+  void alarmChangeTimeIgnoresUninitializedOverrides() {
+    auto doc = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
+    Engine engine(doc); auto n = doc.channels()[0];
+    qint64 time = 1000; engine.now = [&] { return time; };
+    engine.setMask(n, Mask::parse("----L"));
+    QCOMPARE(engine.state(n).changedAt, qint64(0));
+    engine.event(n, {});
+    QCOMPARE(engine.state(n).changedAt, time);
+    time += 1000;
+    engine.event(n, {0, 0, 0, 1, "new value"});
+    engine.setMask(n, Mask::parse("-----"));
+    QCOMPARE(engine.state(n).changedAt, qint64(1000));
+    engine.event(n, {3, 2, 2, 1, "12"});
+    QCOMPARE(engine.state(n).changedAt, time);
+  }
+  void phoebusRejectsTrailingXml() {
+    for (const auto& suffix : {QByteArray("<config name=\"other\"/>"), QByteArray("garbage"),
+                              QByteArray("<!-- unterminated")})
+      QVERIFY_THROWS_EXCEPTION(ParseError, parsePhoebusXml("<config name=\"root\"/>" + suffix));
+    QVERIFY(parsePhoebusXml("<config name=\"root\"/><!-- allowed -->").root);
+  }
+  void phoebusIncludesSelectedComponent() {
+    QTemporaryDir dir;
+    QFile file(dir.filePath("included.xml"));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("<config name=\"included\"><component name=\"selected\" id=\"area\">"
+               "<pv name=\"included:pv\"/></component><pv name=\"unselected\"/></config>");
+    file.close();
+    const auto xml = QByteArray("<config name=\"root\" xmlns:xi=\"http://www.w3.org/2001/XInclude\">"
+                                "<xi:include href=\"included.xml\" xpointer=\"area\"/></config>");
+    auto doc = parsePhoebusXml(xml, dir.path());
+    QCOMPARE(doc.channels().size(), 1);
+    QCOMPARE(doc.channels()[0]->name, QString("included:pv"));
+    QCOMPARE(doc.channels()[0]->parent->name, QString("selected"));
+    QVERIFY_THROWS_EXCEPTION(ParseError, parsePhoebusXml(QByteArray(xml).replace("xpointer=\"area\"", "xpointer=\"missing\""), dir.path()));
+    QVERIFY_THROWS_EXCEPTION(ParseError, parsePhoebusXml(QByteArray(xml).replace("xpointer=\"area\"", "parse=\"text\""), dir.path()));
+  }
+  void phoebusCommandTextStaysInDirective() {
+    QStringList notes;
+    auto doc = parsePhoebusXml(
+        "<config name=\"root\"><pv name=\"pv\"><command><title>Run</title>"
+        "<details>echo first\nCHANNEL root injected</details></command></pv></config>", {}, &notes);
+    QCOMPARE(doc.channels().size(), 1);
+    QVERIFY(doc.channels()[0]->option("COMMAND").isEmpty());
+    QVERIFY(doc.channels()[0]->option("GUIDANCE_TEXT").contains("echo first\nCHANNEL root injected"));
+    QVERIFY(!notes.isEmpty());
+    doc = parsePhoebusXml(
+        "<config name=\"root\"><pv name=\"pv\">"
+        "<command><details>echo first</details></command>"
+        "<command><details>echo second</details></command></pv></config>");
+    const auto command = doc.channels()[0]->option("COMMAND");
+    const auto parts = command.split('!', Qt::SkipEmptyParts);
+    QCOMPARE(parts.size(), 4);
+    QCOMPARE(parts[1], QString("echo first"));
+    QCOMPARE(parts[3], QString("echo second"));
+  }
+  void phoebusRejectsInvalidDelayAndCount() {
+    for (const auto& field : {QByteArray("<delay>nan</delay>"), QByteArray("<delay>1e100</delay>"),
+                              QByteArray("<delay>0.5</delay>"), QByteArray("<delay>-1</delay>"),
+                              QByteArray("<count>bad</count>"), QByteArray("<count>1000001</count>")})
+      QVERIFY_THROWS_EXCEPTION(ParseError, parsePhoebusXml("<config name=\"root\"><pv name=\"pv\">" + field + "</pv></config>"));
+  }
+  void phoebusReportsGroupAliasLoss() {
+    QStringList notes;
+    writePhoebusXml(parseConfig("GROUP NULL root\n$ALIAS Operator facility\n"), &notes);
+    QCOMPARE(notes.size(), 1);
+    QVERIFY(notes[0].contains("Group aliases"));
+  }
+  void phoebusOptions() {
+    auto o = parseOptions({"qtalh", "--to-phoebus", "out.xml", "in.alhConfig"});
+    QCOMPARE(o.toPhoebus, QFileInfo("out.xml").absoluteFilePath());
+    o = parseOptions({"qtalh", "--from-phoebus", "out.alhConfig", "in.xml"});
+    QCOMPARE(o.fromPhoebus, QFileInfo("out.alhConfig").absoluteFilePath());
+    QVERIFY(o.config.endsWith("in.xml"));
+    QVERIFY_THROWS_EXCEPTION(ParseError, parseOptions({"qtalh", "--to-phoebus"}));
+    QVERIFY(usage().contains("--to-phoebus") && usage().contains("--from-phoebus"));
   }
   void styleOptions() {
     QVERIFY(parseOptions({"qtalh"}).style.isEmpty());

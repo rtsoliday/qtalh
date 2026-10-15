@@ -152,6 +152,24 @@ private:
   void rebuildSelectionDialog(const QString&);
   void scheduleDialogSync();
   QString selectionState() const;
+  // Operator tools (ui/tools.cc): active alarm list, search, alarm details,
+  // runtime overrides, summary panel, and Phoebus XML import/export.
+  QPointer<QDialog> activeAlarmsDialog, findDialog, overridesDialog, summaryDialog;
+  // BEEPSEVR as loaded; Engine::setBeep rewrites the node's option at runtime.
+  QHash<Node*, int> configuredBeep;
+  int configuredBeepSeverity = 1;
+  void showActiveAlarms();
+  void findAlarm();
+  void alarmDetails();
+  void showOverrides();
+  void showSummary();
+  void importPhoebus();
+  void exportPhoebus();
+  void showConversionNotes(const QString& title, const QStringList& notes, QWidget* parent);
+  // Shows the main window with this group or channel selected.
+  void reveal(Node*);
+  // Updates open tool windows; cheap when none are open.
+  void refreshTools();
   void activateRuntime();
   void showLogBrowser(bool alarm);
   void shelveDialog(Node*, bool change = false);

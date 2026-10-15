@@ -2,9 +2,9 @@
 QTALH_GUI := 1
 include ../Makefile.rules
 ifeq ($(OS),Windows)
-CORE = core/analytics.cc core/model.cc core/config.cc core/engine.cc core/notifications.cc
+CORE = core/analytics.cc core/model.cc core/config.cc core/engine.cc core/notifications.cc core/phoebus.cc
 SERVICES = services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/options.cc services/logging.cc services/ipc.cc
-GUI = ui/analytics.cc ui/notifications.cc ui/appearance.cc ui/workflows.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc
+GUI = ui/analytics.cc ui/notifications.cc ui/appearance.cc ui/workflows.cc ui/tools.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc
 OBJECTS = $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.obj) $(SERVICES:.cc=.obj) $(GUI:.cc=.obj)) $(OBJ_DIR)/resources.obj
 # MSVC does not emit GCC-style .d files. Rebuild on project header changes.
 HEADERS = $(wildcard core/*.h services/*.h ui/*.h)
@@ -75,9 +75,9 @@ $(error Qt $(QT_VERSION) Widgets, Network, PrintSupport, and Multimedia developm
 endif
 endif
 INCLUDES = -I. -I$(OBJ_DIR) -I$(EPICS_BASE)/include -I$(EPICS_BASE)/include/compiler/$(EPICS_COMPILER) -I$(EPICS_BASE)/include/os/$(OS)
-CORE = core/analytics.cc core/model.cc core/config.cc core/engine.cc core/notifications.cc
+CORE = core/analytics.cc core/model.cc core/config.cc core/engine.cc core/notifications.cc core/phoebus.cc
 SERVICES = services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/options.cc services/logging.cc services/ipc.cc
-GUI = ui/analytics.cc ui/notifications.cc ui/appearance.cc ui/workflows.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc main.cc
+GUI = ui/analytics.cc ui/notifications.cc ui/appearance.cc ui/workflows.cc ui/tools.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc main.cc
 OBJECTS = $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o) $(SERVICES:.cc=.o) $(GUI:.cc=.o)) $(OBJ_DIR)/resources.o
 PROD = qtalh qtalh_printer qtalh_DB
 .PHONY: all test test-core test-ui test-ioc test-helpers clean distclean

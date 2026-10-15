@@ -161,7 +161,30 @@ INCLUDE paths retain their separate configuration-directory rule.
 | `-help`, `--help`, `-h` | Print help without opening a display. |
 | `-version`, `--version`, `-v` | Print ALH, Qt, and EPICS version information without opening a display. |
 | `--validate` | Parse the configuration and includes, report group/channel counts, then exit. |
+| `--to-phoebus out.xml` | Convert the configuration to Phoebus alarm XML, report unconverted settings, then exit. |
+| `--from-phoebus out.alhConfig` | Convert the Phoebus XML file given as the configuration argument to an ALH configuration, then exit. |
 | `--` | End options before the configuration filename. |
+
+### Operator tools
+
+The runtime's **View** menu adds tools that ALH does not have; they work in
+every appearance:
+
+- **Active Alarms…** (Ctrl+L): a sortable, filterable table of every channel in
+  alarm or awaiting acknowledgement, with Acknowledge, Guidance, Details and
+  Show in Tree.
+- **Find Alarm…** (Ctrl+F, also in the editor): search names, aliases, PVs and
+  paths, and select the match in the tree.
+- **Alarm Details…** (Ctrl+D): live state, configured versus runtime settings,
+  an explanation of why the channel alarms, and the record's alarm limits read
+  from the IOC.
+- **Runtime Overrides…**: masks, beep severities, Force PVs, NoAck timers and
+  shelves that differ from the configuration, with Restore Selected.
+- **Alarm Summary Panel…**: a tile per top-level group with alarm counts.
+
+**File → Import/Export Phoebus XML…** and `--to-phoebus`/`--from-phoebus`
+convert to and from the Phoebus alarm-server format. See the docs site pages
+*Active alarms, search & details* and *Phoebus XML import & export*.
 
 ### Choosing an appearance
 

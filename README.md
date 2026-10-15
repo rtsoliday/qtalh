@@ -10,6 +10,11 @@ Add `-style motif` for the classic Motif look, for example
 `qtalh -style motif -mainwindow facility.alhConfig`. See the
 [appearance guide](docs/qtalh-appearance.md) for screenshots and details.
 
+Beyond ALH, the runtime offers an Active Alarms table, Find Alarm, Alarm Details
+(including the record's alarm limits read from the IOC), Runtime Overrides, an
+Alarm Summary panel, and Phoebus alarm XML import/export (also `--to-phoebus` and
+`--from-phoebus`). These work in every appearance, including `-style motif`.
+
 ## Documentation
 
 The [modern documentation site](https://qtalh-documentation.rtsoliday123.chatgpt.site)

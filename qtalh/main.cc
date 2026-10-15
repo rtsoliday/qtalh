@@ -1,4 +1,5 @@
 #include "core/diagnostics.h"
+#include "core/phoebus.h"
 #include "services/options.h"
 #include "ui/window.h"
 #include "ui/dialogs.h"
@@ -29,6 +30,25 @@ int main(int argc, char** argv) {
       auto doc = alh::loadConfig(options.config, options.configDir);
       alh::debugLog(options.debug, "config", QString("validated %1 channels").arg(doc.channels().size()));
       QTextStream(stdout) << "Valid configuration: " << doc.channels().size() << " channels, "
+                          << doc.nodes().size() - doc.channels().size() << " groups\n";
+      return 0;
+    }
+    if (!options.toPhoebus.isEmpty() || !options.fromPhoebus.isEmpty()) {
+      if (!options.toPhoebus.isEmpty() && !options.fromPhoebus.isEmpty())
+        throw alh::ParseError("Choose one of --to-phoebus and --from-phoebus");
+      QStringList notes;
+      alh::Document doc;
+      QString output;
+      if (!options.toPhoebus.isEmpty()) {
+        doc = alh::loadConfig(options.config, options.configDir);
+        alh::savePhoebusXml(doc, output = options.toPhoebus, &notes);
+      } else {
+        doc = alh::loadPhoebusXml(options.config, &notes);
+        alh::saveConfig(doc, output = options.fromPhoebus);
+      }
+      for (const auto& note : notes)
+        QTextStream(stderr) << "qtalh: conversion note: " << note << '\n';
+      QTextStream(stdout) << "Wrote " << output << ": " << doc.channels().size() << " channels, "
                           << doc.nodes().size() - doc.channels().size() << " groups\n";
       return 0;
     }

@@ -59,6 +59,10 @@ Options parseOptions(const QStringList& args) {
       o.version = true;
     else if (a == "--validate")
       o.validate = true;
+    else if (a == "--to-phoebus")
+      o.toPhoebus = QFileInfo(need(i)).absoluteFilePath();
+    else if (a == "--from-phoebus")
+      o.fromPhoebus = QFileInfo(need(i)).absoluteFilePath();
     else if (a == "-a")
       o.alarmFile = need(i);
     else if (a == "-o")
@@ -162,6 +166,9 @@ QString usage() {
   -display display -geometry geometry -fn font
   -help -version     Show help / version without opening a display
   --validate        Validate the configuration without CA connections or GUI
+  --to-phoebus out.xml          Convert the configuration to Phoebus alarm XML
+  --from-phoebus out.alhConfig  Convert a Phoebus alarm XML file (given as the
+                                configuration) to an ALH configuration
 QtALH supports ALH configuration files and Qt 5.15/6 on Linux, macOS and Windows.
 )";
 }

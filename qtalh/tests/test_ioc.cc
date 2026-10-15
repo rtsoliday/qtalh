@@ -37,6 +37,45 @@ private slots:
     startIoc();
   }
 
+  void readStringsForAlarmLimits() {
+    ChannelAccess ca;
+    QHash<QString, QString> values;
+    bool done = false;
+    // Present fields arrive as strings; a nonexistent field is simply omitted.
+    ca.readStrings({prefix + "alarm.RTYP", prefix + "alarm.HIHI", prefix + "alarm.HHSV",
+                    prefix + "alarm.NOSUCHFIELD"},
+                   [&](QHash<QString, QString> result) { values = result; done = true; }, 1000);
+    QTRY_VERIFY_WITH_TIMEOUT(done, 5000);
+    QCOMPARE(values.value(prefix + "alarm.RTYP"), QString("ai"));
+    QCOMPARE(values.value(prefix + "alarm.HIHI").toDouble(), 10.0);
+    QCOMPARE(values.value(prefix + "alarm.HHSV"), QString("MAJOR"));
+    QVERIFY(!values.contains(prefix + "alarm.NOSUCHFIELD"));
+    // A read pending when the context is cleared never calls back.
+    bool late = false;
+    ca.readStrings({prefix + "missing:pv"}, [&](QHash<QString, QString>) { late = true; }, 200);
+    ca.clear();
+    QTest::qWait(400);
+    QVERIFY(!late);
+  }
+  void oneShotReadDoesNotCountReconnectTwice() {
+    ChannelAccess ca;
+    auto doc = parseConfig("GROUP NULL root\nCHANNEL root " + prefix + "alarm\n");
+    Engine engine(doc, {}, &ca); auto n = doc.channels()[0];
+    engine.start(); QTRY_VERIFY(engine.state(n).initialized);
+    bool done = false;
+    ca.readStrings({prefix + "alarm.RTYP", prefix + "missing:record"},
+                   [&](QHash<QString, QString>) { done = true; }, 30000);
+    QTest::qWait(300); // Read the available field before reconnecting it.
+    QVERIFY(!done);
+    ioc.kill(); QVERIFY(ioc.waitForFinished());
+    QTRY_COMPARE(engine.state(n).severity, 4);
+    startIoc(); QTRY_VERIFY_WITH_TIMEOUT(engine.state(n).severity < 4, 15000);
+    QTest::qWait(300);
+    // Re-reading RTYP must not decrement the missing record's pending count.
+    QVERIFY(!done);
+    ca.clear();
+  }
+
   void analyticsConfirmedAcknowledgementsAndGaps() {
     auto doc=parseConfig("GROUP NULL analytics\nCHANNEL analytics "+prefix+"alarm\nCHANNEL analytics "+prefix+"protected\n");
     ChannelAccess ca({true});Engine engine(doc,{true},&ca);auto n=doc.channels()[0];auto protectedNode=doc.channels()[1];

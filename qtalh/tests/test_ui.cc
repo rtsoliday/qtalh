@@ -3640,6 +3640,293 @@ private slots:
     engine.acknowledge(w->document().root.get());
     QVERIFY(displayed("acknowledged"));
   }
+  void phoebusHeadlessCommandLine() {
+    QTemporaryDir dir;
+    const auto input = dir.filePath("input.alhConfig"), xml = dir.filePath("output.xml"),
+               output = dir.filePath("output.alhConfig");
+    saveConfig(sample(), input);
+    const auto executable = QDir(QCoreApplication::applicationDirPath()).filePath("qtalh");
+    auto run = [&](const QStringList& arguments) {
+      QProcess process;
+      auto environment = QProcessEnvironment::systemEnvironment();
+      environment.remove("DISPLAY"); environment.insert("QT_QPA_PLATFORM", "not-a-platform");
+      process.setProcessEnvironment(environment);
+      process.start(executable, arguments);
+      if (!process.waitForFinished()) return -1;
+      return process.exitCode();
+    };
+    QCOMPARE(run({"--to-phoebus", xml, input}), 0);
+    QCOMPARE(run({"--from-phoebus", output, xml}), 0);
+    QCOMPARE(loadConfig(output).channels().size(), 3);
+    QCOMPARE(run({"--to-phoebus", xml, "--from-phoebus", output, input}), 1);
+    QFile file(xml); QVERIFY(file.open(QIODevice::Append)); file.write("<extra/>"); file.close();
+    QCOMPARE(run({"--from-phoebus", output, xml}), 1);
+    QCOMPARE(loadConfig(output).channels().size(), 3); // A failed conversion preserves its destination.
+  }
+  void activeAlarmList() {
+    auto w = std::make_unique<Window>(sample(), options(false), false);
+    w->show();
+    auto& engine = w->alarmEngine();
+    const auto channels = w->document().channels();
+    for (auto n : channels) engine.event(n, {0, 0, 0, 1, "0"});
+    engine.event(channels[0], {4, 1, 1, 1, "7"});  // test:power MINOR
+    engine.event(channels[2], {3, 2, 2, 1, "12"}); // test:vacuum MAJOR
+    for (auto a : w->findChildren<QAction*>()) if (a->text() == "Active Alarms...") a->trigger();
+    auto dialog = w->findChild<QDialog*>("activeAlarmsDialog");
+    QVERIFY(dialog);
+    auto table = dialog->findChild<QTableView*>("activeAlarmsTable");
+    QTRY_COMPARE(table->model()->rowCount(), 2);
+    // Highest severity first.
+    QCOMPARE(table->model()->index(0, 3).data().toString(), QString("test:vacuum"));
+    QCOMPARE(table->model()->index(0, 1).data().toString(), QString("MAJOR"));
+    QCOMPARE(table->model()->index(0, 0).data(Qt::BackgroundRole).value<QColor>(), severityColor(2));
+    QVERIFY(dialog->findChild<QLabel*>("activeAlarmsStatus")->text().startsWith("2 alarms, 2 unacknowledged"));
+    // Acknowledge the selected row; it stays listed while still in alarm.
+    table->selectRow(0);
+    dialog->findChild<QPushButton*>("activeAcknowledge")->click();
+    QCOMPARE(engine.state(channels[2]).unack, 0);
+    QTRY_COMPARE(table->model()->index(0, 0).data().toString(), QString());
+    auto unackOnly = dialog->findChild<QCheckBox*>("activeUnacknowledgedOnly");
+    unackOnly->setChecked(true);
+    QCOMPARE(table->model()->rowCount(), 1);
+    QCOMPARE(table->model()->index(0, 3).data().toString(), QString("test:power"));
+    unackOnly->setChecked(false);
+    dialog->findChild<QLineEdit*>("activeAlarmsFilter")->setText("vacuum");
+    QCOMPARE(table->model()->rowCount(), 1);
+    dialog->findChild<QLineEdit*>("activeAlarmsFilter")->clear();
+    // A recovered, acknowledged channel leaves the list.
+    engine.event(channels[2], {0, 0, 0, 1, "0"});
+    QTRY_COMPARE(table->model()->rowCount(), 1);
+    // Show in Tree selects the channel in the main window.
+    table->selectRow(0);
+    dialog->findChild<QPushButton*>("activeShowInTree")->click();
+    auto group = w->findChild<QTreeView*>("groupContents");
+    QCOMPARE(group->model()->data(group->currentIndex().siblingAtColumn(2)).toString(), QString("test:power"));
+    // Shelved alarms are counted but not listed.
+    engine.shelve(channels[0], 30, "Maintenance", "tester");
+    QTRY_COMPARE(table->model()->rowCount(), 0);
+    QTRY_VERIFY(dialog->findChild<QLabel*>("activeAlarmsStatus")->text().contains("1 shelved not shown"));
+  }
+  void activeAlarmFilterMatchesAliasedPv() {
+    auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root unique:pv\n$ALIAS Pressure gauge\n"), options(false), false);
+    w->alarmEngine().event(w->document().channels()[0], {3, 2, 2, 1, "12"});
+    w->findChild<QAction*>("Active Alarms...")->trigger();
+    auto dialog = w->findChild<QDialog*>("activeAlarmsDialog");
+    auto table = dialog->findChild<QTableView*>("activeAlarmsTable");
+    dialog->findChild<QLineEdit*>("activeAlarmsFilter")->setText("unique:pv");
+    QCOMPARE(table->model()->rowCount(), 1);
+    QCOMPARE(table->model()->index(0, 3).data().toString(), QString("Pressure gauge"));
+  }
+  void findAlarmInTree() {
+    auto w = std::make_unique<Window>(sample(), options(true), false);
+    w->show();
+    for (auto a : w->findChildren<QAction*>()) if (a->text() == "Find Alarm...") a->trigger();
+    auto dialog = w->findChild<QDialog*>("findAlarmDialog");
+    QVERIFY(dialog);
+    auto text = dialog->findChild<QLineEdit*>("findAlarmText");
+    auto results = dialog->findChild<QListWidget*>("findAlarmResults");
+    QTest::keyClicks(text, "TIMING");
+    QTRY_COMPARE(results->count(), 2); // The group and its channel.
+    QTest::keyClick(text, Qt::Key_Down);
+    QCOMPARE(results->currentRow(), 1);
+    QTest::keyClick(text, Qt::Key_Return);
+    auto group = w->findChild<QTreeView*>("groupContents");
+    QCOMPARE(group->model()->data(group->currentIndex().siblingAtColumn(2)).toString(), QString("test:timing"));
+    auto tree = w->findChild<QTreeView*>("alarmTree");
+    QCOMPARE(tree->model()->data(tree->currentIndex().siblingAtColumn(2)).toString(), QString("Timing"));
+    text->setText("no such alarm");
+    QTRY_COMPARE(dialog->findChild<QLabel*>("findAlarmStatus")->text(), QString("No matches."));
+  }
+  void findHiddenChannelPreservesSelection() {
+    auto o = options(false); o.filter = 1;
+    auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root alarming\nCHANNEL root hidden\n"), o, false);
+    w->show();
+    auto channels = w->document().channels();
+    w->alarmEngine().event(channels[0], {3, 2, 2, 1, "12"});
+    w->alarmEngine().event(channels[1], {});
+    auto group = w->findChild<QTreeView*>("groupContents");
+    QTRY_COMPARE(group->model()->rowCount(), 1);
+    group->setCurrentIndex(group->model()->index(0, 2));
+    w->findChild<QAction*>("Find Alarm...")->trigger();
+    auto dialog = w->findChild<QDialog*>("findAlarmDialog");
+    dialog->findChild<QLineEdit*>("findAlarmText")->setText("hidden");
+    QTRY_COMPARE(dialog->findChild<QListWidget*>("findAlarmResults")->count(), 1);
+    dialog->findChild<QPushButton*>("findShowInTree")->click();
+    QCOMPARE(group->currentIndex().siblingAtColumn(2).data().toString(), QString("alarming"));
+    bool reported = false;
+    for (auto label : w->findChildren<QLabel*>())
+      reported |= label->text().contains("/root/hidden is hidden by the display filter");
+    QVERIFY(reported);
+  }
+  void operatorToolsReload() {
+    QTemporaryDir dir; auto o = options(false); o.broadcast = true;
+    o.configDir = dir.path(); o.config = dir.filePath("config");
+    saveConfig(sample(), o.config);
+    auto w = std::make_unique<Window>(loadConfig(o.config), o, false);
+    w->show();
+    for (const auto& name : {"Active Alarms...", "Find Alarm...", "Runtime Overrides...", "Alarm Summary Panel..."})
+      w->findChild<QAction*>(name)->trigger();
+    QPointer<QDialog> original = w->findChild<QDialog*>("alarmSummaryDialog");
+    QVERIFY(original && original->isVisible());
+    saveConfig(parseConfig("GROUP NULL BOOSTER\nGROUP BOOSTER Replacement\nCHANNEL Replacement new:pv\n"), o.config);
+    Logging sender(o, "BOOSTER"); QVERIFY(sender.sendBroadcast("reload", 0, true));
+    QTRY_COMPARE(w->document().channels()[0]->name, QString("new:pv"));
+    auto summary = w->findChild<QDialog*>("alarmSummaryDialog");
+    QVERIFY(summary && summary->isVisible() && summary->isEnabled());
+    QVERIFY(!original);
+    auto tiles = summary->findChildren<MotifButton*>("summaryTile");
+    QCOMPARE(tiles.size(), 1);
+    QVERIFY(tiles[0]->text().startsWith("Replacement\n"));
+    tiles[0]->click();
+    QCOMPARE(w->findChild<QTreeView*>("alarmTree")->currentIndex().siblingAtColumn(2).data().toString(), QString("Replacement"));
+  }
+  void summaryIncludesFacilityChannels() {
+    auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root direct\nGROUP root branch\nCHANNEL branch nested\n"), options(false), false);
+    auto channels = w->document().channels();
+    w->alarmEngine().event(channels[0], {3, 2, 2, 1, "12"});
+    w->alarmEngine().event(channels[1], {});
+    w->findChild<QAction*>("Alarm Summary Panel...")->trigger();
+    auto dialog = w->findChild<QDialog*>("alarmSummaryDialog");
+    QCOMPARE(dialog->findChild<QLabel*>("summaryTotals")->text(), QString("1 in alarm, 1 unacknowledged"));
+    bool alarmVisible = false;
+    for (auto tile : dialog->findChildren<MotifButton*>("summaryTile"))
+      alarmVisible |= tile->text().contains("1 in alarm");
+    QVERIFY(alarmVisible);
+  }
+  void overridesSelectionControlsFollowRefresh() {
+    auto w = std::make_unique<Window>(sample(), options(false), false);
+    auto n = w->document().channels()[0];
+    w->alarmEngine().setBeep(n, 2);
+    w->findChild<QAction*>("Runtime Overrides...")->trigger();
+    auto dialog = w->findChild<QDialog*>("runtimeOverridesDialog");
+    auto table = dialog->findChild<QTableWidget*>("runtimeOverridesTable");
+    auto restore = dialog->findChild<QPushButton*>("restoreOverrides");
+    table->selectRow(0); QVERIFY(restore->isEnabled());
+    w->alarmEngine().setBeep(n, 1);
+    QTRY_COMPARE(table->rowCount(), 0);
+    QVERIFY(!restore->isEnabled());
+  }
+  void facilityBeepOverrideCanBeRestored() {
+    auto w = std::make_unique<Window>(sample(), options(false), false);
+    // This is the same setting changed by Setup -> ALH Beep Severity.
+    w->document().beepSeverity = 4;
+    w->findChild<QAction*>("Runtime Overrides...")->trigger();
+    auto dialog = w->findChild<QDialog*>("runtimeOverridesDialog");
+    auto table = dialog->findChild<QTableWidget*>("runtimeOverridesTable");
+    QCOMPARE(table->rowCount(), 1);
+    QCOMPARE(table->item(0, 1)->text(), QString("ALH beep severity"));
+    table->selectRow(0);
+    dialog->findChild<QPushButton*>("restoreOverrides")->click();
+    QCOMPARE(w->document().beepSeverity, 1);
+    QCOMPARE(table->rowCount(), 0);
+  }
+  void alarmDetailsDescribeHeldRecovery() {
+    auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root pv\n$ALARMCOUNTFILTER 0 10\n"), options(false), false);
+    auto& engine = w->alarmEngine(); auto n = w->document().channels()[0];
+    qint64 time = 1000; engine.now = engine.monotonicNow = [&] { return time; };
+    engine.event(n, {});
+    engine.event(n, {3, 2, 2, 1, "12"});
+    time += 10001; engine.tick();
+    QCOMPARE(engine.state(n).severity, 2);
+    engine.event(n, {0, 0, 2, 1, "0"});
+    QCOMPARE(engine.state(n).severity, 2);
+    w->findChild<QTreeView*>("groupContents")->setCurrentIndex(w->findChild<QTreeView*>("groupContents")->model()->index(0, 2));
+    w->findChild<QAction*>("Alarm Details...")->trigger();
+    auto dialog = w->findChild<QDialog*>("alarmDetailsDialog");
+    const auto explanation = dialog->findChild<QLabel*>("alarmExplanation")->text();
+    QVERIFY2(!explanation.contains("value 0 is at or above"), qPrintable(explanation));
+    QVERIFY(explanation.contains("count filter", Qt::CaseInsensitive));
+  }
+  void alarmDetailsFollowSelection() {
+    auto w = std::make_unique<Window>(sample(), options(false), false);
+    w->show();
+    auto& engine = w->alarmEngine();
+    const auto channels = w->document().channels();
+    for (auto n : channels) engine.event(n, {0, 0, 0, 1, "0"});
+    engine.event(channels[2], {3, 2, 2, 1, "99"});
+    engine.setBeep(channels[2], 3);
+    QCoreApplication::processEvents();
+    auto tree = w->findChild<QTreeView*>("alarmTree");
+    auto vacuum = tree->model()->index(2, 0, tree->model()->index(0, 0));
+    QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier, tree->visualRect(vacuum.siblingAtColumn(2)).center());
+    auto group = w->findChild<QTreeView*>("groupContents");
+    group->setCurrentIndex(group->model()->index(0, 2));
+    for (auto a : w->findChildren<QAction*>()) if (a->text() == "Alarm Details...") a->trigger();
+    auto dialog = w->findChild<QDialog*>("alarmDetailsDialog");
+    QVERIFY(dialog);
+    QCOMPARE(dialog->findChild<QLabel*>("detailsPath")->text(), QString("/BOOSTER/Vacuum/test:vacuum"));
+    QCOMPARE(dialog->findChild<QLabel*>("detailsSeverity")->text(), QString("MAJOR"));
+    QCOMPARE(dialog->findChild<QLabel*>("detailsStatus")->text(), QString("HIHI"));
+    QVERIFY(!dialog->findChild<QLabel*>("detailsChanged")->text().isEmpty());
+    QCOMPARE(dialog->findChild<QLabel*>("detailsBeep")->text(), QString("INVALID  (configured MINOR)"));
+    QVERIFY(dialog->findChild<QLabel*>("alarmExplanation")->text().contains("HIHI limit alarm"));
+    QCOMPARE(dialog->findChild<QLabel*>("alarmLimits")->text(), QString("Not available without Channel Access."));
+    engine.setMask(channels[2], Mask::parse("-D---"));
+    QTRY_VERIFY(dialog->findChild<QLabel*>("alarmExplanation")->text().contains("disabled by its mask"));
+    // The window follows a group selection.
+    tree->setCurrentIndex(tree->model()->index(0, 2));
+    QTRY_VERIFY(dialog->findChild<QLabel*>("detailsCounts"));
+    QCOMPARE(w->findChildren<QDialog*>("alarmDetailsDialog").size(), 1);
+  }
+  void runtimeOverrides() {
+    auto w = std::make_unique<Window>(sample(), options(false), false);
+    w->show();
+    auto& engine = w->alarmEngine();
+    const auto channels = w->document().channels();
+    for (auto n : channels) engine.event(n, {0, 0, 0, 1, "0"});
+    for (auto a : w->findChildren<QAction*>()) if (a->text() == "Runtime Overrides...") a->trigger();
+    auto dialog = w->findChild<QDialog*>("runtimeOverridesDialog");
+    QVERIFY(dialog);
+    auto table = dialog->findChild<QTableWidget*>("runtimeOverridesTable");
+    QCOMPARE(table->rowCount(), 0);
+    engine.setMask(channels[1], Mask::parse("C----"));
+    engine.setBeep(channels[0], 2);
+    engine.shelve(channels[2], 15, "Repair", "tester");
+    QTRY_COMPARE(table->rowCount(), 3);
+    QStringList kinds;
+    for (int row = 0; row < table->rowCount(); ++row) kinds << table->item(row, 1)->text();
+    kinds.sort();
+    QCOMPARE(kinds, (QStringList{"Beep severity", "Mask", "Shelved"}));
+    table->selectAll();
+    dialog->findChild<QPushButton*>("restoreOverrides")->click();
+    QTRY_COMPARE(table->rowCount(), 0);
+    QCOMPARE(engine.state(channels[1]).mask.text(), QString("-----"));
+    QCOMPARE(engine.state(channels[0]).beepThreshold, 1);
+    QCOMPARE(engine.state(channels[2]).shelf.until, qint64(0));
+    QVERIFY(dialog->findChild<QLabel*>("runtimeOverridesStatus")->text().startsWith("No runtime overrides"));
+  }
+  void alarmSummaryPanel() {
+    auto w = std::make_unique<Window>(sample(), options(false), false);
+    w->show();
+    auto& engine = w->alarmEngine();
+    const auto channels = w->document().channels();
+    for (auto n : channels) engine.event(n, {0, 0, 0, 1, "0"});
+    engine.event(channels[2], {3, 2, 2, 1, "12"});
+    for (auto a : w->findChildren<QAction*>()) if (a->text() == "Alarm Summary Panel...") a->trigger();
+    auto dialog = w->findChild<QDialog*>("alarmSummaryDialog");
+    QVERIFY(dialog);
+    auto tiles = dialog->findChildren<MotifButton*>("summaryTile");
+    QCOMPARE(tiles.size(), 3);
+    MotifButton* vacuum = nullptr;
+    for (auto tile : tiles) if (tile->text().startsWith("Vacuum")) vacuum = tile;
+    QVERIFY(vacuum);
+    QVERIFY(vacuum->text().contains("1 in alarm") && vacuum->text().contains("1 unacknowledged"));
+    QCOMPARE(dialog->findChild<QLabel*>("summaryTotals")->text(), QString("1 in alarm, 1 unacknowledged"));
+    // Unacknowledged tiles blink between the alarm color and normal.
+    QSet<QRgb> colors;
+    QElapsedTimer blinking;
+    blinking.start();
+    while (colors.size() < 2 && blinking.elapsed() < 3000) {
+      colors.insert(vacuum->background.rgba());
+      QTest::qWait(100);
+    }
+    QCOMPARE(colors.size(), 2);
+    engine.acknowledge(channels[2]);
+    QTRY_COMPARE(vacuum->background, severityColor(2));
+    vacuum->click();
+    auto tree = w->findChild<QTreeView*>("alarmTree");
+    QCOMPARE(tree->model()->data(tree->currentIndex().siblingAtColumn(2)).toString(), QString("Vacuum"));
+  }
   void countOnlyUpdatesRepaintCounts() {
     // A change that leaves a group's severities alone updates only its counts
     // cell; a severity change still reports the whole row.

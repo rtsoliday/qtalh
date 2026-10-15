@@ -336,6 +336,9 @@ void Engine::severityCommands(Node* n, int prev, int current) {
 void Engine::propagate(Node* n, const State& before, ObservationCause cause,
                        bool publishGroupSeverity) {
   auto& s = states[n];
+  if (!n->group && ((!before.initialized && s.initialized) ||
+                   before.severity != s.severity || before.status != s.status))
+    s.changedAt = now();
   updatePresentation(n, before);
   // Disabled monitors and acknowledgement-only updates must not establish the
   // group's command baseline from siblings still awaiting their first event.

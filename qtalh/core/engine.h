@@ -60,6 +60,8 @@ struct State {
   bool awaitingObservation = true;
   // Deadlines/edges use monotonic time; filterStarted is the event wall timestamp.
   qint64 noAckUntil = 0, filterUntil = 0, filterStarted = 0;
+  // Display only: wall time of the channel's latest severity or status change.
+  qint64 changedAt = 0;
   // Intentional ALH compatibility: -999 is the initial/reinitialization sentinel.
   // A first value of -999 is therefore ignored, even when configured to force.
   double forceCurrent = -999;

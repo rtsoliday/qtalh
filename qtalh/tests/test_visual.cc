@@ -109,6 +109,12 @@ private slots:
         auto channel = window->document().channels()[0];
         window->alarmEngine().event(channel, {3, 2, 2, 1, "20"});
         capture("Current Alarm History", "qt-history");
+        window->alarmEngine().setMask(channel, Mask::parse("---T-"));
+        capture("Active Alarms...", "qt-active-alarms");
+        capture("Alarm Summary Panel...", "qt-summary");
+        capture("Runtime Overrides...", "qt-overrides");
+        window->alarmEngine().resetMask(channel);
+        capture("Find Alarm...", "qt-find");
         capture("Display Guidance", "qt-guidance");
         capture("Send Message...", "qt-broadcast");
         capture("Stop Alarm Logging...", "qt-stop-logging");
@@ -124,7 +130,10 @@ private slots:
       auto view = window->findChild<QTreeView*>("groupContents");
       view->setCurrentIndex(view->model()->index(0, 2));
       capture("Properties Window", editor ? "qt-editor-channel-properties" : "qt-channel-properties");
-      if (!editor) capture("Force Process Variable...", "qt-channel-force");
+      if (!editor) {
+        capture("Force Process Variable...", "qt-channel-force");
+        capture("Alarm Details...", "qt-channel-details");
+      }
       QTimer::singleShot(100, [&] {
         auto dialog = qApp->activeModalWidget();
         if (dialog) {

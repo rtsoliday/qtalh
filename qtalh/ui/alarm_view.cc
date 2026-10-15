@@ -75,9 +75,10 @@ QSize MotifButton::sizeHint() const {
   if (!legacyAppearance()) {
     auto bold = font();
     bold.setBold(true);
-    return QFontMetrics(bold).size(Qt::TextSingleLine, text()) + QSize(28, 14);
+    return QFontMetrics(bold).size(0, text()) + QSize(28, 14);
   }
-  return QFontMetrics(font()).size(Qt::TextSingleLine, text()) + QSize(14, 10);
+  // Multi-line text sizes for summary tiles; single lines are unchanged.
+  return QFontMetrics(font()).size(0, text()) + QSize(14, 10);
 }
 void MotifButton::paintEvent(QPaintEvent* event) {
   if (!legacyAppearance()) {

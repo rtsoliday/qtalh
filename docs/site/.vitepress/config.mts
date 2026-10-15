@@ -30,6 +30,7 @@ export default defineConfig({
       ]},
       { text: 'OPERATE', collapsed: false, items: [
         { text: 'Monitor & acknowledge', link: '/operate/alarms' },
+        { text: 'Active alarms, search & details', link: '/operate/alarm-tools' },
         { text: 'Appearance & font size', link: '/operate/appearance' },
         { text: 'Silence & display filters', link: '/operate/silence-filters' },
         { text: 'Timed shelving', link: '/operate/shelving' },
@@ -41,6 +42,7 @@ export default defineConfig({
       { text: 'CONFIGURE', collapsed: true, items: [
         { text: 'Create & edit a configuration', link: '/configure/editor' },
         { text: 'Masks & automatic forcing', link: '/configure/masks' },
+        { text: 'Phoebus XML import & export', link: '/configure/phoebus' },
         { text: 'Logging & shared operation', link: '/configure/logging' }
       ]},
       { text: 'REFERENCE', collapsed: true, items: [

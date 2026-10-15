@@ -3,6 +3,7 @@
 #include "channel_access.h"
 #include <alarm.h>
 #include <db_access.h>
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 namespace alh {
@@ -378,6 +379,11 @@ void ChannelAccess::clear() {
   if (!active)
     return;
   clearing = true;
+  for (auto& read : reads)
+    for (auto& item : read->items)
+      if (item->id)
+        ca_clear_channel(item->id);
+  reads.clear();
   for (auto& c : channels) {
     if (c->subscription)
       ca_clear_subscription(c->subscription);
@@ -432,6 +438,72 @@ void ChannelAccess::poll() {
       noteDeadline(c.get());
   }
   dispatching = false;
+}
+void ChannelAccess::readStrings(const QStringList& names,
+                                std::function<void(QHash<QString, QString>)> done, int timeoutMs) {
+  auto read = std::make_unique<Read>();
+  read->done = std::move(done);
+  read->id = ++nextRead;
+  read->pending = names.size();
+  for (const auto& name : names) {
+    auto item = std::make_unique<ReadItem>();
+    item->owner = this;
+    item->read = read.get();
+    item->name = name;
+    if (ca_create_channel(name.toLocal8Bit().constData(), readConnection, item.get(),
+                          CA_PRIORITY_DEFAULT, &item->id) != ECA_NORMAL) {
+      --read->pending;
+      item->id = nullptr;
+    }
+    read->items.push_back(std::move(item));
+  }
+  ca_flush_io();
+  const auto id = read->id;
+  const bool empty = !read->pending;
+  reads.push_back(std::move(read));
+  QTimer::singleShot(empty ? 0 : timeoutMs, this, [this, id] { finishRead(id); });
+}
+void ChannelAccess::finishRead(quint64 id) {
+  // Completion and timeout both arrive here; only the first finishes the read.
+  auto found = std::find_if(reads.begin(), reads.end(), [id](const auto& r) { return r->id == id; });
+  if (found == reads.end())
+    return;
+  auto owned = std::move(*found);
+  reads.erase(found);
+  for (auto& item : owned->items)
+    if (item->id)
+      ca_clear_channel(item->id);
+  ca_flush_io();
+  if (owned->done)
+    owned->done(owned->values);
+}
+void ChannelAccess::readConnection(connection_handler_args a) {
+  auto item = static_cast<ReadItem*>(ca_puser(a.chid));
+  if (!item || item->owner->clearing || item->requested || a.op != CA_OP_CONN_UP)
+    return;
+  if (!ca_read_access(a.chid))
+    return;
+  // One get per item: a reconnect must not complete this field twice and
+  // consume another field's pending slot.
+  item->requested = true;
+  if (ca_array_get_callback(DBR_STRING, 1, a.chid, readValue, item) != ECA_NORMAL) {
+    item->requested = false;
+    return;
+  }
+  ca_flush_io();
+}
+void ChannelAccess::readValue(event_handler_args a) {
+  auto item = static_cast<ReadItem*>(a.usr);
+  if (!item || item->owner->clearing)
+    return;
+  auto read = item->read;
+  if (a.status == ECA_NORMAL && a.dbr) {
+    auto value = static_cast<const char*>(a.dbr);
+    read->values[item->name] = QString::fromLocal8Bit(value, int(strnlen(value, MAX_STRING_SIZE))).trimmed();
+  }
+  // Channels are cleared outside their own callback.
+  if (--read->pending == 0)
+    QTimer::singleShot(0, item->owner, [owner = item->owner, id = read->id] { owner->finishRead(id); });
 }
 void ChannelAccess::noteDeadline(const Channel* c) {
   // Deadlines cleared by a connection leave this stale; poll() then rescans once.
