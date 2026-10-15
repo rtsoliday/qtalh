@@ -237,6 +237,8 @@ QFont contentFont() {
   if (!QFontInfo(font).fixedPitch()) {
 #ifdef Q_OS_WIN
     font.setFamily("Consolas");
+#elif defined(Q_OS_MACOS)
+    font.setFamily("Menlo");
 #else
     font.setFamily("monospace");
 #endif

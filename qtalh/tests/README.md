@@ -22,7 +22,7 @@ Individual targets allow testing the Qt core/UI/CA without Motif:
 | Target (use `make -C qtalh TARGET`) | Coverage and extra prerequisites |
 | --- | --- |
 | `test-core` | Parser, options, alarm state, masks, fake clocks/PV callbacks, and queue encoding. No live IOC or display required. |
-| `test-ui` | Models, editor, dialogs, lifecycle, and muted audio playback in the default modern appearance, including style startup errors, font-size shortcuts across windows/dialogs, large-font geometry, and dark-palette indicators. Help coverage includes bundled topics and links, navigation and scrolling, highlighted search and keyboard wrapping, context Help/F1, modal ownership, reuse, About's email link and Open help button, and Beeper's idle motion, drill sequence, mouse/keyboard activation, and timer lifecycle. Uses `QT_QPA_PLATFORM=offscreen`; needs a functioning Qt media backend. On macOS the audio case starts a native Cocoa child. |
+| `test-ui` | Models, editor, dialogs, lifecycle, and muted audio playback in the default modern appearance, including style startup errors, font-size shortcuts across windows/dialogs, large-font geometry, and dark-palette indicators. Help coverage includes bundled topics and links, navigation and scrolling, highlighted search and keyboard wrapping, context Help/F1, modal ownership, reuse, About's email link and Open help button, and Beeper's idle motion, drill sequence, mouse/keyboard activation, and timer lifecycle. Uses `QT_QPA_PLATFORM=offscreen`; needs a functioning Qt media backend. On macOS the audio cases start native Cocoa children. |
 | `test-ui-motif` | The same UI suite with the classic Motif appearance (`QTALH_TEST_STYLE=motif`), including its bevels, row heights and width slider. Part of `make -C qtalh test`. |
 | `test-ui-fusion` | The same UI suite in a fresh Fusion process (`QTALH_TEST_STYLE=fusion`). Builds the GUI executable. |
 | `test-gallery` | Separate modern (`dialogs/`) and classic (`dialogs-motif/`) galleries, including every Properties tab and the Force PV scroll area; no Motif, IOC, or X11 dependency. Also available with the Windows Makefile. |
@@ -45,8 +45,12 @@ xvfb-run -a -s '-screen 0 1600x1000x24' \
   env QT_QPA_PLATFORM=xcb make -C qtalh QT_VERSION=5 test-visual
 ```
 
-On macOS, use a working X11/XQuartz display for the Motif comparison. Offscreen
-mode alone cannot capture another X11 application's window.
+On macOS, use a working X11/XQuartz display (or a private Xvfb) for the Motif
+comparison, with `xwininfo` and `xwd` on `PATH`. The Qt test may use
+`QT_QPA_PLATFORM=offscreen`: it captures the legacy X11 window through `xwd`
+into `test-artifacts/motif-reference.xwd`, since Cocoa window IDs cannot address
+X11 windows. Native Windows/macOS print panels are omitted from the offscreen
+dialog galleries.
 
 On Windows, use the launcher from the repository root:
 
@@ -68,6 +72,37 @@ a clean application build and test compilation without compiler warnings.
 expected skips (Linux `/dev/full` in both UI runs and the modern-only styling
 contract in the classic run). The optional Fusion suite passed 226 checks
 with one Linux-only skip; both dialog galleries passed three checks each.
+
+## macOS verification (2026-10-15)
+
+Apple Silicon macOS 26.6.2 with EPICS Base 7.0.9.1-DEV passed application and
+test builds with Qt 5.15.19 and Qt 6.11.2 without compiler warnings. Both Qt
+versions passed the following suites after the macOS compatibility fixes:
+
+| Suite | Qt 5 passed | Qt 6 passed |
+| --- | ---: | ---: |
+| Core | 330 | 330 |
+| Modern UI | 239 | 239 |
+| Classic UI | 238 | 238 |
+| Fusion UI | 239 | 239 |
+| Loopback IOC | 100 | 100 |
+| Unix helpers, queues, TCP and RPC | 181 | 181 |
+| Notifications | 46 | 46 |
+| Analytics | 27 | 27 |
+| Modern and classic galleries | 6 | 6 |
+| Full X11 visual target | 4 | 4 |
+| Focused layout checks at 150% and 200% scale | 10 | 10 |
+
+There were no failures. The three complete UI appearances have four expected
+skips per Qt version: Linux `/dev/full` coverage in each appearance and the
+modern-only styling contract in the classic run. Audio playback and missing-file
+fallback ran in native Cocoa children; playback was muted. The visual target
+used a private Xvfb, captured the Motif window through `xwd`, and verified the
+ordered normal/MINOR/MAJOR/normal alarm-log transitions in both applications.
+Native print panels and physical audio/printer output were not verified.
+
+The documentation build also passed for `/` and `/manuals/QtALH/`: 34 HTML
+pages, 1,927 local links/assets, 41 option spellings, and 14 directives.
 
 ## Isolation, artifacts, and focused runs
 
@@ -188,8 +223,9 @@ the README and compatibility inventory remain historical platform evidence.
 [alarm.ogg](alarm.ogg) is a generated 0.2-second, 880 Hz sine wave encoded as
 Ogg Vorbis. The UI test decodes and plays it twice with output muted, on both
 Qt 5 and Qt 6. It does not require a system sound theme, and does not verify
-speaker output. On macOS the offscreen suite runs the audio case in a Cocoa
-child process, which supplies the event loop needed by native media backends.
+speaker output. On macOS the offscreen suite runs playback and missing-file
+fallback cases in Cocoa child processes, which supply the event loop needed by
+native media backends to report both playback completion and errors.
 
 The FFmpeg command-line tool and its libvorbis encoder are needed only to
 regenerate the fixture. From `qtalh/tests/`:

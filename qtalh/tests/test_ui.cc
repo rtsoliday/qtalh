@@ -52,6 +52,25 @@ public:
 protected:
   void systemBeep() override { ++bells; }
 };
+#ifdef Q_OS_MACOS
+// AVFoundation needs Cocoa's event dispatcher for both playback and errors.
+static void nativeMediaCase(const QString& name) {
+  QProcess child;
+  auto environment = QProcessEnvironment::systemEnvironment();
+  environment.insert("QT_QPA_PLATFORM", "cocoa");
+  child.setProcessEnvironment(environment);
+  child.start(QCoreApplication::applicationFilePath(), {name});
+  QVERIFY(child.waitForStarted());
+  if (!child.waitForFinished(45000)) {
+    child.kill();
+    child.waitForFinished();
+    QFAIL("Native macOS alarm audio test timed out");
+  }
+  const auto output = child.readAllStandardOutput() + child.readAllStandardError();
+  QVERIFY2(child.exitStatus() == QProcess::NormalExit && child.exitCode() == 0,
+           output.constData());
+}
+#endif
 class UiTests : public QObject {
   Q_OBJECT
   QTemporaryDir notificationConfig;
@@ -1219,7 +1238,8 @@ private slots:
       if (!modal) return;
       if (deadline.elapsed() > 5000) { timedOut = true; modal->reject(); return; }
       if (auto message = qobject_cast<QMessageBox*>(modal)) {
-        if (message->windowTitle() == "Dated Log File") {
+        // macOS omits QMessageBox window titles, including offscreen dialogs.
+        if (message->objectName() == "datedLogFileChoice") {
           sawChoice = true;
           const auto label = selection == "basename" ? "Use as Basename" : "Use Log Series";
           if (selection == "cancel") message->button(QMessageBox::Cancel)->click();
@@ -2211,6 +2231,12 @@ private slots:
     QVERIFY(!audit.readAll().contains("Setup---Exit"));
   }
   void failedAlarmSoundFallsBack() {
+#ifdef Q_OS_MACOS
+    if (QGuiApplication::platformName() != "cocoa") {
+      nativeMediaCase("failedAlarmSoundFallsBack");
+      return;
+    }
+#endif
     QTemporaryDir dir;
     auto o = options(false); o.silent = false;
     o.sound = dir.filePath("missing-alarm.wav");
@@ -2238,20 +2264,7 @@ private slots:
     // Native media backends need the Cocoa event loop; the offscreen plugin
     // cannot drive playback reliably. Run just this case in a native child.
     if (QGuiApplication::platformName() != "cocoa") {
-      QProcess child;
-      auto environment = QProcessEnvironment::systemEnvironment();
-      environment.insert("QT_QPA_PLATFORM", "cocoa");
-      child.setProcessEnvironment(environment);
-      child.start(QCoreApplication::applicationFilePath(), {"oggAlarmSound"});
-      QVERIFY(child.waitForStarted());
-      if (!child.waitForFinished(45000)) {
-        child.kill();
-        child.waitForFinished();
-        QFAIL("Native macOS alarm playback test timed out");
-      }
-      const auto output = child.readAllStandardOutput() + child.readAllStandardError();
-      QVERIFY2(child.exitStatus() == QProcess::NormalExit && child.exitCode() == 0,
-               output.constData());
+      nativeMediaCase("oggAlarmSound");
       return;
     }
 #endif
@@ -3432,7 +3445,8 @@ private slots:
     if (treePane) QTest::qWait(QApplication::doubleClickInterval() + 30);
     else QTest::mouseRelease(view.viewport(), Qt::LeftButton, Qt::NoModifier, point);
     QCOMPARE(resets.count(), 0);
-    QCOMPARE(clicks, change == "target" ? 0 : 1);
+    // The timer can be dispatched later than its interval on a busy host.
+    QTRY_COMPARE(clicks, change == "target" ? 0 : 1);
     if (change == "target") QVERIFY(!target.isValid());
     else {
       QCOMPARE(clicked, targetNode);

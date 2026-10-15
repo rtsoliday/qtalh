@@ -100,8 +100,9 @@ private slots:
         captureModal("Channel...", "qt-insert-channel");
       } else {
         captureModal("About QtALH", "qt-about");
-#ifndef Q_OS_WIN
-        // Windows uses an OS print dialog, outside Qt's offscreen widget tree.
+#if !defined(Q_OS_WIN) && !defined(Q_OS_MACOS)
+        // Native Windows/macOS print panels are outside the offscreen widget
+        // tree; macOS can also block waiting for a native event dispatcher.
         captureModal("Print...", "qt-print");
 #endif
       }
@@ -197,11 +198,24 @@ private slots:
     driver.prepare(prefix + "alarm");
     QTRY_VERIFY(driver.put(prefix + "alarm", 20));
     QTest::qWait(1000);
+#ifdef Q_OS_MACOS
+    // Cocoa window IDs cannot address windows on XQuartz (or a private Xvfb).
+    // Capture through X11 itself and retain its native XWD screenshot.
+    QProcess capture;
+    const auto screenshot = output + "/motif-reference.xwd";
+    QFile::remove(screenshot);
+    capture.start("xwd", {"-silent", "-id", QString::number(id), "-out", screenshot});
+    QVERIFY(capture.waitForFinished(5000));
+    QCOMPARE(capture.exitStatus(), QProcess::NormalExit);
+    QVERIFY2(capture.exitCode() == 0, capture.readAllStandardError().constData());
+    QVERIFY(QFileInfo(screenshot).size() > 100); // XWD header plus captured pixels.
+#else
     auto screen = QGuiApplication::primaryScreen();
     QVERIFY(screen);
     auto shot = screen->grabWindow(id);
     QVERIFY(!shot.isNull());
     QVERIFY(shot.save(output + "/motif-reference.png"));
+#endif
     Options options;
     options.noLog = false;
     options.alarmFile = tmp.filePath("qt.alhAlarm");

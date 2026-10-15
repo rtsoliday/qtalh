@@ -219,7 +219,8 @@ void setupConfig(char *filename,int program,ALINK *areaOld)
 			alLogOpModMessage(0,0, "Setup Config File : %s",filename);
 			alGetConfig(pmainGroup,filename,CA_CONNECT_NO);
 		}
-		if (sllFirst(pmainGroup)) strcpy(psetup.configFile,filename);
+		/* fileSetupInit passes this destination as filename at startup. */
+		if (sllFirst(pmainGroup)) memmove(psetup.configFile,filename,strlen(filename)+1);
 	} else{
 		if (program == ACT) alCreateConfig(pmainGroup);
 		else {

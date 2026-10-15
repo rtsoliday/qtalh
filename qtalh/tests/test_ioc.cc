@@ -780,6 +780,10 @@ private slots:
         "$FORCEPV CALC D 1 0\n$FORCEPV_CALC A:=A+1;B:=B+1;B%2\n$FORCEPV_CALC_A " + input + "\n");
     ChannelAccess ca; Engine e(d, {}, &ca); auto n = d.channels()[0];
     int validInputs = 0, unavailable = 0;
+    int unreadableSubscriptions = 0;
+    ca.error = [&](const QString& message) {
+      if (message == "No read access for PV: " + input) ++unreadableSubscriptions;
+    };
     ca.number(input, [&](double v) { if (std::isfinite(v)) ++validInputs; else ++unavailable; });
     e.start(); QTRY_COMPARE(e.state(n).forceCurrent, 1.0);
     QTRY_COMPARE(validInputs, 1);
@@ -793,6 +797,10 @@ private slots:
     QVERIFY(driver.put(input, 6)); QTRY_COMPARE(e.state(n).forceCurrent, 0.0);
     QTRY_COMPARE(validInputs, 2); QVERIFY(!e.state(n).mask[Disable]);
     QVERIFY(driver.put(prefix + "readPermit", 0)); QTRY_VERIFY(unavailable > 0);
+    // The observer and engine use independent CA subscriptions. Wait until
+    // both have seen the gap before restoring access; their callbacks can
+    // arrive in separate event-loop iterations.
+    QTRY_COMPARE(unreadableSubscriptions, 2);
     QCOMPARE(e.state(n).forceCurrent, 0.0);
     QVERIFY(driver.put(prefix + "readPermit", 1));
     QTRY_COMPARE(e.state(n).forceCurrent, 1.0); // Same 6 after a gap must evaluate once.

@@ -95,9 +95,9 @@ resolution; values are medians of three alternating trials.
 | Updates, logging enabled | 0.9000% | 0.8000% (11.1% lower) | 0.8333% (3.8% lower) |
 
 Each after-build updates trial used less CPU than every before trial. Xvfb CPU
-stayed at 0.033–0.067% in all runs. Raw trials:
-[modern](benchmarks/qtalh-modern-before-after-2026-10-14.csv) and
-[`-style motif`](benchmarks/qtalh-motif-before-after-2026-10-14.csv).
+stayed at 0.033–0.067% in all runs. The reported raw-trial files,
+`qtalh-modern-before-after-2026-10-14.csv` and
+`qtalh-motif-before-after-2026-10-14.csv`, are not included in this checkout.
 
 The in-process harness (`benchmark_cpu`, 10,000 channels, offscreen, medians of
 three 10-second trials on one performance core) isolates engine, model and
@@ -110,7 +110,8 @@ painting costs from Channel Access and X11:
 | 2,000 updates/s | 0.745% | 0.610% (18% lower) | 0.571% (23% lower) |
 | 2,000 updates/s, active filter | 0.877% | 0.755% (14% lower) | 0.752% (14% lower) |
 
-[Raw trials](benchmarks/qtalh-modern-inprocess-2026-10-14.csv). CPU time for the
+The reported raw-trial file `qtalh-modern-inprocess-2026-10-14.csv` is not
+included in this checkout. CPU time for the
 first three seconds of a runtime with 20,000 unreachable channels fell from
 0.18 s to 0.16 s (modern) or 0.17 s (`-style motif`), medians of five trials.
 

@@ -222,11 +222,18 @@ $(LIBRARY_DEPS):
 .PHONY: all clean
 
 # Refresh both installations even when the executable is already built.
+# Replacing a signed Mach-O in place can leave Darwin's code-signature cache
+# associated with the previous executable. install uses a temporary file and
+# rename, so newly built programs always receive a fresh inode.
+INSTALL_PROGRAM = cp -f
+ifeq ($(OS),Darwin)
+INSTALL_PROGRAM = install -m 755
+endif
 .PHONY: install-programs
 all: install-programs
 install-programs: $(FULLPROD) | $(BIN_DIR) $(EPICS_BIN_DIR)
-	$(if $(FULLPROD),set -e; $(foreach program,$(FULLPROD),cp -f $(program) $(BIN_DIR)/;))
-	$(if $(and $(EPICS_BIN_DIR),$(FULLPROD)),set -e; $(foreach program,$(FULLPROD),cp -f $(program) $(EPICS_BIN_DIR)/;))
+	$(if $(FULLPROD),set -e; $(foreach program,$(FULLPROD),$(INSTALL_PROGRAM) $(program) $(BIN_DIR)/;))
+	$(if $(and $(EPICS_BIN_DIR),$(FULLPROD)),set -e; $(foreach program,$(FULLPROD),$(INSTALL_PROGRAM) $(program) $(EPICS_BIN_DIR)/;))
 
 .PHONY: install distclean
 install: all

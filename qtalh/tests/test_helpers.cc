@@ -981,12 +981,16 @@ private slots:
     log.operation(n, "x", OperationKind::ChangeMask);
     auto ordinary = receiveQueue(queue.id); QVERIFY(!ordinary.isEmpty());
     struct msqid_ds settings{}; QVERIFY(msgctl(queue.id, IPC_STAT, &settings) == 0);
-    const auto capacity = settings.msg_qbytes;
     settings.msg_qbytes = ordinary.size(); QVERIFY(msgctl(queue.id, IPC_SET, &settings) == 0);
     log.operation(n, QString(300, 'x'), OperationKind::ChangeMask); // One oversized original.
     log.operation(n, "x", OperationKind::ChangeMask); // Smaller than the pending summary.
     QVERIFY(receiveQueue(queue.id).startsWith("2 7 root  "));
-    settings.msg_qbytes = capacity; QVERIFY(msgctl(queue.id, IPC_SET, &settings) == 0);
+    // Darwin requires privilege to increase msg_qbytes, even back to its
+    // original value. Replace the owned queue to recover its default capacity;
+    // Logging must retain and retry the pending summary for the same key.
+    QVERIFY(msgctl(queue.id, IPC_RMID, nullptr) == 0);
+    queue.id = msgget(queue.key, IPC_CREAT | IPC_EXCL | 0600);
+    QVERIFY(queue.id >= 0);
     QByteArray summary; QTRY_VERIFY(([&] { if (summary.isEmpty()) summary = receiveQueue(queue.id); return !summary.isEmpty(); })());
     QVERIFY(summary.contains("MQ lost 1 messages"));
   }

@@ -734,7 +734,8 @@ int programId,Widget widget)
 
 		case FILE_ALARMLOG:
 			alLogOpModMessage(0,0,"Setup Alarm Log File : %s",filename);
-			strcpy(psetup.logFile,filename);
+			/* Startup passes psetup.logFile itself; copying must allow overlap. */
+			memmove(psetup.logFile,filename,strlen(filename)+1);
 			if (fl) fclose(fl); /* RO-flag. Albert */
 			if(_read_only_flag)  fl = fopen(psetup.logFile,"r");
 			else if((_time_flag)||(_lock_flag))  fl = fopen(psetup.logFile,"a");
@@ -746,7 +747,8 @@ int programId,Widget widget)
 
 		case FILE_OPMOD:
 			alLogOpModMessage(0,0,"Setup OpMod File : %s",filename);
-			strcpy(psetup.opModFile,filename);
+			/* Startup passes psetup.opModFile itself. */
+			memmove(psetup.opModFile,filename,strlen(filename)+1);
 			if (fo) fclose(fo);
 			if(!_read_only_flag) fo=fopen(psetup.opModFile,"a");
 			/* RO-option. Albert */

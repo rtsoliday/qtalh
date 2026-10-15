@@ -1294,6 +1294,7 @@ void Window::selectLogFile(bool alarm) {
     QMessageBox choice(QMessageBox::Question, "Dated Log File",
         "This file ends in a date. Use its log series, or keep the date as part of the basename?",
         QMessageBox::Cancel, this);
+    choice.setObjectName("datedLogFileChoice");
     choice.setInformativeText("Log series: " + path.left(path.size() - 11) +
                                "\nBasename: " + path);
     auto series = choice.addButton("Use Log Series", QMessageBox::AcceptRole);
