@@ -231,9 +231,7 @@ void Window::showLogBrowser(bool alarm) {
     if (*running) (*running)->requestInterruption();
   });
   dialogActions(layout, dialog, QDialogButtonBox::Close,
-                "ShowSelected searches the current log and its .yyyy-MM-dd files within the "
-                "inclusive local-time interval. With is a case-sensitive text filter. "
-                "Results are chronological and limited to 100,000 records or 10 MiB.");
+                "log-browser");
   dialog->show();
   QTimer::singleShot(0, search, &QPushButton::click);
 }

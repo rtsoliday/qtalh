@@ -10,7 +10,7 @@ From the repository root:
 bin/Linux-x86_64/qtalh -c examples/minimal.alhConfig
 ```
 
-The editor uses the modern appearance shown below; add `-style motif` for the classic single-column Properties form.
+The editor uses the modern appearance by default; add `-style motif` for the classic single-column Properties form.
 
 Use **Save As** to save your own file. To start an empty document instead, run `qtalh -c`.
 
@@ -25,7 +25,7 @@ There must be one root. Group names must not repeat an ancestor or use the reser
 
 ## Edit properties and guidance
 
-Select a node and open Properties. **Apply** validates and applies the fields while leaving the dialog open. **Cancel** restores the currently applied values; **Close** (modern) or **Dismiss** (Motif mode) closes the window. Selection dialogs follow your selected node.
+Select a node and open Properties. **Apply** validates and applies the fields while leaving the dialog open. **Cancel** restores the currently applied values; **Close** (modern) or **Dismiss** (Motif mode) closes the window. Selection dialogs follow your selected node. In a runtime, **View → Properties Window** shows the same fields read-only, with only Close or Dismiss.
 
 In the modern appearance, Properties organizes the fields into **General**, **Force PV**,
 **Commands**, and **Guidance** tabs of aligned forms. General contains identity, alias,

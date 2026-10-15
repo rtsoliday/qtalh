@@ -7,7 +7,7 @@ Use historical browsers to find alarm transitions and operator changes across cu
 1. Open the alarm-log or operator-log browser from **View**.
 2. Set **From** and **To** using local time. The entire final minute is included.
 3. Enter optional **With** text. Matching is a case-sensitive substring search.
-4. Start **Search**. Use **Stop** to cancel a long-running search.
+4. Click **Search** (**ShowSelected** in the classic appearance). Use **Stop** to cancel a long-running search.
 5. Review results in chronological order and read any search warnings.
 
 The browser searches the selected current log and its `.yyyy-MM-dd` siblings. It recognizes modern ALH, legacy ctime, and XML-like timestamps. The With filter searches complete records, including continuation lines in older multiline logs. Results stop at **100,000 records or 10 MiB**, with an explicit message when truncated. Unreadable files and unrecognized timestamps are reported.

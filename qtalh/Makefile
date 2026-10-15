@@ -1,10 +1,14 @@
 .DEFAULT_GOAL := all
 QTALH_GUI := 1
 include ../Makefile.rules
+HELP_DOCS = ../docs/qtalh-user-guide.md $(addprefix ../docs/site/,\
+            operate/alarm-tools.md operate/logs.md operate/notifications.md \
+            operate/analytics.md configure/editor.md configure/masks.md \
+            configure/phoebus.md)
 ifeq ($(OS),Windows)
 CORE = core/analytics.cc core/model.cc core/config.cc core/engine.cc core/notifications.cc core/phoebus.cc
 SERVICES = services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/options.cc services/logging.cc services/ipc.cc
-GUI = ui/analytics.cc ui/notifications.cc ui/appearance.cc ui/workflows.cc ui/tools.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc
+GUI = ui/analytics.cc ui/notifications.cc ui/appearance.cc ui/workflows.cc ui/tools.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc ui/help.cc ui/about_banner.cc
 OBJECTS = $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.obj) $(SERVICES:.cc=.obj) $(GUI:.cc=.obj)) $(OBJ_DIR)/resources.obj
 # MSVC does not emit GCC-style .d files. Rebuild on project header changes.
 HEADERS = $(wildcard core/*.h services/*.h ui/*.h)
@@ -17,7 +21,7 @@ $(OBJ_DIR)/qtalh.exe: $(OBJECTS) $(OBJ_DIR)/main.obj
 $(OBJ_DIR)/tests/%.obj: tests/%.cc $(HEADERS) $(BUILD_FILES)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CPPFLAGS) $(INCLUDES) $(QT_CFLAGS) $(QT_TEST_CFLAGS) $(CXXFLAGS) /c $< /Fo$@
-$(OBJ_DIR)/resources.cc: resources/qtalh.qrc resources/alh.xbm
+$(OBJ_DIR)/resources.cc: resources/qtalh.qrc resources/alh.xbm $(HELP_DOCS)
 	@mkdir -p $(OBJ_DIR)
 	$(RCC) $< -o $@
 $(OBJ_DIR)/resources.obj: $(OBJ_DIR)/resources.cc $(BUILD_FILES)
@@ -77,7 +81,7 @@ endif
 INCLUDES = -I. -I$(OBJ_DIR) -I$(EPICS_BASE)/include -I$(EPICS_BASE)/include/compiler/$(EPICS_COMPILER) -I$(EPICS_BASE)/include/os/$(OS)
 CORE = core/analytics.cc core/model.cc core/config.cc core/engine.cc core/notifications.cc core/phoebus.cc
 SERVICES = services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/options.cc services/logging.cc services/ipc.cc
-GUI = ui/analytics.cc ui/notifications.cc ui/appearance.cc ui/workflows.cc ui/tools.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc main.cc
+GUI = ui/analytics.cc ui/notifications.cc ui/appearance.cc ui/workflows.cc ui/tools.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc ui/help.cc ui/about_banner.cc main.cc
 OBJECTS = $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o) $(SERVICES:.cc=.o) $(GUI:.cc=.o)) $(OBJ_DIR)/resources.o
 PROD = qtalh qtalh_printer qtalh_DB
 .PHONY: all test test-core test-ui test-ioc test-helpers clean distclean
@@ -150,7 +154,7 @@ $(OBJ_DIR)/test_notifications: $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o)) $(OBJ_DIR
 test-notifications: $(OBJ_DIR)/test_notifications
 	$(OBJ_DIR)/test_notifications
 
-$(OBJ_DIR)/resources.cc: resources/qtalh.qrc resources/alh.xbm
+$(OBJ_DIR)/resources.cc: resources/qtalh.qrc resources/alh.xbm $(HELP_DOCS)
 	@mkdir -p $(OBJ_DIR)
 	$(RCC) $< -o $@
 $(OBJ_DIR)/resources.o: $(OBJ_DIR)/resources.cc $(BUILD_FILES)

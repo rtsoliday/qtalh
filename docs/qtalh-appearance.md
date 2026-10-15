@@ -46,7 +46,7 @@ ALH meaning with slightly deeper tones for legible letters on either palette.
 Dialogs keep their names, fields and buttons, with clearer layouts:
 
 - Action rows keep ALH's order (Apply, Reset, Cancel, Close) on the right, with
-  Help on the left. Help also shows its text as a tooltip. **Close** replaces
+  Help on the left. Help opens the relevant section of the in-app guide. **Close** replaces
   the Motif **Dismiss** label.
 - **Modify Mask Settings** shows each field as a two-part toggle
   (for example *Add | Cancel*) with the current setting highlighted, plus
@@ -67,6 +67,15 @@ Dialogs keep their names, fields and buttons, with clearer layouts:
 - Send Message, Stop Alarm Logging and Reload Facility have task-specific
   titles, prompts and buttons (Send, Stop Logging, Reload).
 - Exit asks "Exit Alarm Handler?" and names the facility whose monitoring stops.
+- **Help Topics** opens a modeless guide with grouped topics, a resizable sidebar,
+  formatted text, and search with highlighted matches and a match counter, following
+  pvDataReview's Help window. Scrolling and search keep the selected topic in sync.
+  F1 opens the guide or the current dialog's topic in both appearances. About shows
+  selectable credits, Robert Soliday's email link, and an **Open help** button.
+  Its Beeper robot bobs and blinks beside a miniature annunciator panel. Clicking
+  the banner runs an alarm drill with a ringing bell, an ACK-button press, and a
+  shower of stars. Space or Enter also activates the focused banner; its animation
+  timer stops while the dialog is hidden.
 
 ![Modern Modify Mask Settings](site/public/images/modern-mask.png)
 

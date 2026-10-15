@@ -1,4 +1,5 @@
 #include "dialogs.h"
+#include "help.h"
 #include <QPainterPath>
 #include <algorithm>
 namespace alh {
@@ -101,7 +102,7 @@ QHBoxLayout* dialogRow(QVBoxLayout* parent) {
   return row;
 }
 QDialogButtonBox* dialogActions(QVBoxLayout* parent, QDialog* dialog,
-                                QDialogButtonBox::StandardButtons buttons, const QString& help) {
+                                QDialogButtonBox::StandardButtons buttons, const QString& helpTopic) {
   if (legacyAppearance()) {
     auto separator = new QFrame;
     separator->setFrameShape(QFrame::HLine);
@@ -110,7 +111,7 @@ QDialogButtonBox* dialogActions(QVBoxLayout* parent, QDialog* dialog,
   } else {
     parent->addSpacing(4);
   }
-  if (!help.isEmpty())
+  if (!helpTopic.isEmpty())
     buttons |= QDialogButtonBox::Help;
   QDialogButtonBox* box = new MotifButtonBox(buttons);
   box->setCenterButtons(legacyAppearance());
@@ -122,11 +123,14 @@ QDialogButtonBox* dialogActions(QVBoxLayout* parent, QDialog* dialog,
     if (legacyAppearance() && box->standardButton(button) == QDialogButtonBox::Close)
       button->setText("Dismiss");
     if (!legacyAppearance() && box->standardButton(button) == QDialogButtonBox::Help)
-      button->setToolTip(help);
+      button->setToolTip("Open help for this dialog (F1)");
   }
   QObject::connect(box, &QDialogButtonBox::rejected, dialog, &QDialog::close);
-  QObject::connect(box, &QDialogButtonBox::helpRequested, dialog,
-                   [dialog, help] { QMessageBox::information(dialog, "ALH InformationDialog", help); });
+  if (!helpTopic.isEmpty()) {
+    contextHelp(dialog, helpTopic);
+    QObject::connect(box, &QDialogButtonBox::helpRequested, dialog,
+                     [dialog, helpTopic] { showHelp(dialog, helpTopic); });
+  }
   parent->addWidget(box);
   return box;
 }
@@ -357,7 +361,7 @@ QString chooseFile(QWidget* parent, const QString& title, const QString& initial
     result = path; dialog.accept();
   };
   auto buttons = dialogActions(layout, &dialog, QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
-                                "Choose a directory and file, or enter a filename. Use Filter to update the file list.");
+                                "file-selection");
   auto filterButton = buttons->addButton("Filter", QDialogButtonBox::ActionRole);
   QObject::connect(filterButton, &QPushButton::clicked, &dialog, refresh);
   QObject::connect(filter, &QLineEdit::returnPressed, &dialog, refresh);

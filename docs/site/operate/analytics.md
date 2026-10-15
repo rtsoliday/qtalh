@@ -37,8 +37,8 @@ The four tabs are:
   range. The chart shows the ten longest currently observed standing durations.
 - **Acknowledgement times:** Completed sample count, mean and maximum confirmed
   response time, outstanding age, and incomplete samples. The histogram bins are
-  0–1 seconds, >1–5 seconds, >5–15 seconds, >15–60 seconds, >1–5 minutes,
-  >5–15 minutes, >15–60 minutes, >1–4 hours, and >4 hours.
+  0–1 seconds, >1–5 seconds, >5–15 seconds, >15–60 seconds, >1–5 minutes, >5–15
+  minutes, >15–60 minutes, >1–4 hours, and >4 hours.
 
 A channel already active when first observed has an unknown true onset. Its
 standing age is labeled **At least**: this means continuously observed duration,

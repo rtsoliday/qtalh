@@ -6,7 +6,7 @@ QVBoxLayout* dialogColumn(QWidget*);
 QVBoxLayout* dialogFrame(QVBoxLayout*, const QString& title = {});
 QHBoxLayout* dialogRow(QVBoxLayout*);
 QDialogButtonBox* dialogActions(QVBoxLayout*, QDialog*,
-                                QDialogButtonBox::StandardButtons, const QString& help = {});
+                                QDialogButtonBox::StandardButtons, const QString& helpTopic = {});
 void dialogHeading(QVBoxLayout*, const QString& kind, const QString& name);
 // Columns apply to the modern appearance; the classic panel is one column.
 QVector<QCheckBox*> maskChoices(QVBoxLayout*, const QString& mask, bool passive = false,

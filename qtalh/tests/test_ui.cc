@@ -1,6 +1,8 @@
 #include "test_compat.h"
 #include "ui/window.h"
 #include "ui/dialogs.h"
+#include "ui/help.h"
+#include "ui/about_banner.h"
 #include "ui/alarm_view.h"
 #include "services/log_browser.h"
 #include "services/log_identity.h"
@@ -69,6 +71,260 @@ class UiTests : public QObject {
         "test:timing\nGROUP BOOSTER Vacuum\nCHANNEL Vacuum test:vacuum\n");
   }
 private slots:
+  void helpNavigationAndLifetime() {
+    auto w = std::make_unique<Window>(sample(), options(false), false);
+    w->show();
+    w->findChild<QAction*>("Help Topics")->trigger();
+    QPointer<QDialog> help = w->findChild<QDialog*>("helpWindow");
+    QVERIFY(help); QVERIFY(help->isVisible()); QVERIFY(!help->isModal());
+    QVERIFY(!qApp->activeModalWidget());
+    auto list = help->findChild<QListWidget*>("helpTopics");
+    auto browser = help->findChild<QTextBrowser*>("helpBrowser");
+    auto splitter = help->findChild<QSplitter*>("helpSplitter");
+    QVERIFY(list && browser && splitter);
+    QVERIFY(!splitter->childrenCollapsible());
+    QVERIFY(browser->toPlainText().contains("$FORCEPV"));
+    QVERIFY(browser->toPlainText().contains("100,000 records or 10 MiB"));
+    QVERIFY(!browser->toPlainText().contains(":::"));
+    QHash<QString, int> anchors;
+    QSet<QString> links;
+    for (auto block = browser->document()->begin(); block.isValid(); block = block.next())
+      for (auto it = block.begin(); !it.atEnd(); ++it) {
+        const auto format = it.fragment().charFormat();
+        for (const auto& anchor : format.anchorNames()) anchors[anchor] = block.position();
+        if (!format.anchorHref().isEmpty()) links.insert(format.anchorHref());
+      }
+    QVERIFY(links.contains("#masks"));
+    QVERIFY(links.contains("#logging-and-shared-operation"));
+    QVERIFY(links.contains("https://ops.aps.anl.gov/manuals/QtALH/downloads/examples/minimal.alhConfig"));
+    for (const auto& href : links) {
+      const QUrl url(href);
+      if (url.isRelative()) QVERIFY2(url.path().isEmpty() && anchors.contains(url.fragment()), qPrintable(href));
+    }
+    int topics = 0;
+    for (int row = 0; row < list->count(); ++row) {
+      auto item = list->item(row);
+      auto anchor = item->data(Qt::UserRole).toString();
+      if (anchor.isEmpty()) { QVERIFY(!(item->flags() & Qt::ItemIsSelectable)); continue; }
+      ++topics;
+      QVERIFY2(anchors.contains(anchor), qPrintable(anchor));
+      list->setCurrentRow(row);
+      QCoreApplication::processEvents();
+      QCOMPARE(list->currentItem()->data(Qt::UserRole).toString(), anchor);
+      const auto block = browser->document()->findBlock(anchors.value(anchor));
+      const int y = int(browser->document()->documentLayout()->blockBoundingRect(block).top());
+      QVERIFY(qAbs(browser->verticalScrollBar()->value() - qMin(y, browser->verticalScrollBar()->maximum())) <= 2);
+    }
+    QVERIFY(topics >= 20);
+    // Following the scrollbar and an internal documentation link updates the topic.
+    auto position = anchors.value("log-browser");
+    auto block = browser->document()->findBlock(position);
+    browser->verticalScrollBar()->setValue(int(browser->document()->documentLayout()->blockBoundingRect(block).top()));
+    QCOMPARE(list->currentItem()->data(Qt::UserRole).toString(), QString("log-browser"));
+    browser->anchorClicked(QUrl("#masks"));
+    QCOMPARE(list->currentItem()->data(Qt::UserRole).toString(), QString("masks"));
+    help->resize(900, 600);
+    help->findChild<QLineEdit*>("helpFind")->setText("Force PV");
+    const auto size = help->size();
+    help->close(); QVERIFY(!help->isVisible());
+    w->findChild<QAction*>("Keyboard Shortcuts")->trigger();
+    QCOMPARE(w->findChildren<QDialog*>("helpWindow").size(), 1);
+    QCOMPARE(w->findChild<QDialog*>("helpWindow"), help.data());
+    QCOMPARE(help->size(), size);
+    QCOMPARE(help->findChild<QLineEdit*>("helpFind")->text(), QString("Force PV"));
+    QCOMPARE(list->currentItem()->data(Qt::UserRole).toString(), QString("keyboard-shortcuts"));
+    QDir().mkpath(TEST_OUTPUT);
+    QVERIFY(help->grab().save(QString(TEST_OUTPUT) + "/" + artifactStyle() + "-help.png"));
+    if (!legacyAppearance()) {
+      const auto before = list->visualItemRect(list->currentItem()).height();
+      const auto startupFont = QApplication::font();
+      help->activateWindow(); browser->setFocus(); QCoreApplication::processEvents();
+      QTest::keyClick(browser, Qt::Key_Equal, Qt::ControlModifier);
+      QCoreApplication::processEvents();
+      QCOMPARE(list->font().pointSizeF(), QApplication::font().pointSizeF());
+      QCOMPARE(browser->document()->defaultFont().pointSizeF(), QApplication::font().pointSizeF());
+      QVERIFY(list->visualItemRect(list->currentItem()).height() > before);
+      QTest::keyClick(browser, Qt::Key_0, Qt::ControlModifier);
+      QCOMPARE(QApplication::font(), startupFont);
+    }
+    auto second = std::make_unique<Window>(sample(), options(true), false);
+    QVERIFY(showHelp(second.get()) != help);
+    w.reset(); QVERIFY(!help);
+  }
+  void helpSearchAndKeyboard() {
+    QWidget owner;
+    owner.show();
+    auto help = showHelp(&owner, "first-run");
+    auto find = help->findChild<QLineEdit*>("helpFind");
+    auto browser = help->findChild<QTextBrowser*>("helpBrowser");
+    auto label = help->findChild<QLabel*>("helpMatches");
+    auto next = help->findChild<QToolButton*>("helpNext");
+    auto previous = help->findChild<QToolButton*>("helpPrevious");
+    QVERIFY(find && browser && label && next && previous);
+    help->activateWindow(); QCoreApplication::processEvents();
+    browser->setFocus();
+    QTest::keyClick(browser, Qt::Key_F, Qt::ControlModifier);
+    QTRY_VERIFY(find->hasFocus());
+    find->setText("shelv");
+    const int count = browser->extraSelections().size();
+    QVERIFY(count > 10);
+    auto current = [&] { return label->text().section(' ', 0, 0).toInt(); };
+    auto expected = current() % count + 1;
+    QTest::keyClick(find, Qt::Key_Return);
+    QCOMPARE(current(), expected); QVERIFY(help->isVisible());
+    QTest::keyClick(find, Qt::Key_Return, Qt::ShiftModifier);
+    QCOMPARE(current(), expected == 1 ? count : expected - 1);
+    expected = current() % count + 1;
+    QTest::keyClick(find, Qt::Key_F3);
+    QCOMPARE(current(), expected);
+    QTest::keyClick(find, Qt::Key_F3, Qt::ShiftModifier);
+    QCOMPARE(current(), expected == 1 ? count : expected - 1);
+    // Traverse both ends and ensure each occurrence is emphasized exactly once.
+    for (int step = 0; step < count; ++step) next->click();
+    QCOMPARE(current(), expected == 1 ? count : expected - 1);
+    while (current() != 1) next->click();
+    previous->click(); QCOMPARE(current(), count);
+    next->click(); QCOMPARE(current(), 1);
+    int emphasized = 0;
+    for (const auto& selection : browser->extraSelections())
+      emphasized += selection.format.background() == browser->palette().highlight();
+    QCOMPARE(emphasized, 1);
+    find->setText("this phrase does not occur 491625");
+    QCOMPARE(label->text(), QString("No matches"));
+    QVERIFY(browser->extraSelections().isEmpty());
+    QVERIFY(!next->isEnabled()); QVERIFY(!previous->isEnabled());
+    QTest::keyClick(find, Qt::Key_Return); QVERIFY(help->isVisible());
+    find->clear(); QVERIFY(label->text().isEmpty()); QVERIFY(browser->extraSelections().isEmpty());
+    QTest::keyClick(find, Qt::Key_Escape); QVERIFY(!help->isVisible());
+  }
+  void dialogHelpOpensRelevantTopic() {
+    auto o = options(false); o.broadcast = true;
+    auto w = std::make_unique<Window>(sample(), o, false);
+    w->show();
+    const QVector<QStringList> cases = {
+        {"Properties Window", "propertiesDialog", "properties"},
+        {"Force Mask...", "forceMaskDialog", "masks"},
+        {"Modify Mask Settings...", "modifyMaskDialog", "masks"},
+        {"Force Process Variable...", "forcePvDialog", "masks"},
+        {"Beep Severity...", "beepSeverityDialog", "beep-severity"},
+        {"Active Alarms...", "activeAlarmsDialog", "active-alarms"},
+        {"Find Alarm...", "findAlarmDialog", "find-alarm"},
+        {"Alarm Details...", "alarmDetailsDialog", "alarm-details"},
+        {"Runtime Overrides...", "runtimeOverridesDialog", "runtime-overrides"},
+        {"Send Message...", "broadcastDialog", "logging-and-shared-operation"}};
+    QPointer<QDialog> guide;
+    for (const auto& entry : cases) {
+      auto action = w->findChild<QAction*>(entry[0]); QVERIFY2(action, qPrintable(entry[0]));
+      action->trigger();
+      auto dialog = w->findChild<QDialog*>(entry[1]); QVERIFY2(dialog, qPrintable(entry[1]));
+      auto buttons = dialog->findChild<QDialogButtonBox*>(); QVERIFY(buttons);
+      auto helpButton = buttons->button(QDialogButtonBox::Help); QVERIFY(helpButton);
+      helpButton->click();
+      auto help = w->findChild<QDialog*>("helpWindow"); QVERIFY(help);
+      if (guide) QCOMPARE(help, guide.data());
+      guide = help;
+      auto list = help->findChild<QListWidget*>("helpTopics");
+      QCOMPARE(list->currentItem()->data(Qt::UserRole).toString(), entry[2]);
+      QVERIFY(!qApp->activeModalWidget());
+      guide->close();
+      dialog->activateWindow(); dialog->setFocus(); QCoreApplication::processEvents();
+      QTest::keyClick(dialog, Qt::Key_F1);
+      QTRY_VERIFY(guide->isVisible());
+      dialog->close();
+      QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+      QVERIFY(guide); // The guide belongs to the main window, not the source dialog.
+      guide->close();
+    }
+  }
+  void modalDialogHelpAndAbout() {
+    auto w = std::make_unique<Window>(sample(), options(true), false);
+    w->show();
+    auto guide = showHelp(w.get()); guide->close();
+    QPointer<QDialog> modalGuide;
+    {
+      QDialog modal(w.get());
+      auto column = new QVBoxLayout(&modal);
+      auto buttons = dialogActions(column, &modal, QDialogButtonBox::Cancel, "file-selection");
+      modal.setModal(true); modal.show();
+      buttons->button(QDialogButtonBox::Help)->click();
+      modalGuide = modal.findChild<QDialog*>("helpWindow", Qt::FindDirectChildrenOnly);
+      QVERIFY(modalGuide); QVERIFY(modalGuide != guide);
+      QVERIFY(modalGuide->isVisible()); QVERIFY(modalGuide->isEnabled());
+      auto find = modalGuide->findChild<QLineEdit*>("helpFind");
+      find->setText("filename");
+      QVERIFY(!modalGuide->findChild<QTextBrowser*>("helpBrowser")->extraSelections().isEmpty());
+      modal.reject();
+    }
+    QVERIFY(!modalGuide);
+    QTimer::singleShot(0, [&] {
+      auto about = qobject_cast<QDialog*>(qApp->activeModalWidget());
+      QVERIFY(about); QCOMPARE(about->objectName(), QString("aboutDialog"));
+      QString credits;
+      for (auto label : about->findChildren<QLabel*>()) credits += label->text();
+      QVERIFY(credits.contains("Robert Soliday"));
+      QVERIFY(credits.contains("Ben-Chin Cha"));
+      QVERIFY(credits.contains(qVersion()));
+      auto label = about->findChild<QLabel*>("aboutCredits"); QVERIFY(label);
+      QVERIFY(label->text().contains("<a href=\"mailto:soliday@anl.gov\">soliday@anl.gov</a>"));
+      QVERIFY(label->openExternalLinks());
+      QVERIFY(label->textInteractionFlags() & Qt::LinksAccessibleByKeyboard);
+      auto banner = static_cast<AboutBanner*>(about->findChild<QWidget*>("aboutAlarmBanner"));
+      QVERIFY(banner);
+      QTest::mouseClick(banner, Qt::LeftButton);
+      QCOMPARE(banner->phase(), AboutBanner::Phase::Ringing);
+      banner->advance(4);
+      banner->setFocus();
+      QTest::keyClick(banner, Qt::Key_Return);
+      QCOMPARE(banner->phase(), AboutBanner::Phase::Ringing);
+      QVERIFY(about->isVisible()); // Activating the mascot must not accept About.
+      for (auto button : about->findChildren<QPushButton*>())
+        if (button->text() == "Open help") { button->click(); return; }
+      about->reject(); QFAIL("About has no Open help button");
+    });
+    w->findChild<QAction*>("About QtALH")->trigger();
+    QVERIFY(guide->isVisible());
+    QCOMPARE(guide->findChild<QListWidget*>("helpTopics")->currentItem()->data(Qt::UserRole).toString(), QString("first-run"));
+  }
+  void aboutBannerAnimation() {
+    AboutBanner banner;
+    banner.resize(banner.sizeHint());
+    banner.show();
+    QCoreApplication::processEvents();
+    auto timer = banner.findChild<QTimer*>("aboutAnimationTimer"); QVERIFY(timer);
+    QVERIFY(timer->isActive());
+    timer->stop(); // Render known moments without waiting for the full animation.
+    QCOMPARE(banner.phase(), AboutBanner::Phase::Watching);
+    const auto initial = banner.grab().toImage();
+    banner.advance(0.25);
+    QVERIFY(banner.grab().toImage() != initial); // Idle animation is moving too.
+    QDir().mkpath(TEST_OUTPUT);
+    auto capture = [&](const QString& phase) {
+      return banner.grab().save(QString(TEST_OUTPUT) + "/" + artifactStyle() + "-beeper-" + phase + ".png");
+    };
+    QVERIFY(capture("watching"));
+    QTest::mouseClick(&banner, Qt::LeftButton, Qt::NoModifier, QPoint(296, 86));
+    QCOMPARE(banner.phase(), AboutBanner::Phase::Ringing);
+    banner.advance(0.4);
+    const auto ringing = banner.grab().toImage();
+    QVERIFY(ringing != initial);
+    QVERIFY(capture("ringing"));
+    QTest::mouseClick(&banner, Qt::LeftButton); // Repeated clicks do not restart it.
+    banner.advance(0.6);
+    QCOMPARE(banner.phase(), AboutBanner::Phase::Acknowledging);
+    banner.advance(0.65);
+    QVERIFY(capture("acknowledging"));
+    banner.advance(0.3);
+    QCOMPARE(banner.phase(), AboutBanner::Phase::Celebrating);
+    QVERIFY(banner.grab().toImage() != ringing);
+    QVERIFY(capture("celebrating"));
+    banner.advance(1.8);
+    QCOMPARE(banner.phase(), AboutBanner::Phase::Watching);
+    QTest::keyClick(&banner, Qt::Key_Space);
+    QCOMPARE(banner.phase(), AboutBanner::Phase::Ringing);
+    banner.hide(); QVERIFY(!timer->isActive());
+    banner.show(); QVERIFY(timer->isActive());
+    banner.hide(); QVERIFY(!timer->isActive());
+  }
   void runtimeErrorsAreAudited_data() {
     QTest::addColumn<bool>("noLog");
     QTest::newRow("operation-log") << false;

@@ -16,6 +16,13 @@ Use **Modify Mask** (**Ctrl+S**) or **Force Mask** (**Ctrl+M**) for the selected
 
 Canonical configuration order is `CDATL`. For example, `-D--L` enables Disable and NoLog; `-----` clears all five bits.
 
+**Modify Mask Settings** changes one field immediately and preserves the other
+fields. Each row's **Reset** uses that channel's configured value. **Force Mask**
+lets you choose all five fields, then **Apply** sets the mask on the selected
+channel or every descendant channel in a group. **Reset** restores each channel's
+configured mask. **Close** (or **Dismiss** in the classic appearance) closes the
+dialog without undoing changes already applied.
+
 ## Configure a Force PV
 
 To apply a mask automatically when another PV reaches a value, add a `$FORCEPV` directive to the target group or channel:

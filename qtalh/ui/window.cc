@@ -7,6 +7,7 @@
 // Author credits are recorded in ../../AUTHORS.md; see ../../LICENSE for the license.
 #include "alarm_view.h"
 #include "dialogs.h"
+#include "help.h"
 #include "window.h"
 #include <QDesktopServices>
 #include <QPrintDialog>
@@ -1571,31 +1572,16 @@ void Window::menus() {
     helpButton->setPopupMode(QToolButton::InstantPopup);
     menuBar()->setCornerWidget(helpButton, Qt::TopRightCorner);
   }
-  action(help, "Help Topics", [] {
+  auto contents = action(help, "Help Topics", [this] { showHelp(this, "first-run"); });
+  auto helpKeys = QKeySequence::keyBindings(QKeySequence::HelpContents);
+  if (!helpKeys.contains(QKeySequence(Qt::Key_F1))) helpKeys.append(QKeySequence(Qt::Key_F1));
+  contents->setShortcuts(helpKeys);
+  action(help, "Keyboard Shortcuts", [this] { showHelp(this, "keyboard-shortcuts"); });
+  action(help, "Online Manual", [] {
     QDesktopServices::openUrl(QUrl("https://ops.aps.anl.gov/manuals/QtALH/"));
   });
-  action(help, "About QtALH", [this] {
-    if (!legacyAppearance()) {
-      QMessageBox::about(this, "About QtALH",
-          "<h3>QtALH</h3><p>Qt port of ALH 1.2.35<br>EPICS Alarm Handler and Alarm "
-          "Configuration Tool<br>Developed at Argonne National Laboratory</p>"
-          "<p><b>Qt port development and maintenance</b><br>Robert Soliday</p>"
-          "<p><b>Original ALH authors</b><br>Ben-Chin Cha, Janet Anderson, Mark Anderson, "
-          "Marty Kraimer, and Albert Kagarmanov</p>"
-          "<p><b>Additional ALH contributors</b><br>John Sinclair and Kay Kasemir (SNS), "
-          "Andreas Luedeke (PSI)</p><p>Qt " + QString(qVersion()).toHtmlEscaped() + "</p>");
-      return;
-    }
-    QMessageBox::about(this, "About QtALH",
-                       "QtALH — Qt port of ALH 1.2.35\nEPICS Alarm Handler and Alarm Configuration "
-                       "Tool\nDeveloped at Argonne National Laboratory\n\n"
-                       "Qt port development and maintenance:\nRobert Soliday\n\n"
-                       "Original ALH authors:\nBen-Chin Cha, Janet Anderson, Mark Anderson,\n"
-                       "Marty Kraimer, and Albert Kagarmanov\n\n"
-                       "Additional ALH contributors:\nJohn Sinclair and Kay Kasemir (SNS)\n"
-                       "Andreas Luedeke (PSI)\n\nQt " +
-                           QString(qVersion()));
-  });
+  help->addSeparator();
+  action(help, "About QtALH", [this] { showAbout(this); });
 }
 void Window::replace(Document d, bool snapshot) {
   // The summary's tiles name the old top-level groups; rebuild it after the reload.
@@ -2284,8 +2270,7 @@ void Window::properties() {
   auto buttons = dialogActions(layout, dialog,
       options.editor ? QDialogButtonBox::Apply | QDialogButtonBox::Cancel | QDialogButtonBox::Close
                      : QDialogButtonBox::Close,
-      "Properties show the selected group or channel configuration. In configuration mode, "
-      "edit fields and use Apply to apply them. Cancel restores the current configuration; Dismiss closes the window. Invalid configurations leave the original unchanged.");
+      "properties");
   if (options.editor) {
     disconnect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::close);
     connect(buttons->button(QDialogButtonBox::Close), &QPushButton::clicked, dialog, &QDialog::close);
@@ -2379,8 +2364,7 @@ void Window::masks(bool forced) {
               [choices, value] { value->setText("Mask: " + selectedMask(choices)); });
     auto buttons = dialogActions(layout, dialog,
         QDialogButtonBox::Apply | QDialogButtonBox::Reset | QDialogButtonBox::Close,
-        "Apply sets the chosen mask on the selected channel or every channel in the group. "
-        "Reset restores each channel's configured mask.");
+        "masks");
     connect(buttons->button(QDialogButtonBox::Apply), &QPushButton::clicked, dialog, [=] {
       engine->cancelNoAckTimer(n);
       engine->setMask(n, Mask::parse(selectedMask(choices)));
@@ -2465,8 +2449,7 @@ void Window::masks(bool forced) {
     if (!legacyAppearance()) grid->setColumnStretch(3, 1);
     layout->addLayout(grid);
     auto actions = dialogActions(layout, dialog, QDialogButtonBox::Close,
-                  "Change one mask field for the selected channel or group. Reset uses each "
-                  "channel's configured value. Other mask fields are preserved.");
+                  "masks");
     // Start on Close so no segment looks different from the other settings.
     if (!legacyAppearance()) actions->button(QDialogButtonBox::Close)->setFocus();
     sizeDialog(dialog, QSize(336, 202));
@@ -2567,8 +2550,7 @@ void Window::forceDialog() {
   for (int i = 1; i < order.size(); ++i) QWidget::setTabOrder(order[i - 1], order[i]);
   auto buttons = dialogActions(layout, dialog,
       QDialogButtonBox::Apply | QDialogButtonBox::Cancel | QDialogButtonBox::Close,
-      "A Force PV applies the selected mask at the force value and restores configured masks "
-      "at the reset value. CALC accepts an expression with A through F PVs or constants.");
+      "masks");
   disconnect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::close);
   connect(buttons->button(QDialogButtonBox::Close), &QPushButton::clicked, dialog, &QDialog::close);
   connect(buttons->button(QDialogButtonBox::Cancel), &QPushButton::clicked, dialog, [=] {
@@ -2642,7 +2624,7 @@ void Window::beepSeverity(bool global) {
     });
   }
   dialogActions(layout, dialog, QDialogButtonBox::Close,
-                "Select the lowest unacknowledged severity that should sound an alarm.");
+                "beep-severity");
   sizeDialog(dialog, QSize(170, 178));
   finishSelectionDialog(dialog);
 }
@@ -2823,8 +2805,7 @@ void Window::broadcast(int mode) {
     minutes->hide();
   }
   auto buttons = dialogActions(layout, dialog, QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
-      "Messages are delivered to other ALH instances using the same facility configuration. "
-      "Stop Logging suspends alarm logging for the chosen duration. Reload rereads the facility configuration.");
+      "logging-and-shared-operation");
   if (!legacy) buttons->button(QDialogButtonBox::Ok)->setText(QStringList{"Send", "Stop Logging", "Reload"}.value(mode));
   connect(buttons, &QDialogButtonBox::accepted, dialog, [this, dialog, text, minutes, mode] {
     if (logging->sendBroadcast(text->text(), mode == 1 ? minutes->value() : 0, mode == 2)) dialog->close();

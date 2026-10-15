@@ -1,1 +1,13 @@
-<RCC><qresource prefix="/qtalh"><file>alh.xbm</file></qresource></RCC>
+<RCC>
+  <qresource prefix="/qtalh">
+    <file>alh.xbm</file>
+    <file alias="help/user-guide.md">../../docs/qtalh-user-guide.md</file>
+    <file alias="help/alarm-tools.md">../../docs/site/operate/alarm-tools.md</file>
+    <file alias="help/logs.md">../../docs/site/operate/logs.md</file>
+    <file alias="help/notifications.md">../../docs/site/operate/notifications.md</file>
+    <file alias="help/analytics.md">../../docs/site/operate/analytics.md</file>
+    <file alias="help/editor.md">../../docs/site/configure/editor.md</file>
+    <file alias="help/masks.md">../../docs/site/configure/masks.md</file>
+    <file alias="help/phoebus.md">../../docs/site/configure/phoebus.md</file>
+  </qresource>
+</RCC>

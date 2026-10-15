@@ -353,9 +353,7 @@ void Window::showActiveAlarms() {
   for (auto button : {acknowledge, guidanceButton, details, showButton}) actions->addWidget(button);
   actions->addStretch();
   dialogActions(layout, dialog, QDialogButtonBox::Close,
-                "Every channel in alarm or awaiting acknowledgement, highest severity first. "
-                "Click a column heading to sort. Double-click a row to show it in the main window. "
-                "Shelved alarms are listed under View → Shelved Alarms.");
+                "active-alarms");
   auto updateButtons = [=] {
     const auto nodes = selectedNodes(table);
     bool unack = false;
@@ -426,8 +424,7 @@ void Window::findAlarm() {
   if (!legacyAppearance()) status->setForegroundRole(QPalette::PlaceholderText);
   layout->addWidget(status);
   auto buttons = dialogActions(layout, dialog, QDialogButtonBox::Close,
-                               "Matches are case-insensitive and update as you type. Press Enter or "
-                               "double-click a match to show it in the main window.");
+                               "find-alarm");
   auto showButton = buttons->addButton("Show in Tree", QDialogButtonBox::ActionRole);
   showButton->setObjectName("findShowInTree");
   struct Entry { Node* node; QString text, haystack; };
@@ -527,8 +524,7 @@ void Window::alarmDetails() {
   }
   layout->addStretch();
   dialogActions(layout, dialog, QDialogButtonBox::Close,
-                "Live state, configuration and IOC alarm limits for the selected group or channel. "
-                "The window follows the selection. Limits are read once when the selection changes.");
+                "alarm-details");
   // Limit values feed the explanation; they belong to this build of the window.
   auto limitValues = std::make_shared<QHash<QString, QString>>();
   auto update = [=] {
@@ -643,9 +639,7 @@ void Window::showOverrides() {
   actions->addWidget(showButton);
   actions->addStretch();
   dialogActions(layout, dialog, QDialogButtonBox::Close,
-                "Lists masks, beep severities, disabled Force PVs, NoAck timers and shelves that differ "
-                "from the configuration. Restore Selected resets masks, beep severity and Force PVs, "
-                "ends NoAck timers and unshelves. Each change is recorded in the operation log.");
+                "runtime-overrides");
   auto selected = [table] {
     QVector<QPair<Node*, int>> items;
     for (const auto& index : table->selectionModel()->selectedRows())

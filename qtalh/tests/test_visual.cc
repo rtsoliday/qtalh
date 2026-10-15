@@ -94,6 +94,7 @@ private slots:
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
       };
       capture("Properties Window", editor ? "qt-editor-properties" : "qt-properties");
+      capture("Help Topics", "qt-help");
       if (editor) {
         captureModal("Group...", "qt-insert-group");
         captureModal("Channel...", "qt-insert-channel");

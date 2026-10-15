@@ -38,6 +38,22 @@ or CA connections; it does not check PV existence, access rights, audio, or log
 permissions. Help, version, and successful validation exit with status 0;
 option/configuration errors print to stderr and exit with status 1.
 
+**Help → Help Topics** (F1) opens a reusable, modeless guide inside QtALH.
+Choose a topic in the grouped sidebar or scroll through the formatted text;
+the sidebar follows the section in view. The guide is bundled with the
+application and works offline. Dialog **Help** buttons and F1 open the relevant
+section. **Help → Keyboard Shortcuts** opens the shortcut reference.
+
+Use **Find in help** (Ctrl+F, or Command+F on macOS) to highlight every match.
+Enter or F3 advances, Shift+Enter or Shift+F3 goes back, and the search wraps at
+both ends. The counter identifies the current match or reports **No matches**.
+Clear the field to remove highlights. **Close** or Esc hides the guide; reopening
+it retains the window size and search. **Online manual** opens the full website.
+**About QtALH** includes credits, the Qt version, and an **Open help** button.
+Robert Soliday's email link opens your mail application. The animated Beeper
+robot watches a miniature alarm panel; click it (or focus it and press Space)
+to ring its bell, acknowledge an alarm drill, and celebrate the all-clear.
+
 Without `-mainwindow`, runtime starts with a compact facility button. Click it
 to open the main tree and group contents. Closing the main runtime window hides
 it while monitoring continues. Closing the compact window or using File
@@ -55,6 +71,16 @@ active timed silence, matching ALH. Enable the silence checkbox again to start
 that duration. Choosing the same interval leaves the countdown unchanged.
 Timed silence, Silence Current, Silence Forever, interval changes, and timed
 silence expiry are recorded in the operation log when file logging is enabled.
+
+### Beep severity
+
+**Action → Beep Severity…** (Ctrl+B) sets the lowest unacknowledged severity
+that can sound for the selected group or channel. The change applies as soon
+as you choose a severity. **Setup → ALH Beep Severity…** sets the facility-wide
+threshold. Both thresholds and the silence settings affect whether an alarm
+sounds; changing the threshold does not acknowledge an alarm. Runtime changes
+do not modify the configuration file, but runtime **File → Save As…** writes the
+current thresholds. **View → Runtime Overrides…** lists and restores them.
 
 ### Preview guidance and commands
 
@@ -165,6 +191,19 @@ INCLUDE paths retain their separate configuration-directory rule.
 | `--from-phoebus out.alhConfig` | Convert the Phoebus XML file given as the configuration argument to an ALH configuration, then exit. |
 | `--` | End options before the configuration filename. |
 
+Local mode keeps acknowledgements in this runtime. Global active mode can write
+ACKS/ACKT and configured acknowledgement, severity, and heartbeat PVs. Passive
+mode still monitors alarms and can log them. It does not disable configured
+shell commands; `-D` and `-s` also leave command execution enabled.
+
+EPICS Base reads the standard `EPICS_CA_*` environment variables.
+`QT_QPA_PLATFORM` selects Qt's display backend; `QT_PLUGIN_PATH` can locate
+plugins from a separate SDK. On Windows, `COMSPEC` selects the command shell
+(default `cmd.exe`). Sound paths and an explicit relative `-Lfile` basename
+resolve from the process working directory, rather than `-f` or `-l`.
+Unknown switches and arbitrary Xt resource overrides are errors. CDEV and
+CMLOG extensions are not supported by QtALH.
+
 ### Operator tools
 
 The runtime's **View** menu adds tools that ALH does not have; they work in
@@ -226,19 +265,6 @@ These font shortcuts are disabled in Motif mode.
 
 See [appearance details and screenshots](qtalh-appearance.md) for the dialog
 layouts and legacy comparison.
-
-Local mode keeps acknowledgements in this runtime. Global active mode can write
-ACKS/ACKT and configured acknowledgement, severity, and heartbeat PVs. Passive
-mode still monitors alarms and can log them. It does not disable configured
-shell commands; `-D` and `-s` also leave command execution enabled.
-
-EPICS Base reads the standard `EPICS_CA_*` environment variables.
-`QT_QPA_PLATFORM` selects Qt's display backend; `QT_PLUGIN_PATH` can locate
-plugins from a separate SDK. On Windows, `COMSPEC` selects the command shell
-(default `cmd.exe`). Sound paths and an explicit relative `-Lfile` basename
-resolve from the process working directory, rather than `-f` or `-l`.
-Unknown switches and arbitrary Xt resource overrides are errors. CDEV and
-CMLOG extensions are not supported by QtALH.
 
 ## Configuration format
 
