@@ -55,6 +55,10 @@ this difference for review.
 
 Names with spaces are converted to underscores, and a component that repeats an ancestor's name is renamed, as ALH requires.
 
+PV names are copied unchanged in both directions. A Phoebus `pva://` PV is
+monitored over [pvAccess](/reference/configuration#pvaccess-channels), with
+acknowledgement kept in the running QtALH instance.
+
 Not converted: group aliases (group names are retained), NoAck (A) and NoLog (L)
 masks, `$SEVRPV`, `$ACKPV`,
 `$SEVRCOMMAND`, `$STATCOMMAND`, `$FORCEPV`, `$BEEPSEVR`, `$BEEPSEVERITY`,

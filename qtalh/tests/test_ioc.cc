@@ -1,4 +1,4 @@
-#include "services/channel_access.h"
+#include "services/pv_router.h"
 #include "core/notifications.h"
 #include "core/analytics.h"
 #include <QProcess>
@@ -20,7 +20,8 @@ class IocTests : public QObject {
     output.write(input.readAll().replace("$(P)", prefix.toLatin1()));
     output.close();
     ioc.setProcessChannelMode(QProcess::MergedChannels);
-    ioc.start(QString(EPICS_TEST_BIN) + "/softIoc",
+    // softIocPVA serves the same records over Channel Access and pvAccess.
+    ioc.start(QString(EPICS_TEST_BIN) + "/softIocPVA",
               {"-m", "P=" + prefix, "-a", security.filePath("access.acf"), "-d", database});
     QVERIFY(ioc.waitForStarted());
     // Process creation precedes database initialization, especially on Windows.
@@ -39,6 +40,12 @@ private slots:
     qputenv("EPICS_CA_REPEATER_PORT", QByteArray::number(port + 1));
     qputenv("EPICS_CAS_INTF_ADDR_LIST", "127.0.0.1");
     qputenv("EPICS_CAS_BEACON_ADDR_LIST", ("127.0.0.1:" + QString::number(port + 1)).toLatin1());
+    // QSRV otherwise listens for PVA searches on host interfaces, not loopback.
+    qputenv("EPICS_PVA_AUTO_ADDR_LIST", "NO");
+    qputenv("EPICS_PVA_ADDR_LIST", "127.0.0.1");
+    qputenv("EPICS_PVA_SERVER_PORT", QByteArray::number(port + 2));
+    qputenv("EPICS_PVA_BROADCAST_PORT", QByteArray::number(port + 3));
+    qputenv("EPICS_PVAS_INTF_ADDR_LIST", "127.0.0.1");
     ioc.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
     startIoc();
   }
@@ -1281,6 +1288,189 @@ private slots:
     ca.monitor(prefix + "alarm", [&](Event) { ++events; });
     QTRY_VERIFY(events > 0);
     QVERIFY(!ca.put(prefix + "alarm", 99));
+  }
+  void pvaMonitorAndWrites() {
+    PvAccess pva;
+    QStringList errors;
+    pva.error = [&](QString s) { errors << s; };
+    const auto name = "pva://" + prefix + "pvaAlarm";
+    Event last;
+    last.severity = -1;
+    pva.monitor(name, [&](Event e) { last = e; });
+    pva.prepare(name);
+    QTRY_VERIFY_WITH_TIMEOUT(last.severity == 0 && pva.canWrite(name), 5000);
+    // QSRV reports the record's STAT name; values use the record precision.
+    QVERIFY(pva.put(name, 20));
+    QTRY_COMPARE(last.severity, 2);
+    QCOMPARE(last.status, 3); // HIHI
+    QCOMPARE(last.value, QString("20.0"));
+    QCOMPARE(last.acks, 2);
+    QVERIFY(pva.put(name, 7));
+    QTRY_COMPARE(last.status, 4); // HIGH
+    QCOMPARE(last.severity, 1);
+    QCOMPARE(last.acks, 2); // ACKT=YES keeps the higher unacknowledged severity.
+    QVERIFY(pva.put(name, 0));
+    QTRY_COMPARE(last.severity, 0);
+    // Enumerated values display their state strings and accept index writes.
+    const auto enumName = "pva://" + prefix + "pvaEnum";
+    Event state;
+    state.severity = -1;
+    double index = -1;
+    pva.monitor(enumName, [&](Event e) { state = e; });
+    pva.number(enumName, [&](double v) { index = v; });
+    pva.prepare(enumName);
+    QTRY_COMPARE(state.value, QString("Off"));
+    QTRY_VERIFY(pva.put(enumName, 1));
+    QTRY_COMPARE(state.value, QString("On"));
+    QCOMPARE(state.severity, 1);
+    QCOMPARE(state.status, 7); // STATE
+    QTRY_COMPARE(index, 1.0);
+    QVERIFY(pva.put(enumName, 0));
+    QTRY_COMPARE(state.value, QString("Off"));
+    QVERIFY2(errors.isEmpty(), qPrintable(errors.join("; ")));
+  }
+  void pvaMissingAndReconnect() {
+    PvRouter pv({true});
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pva://" + prefix + "pvaAlarm\n"
+                         "CHANNEL root pva://" + prefix + "missing:pv\n");
+    Engine engine(d, {true}, &pv);
+    auto n = d.channels()[0], missing = d.channels()[1];
+    QStringList errors;
+    pv.error = [&](QString s) { errors << s; };
+    engine.start();
+    QTRY_VERIFY_WITH_TIMEOUT(engine.state(n).initialized && engine.state(n).severity == 0, 5000);
+    // A PVA channel that never connects reports ERROR, as Channel Access.
+    QTRY_VERIFY(engine.state(missing).initialized);
+    QCOMPARE(engine.state(missing).severity, 4);
+    QCOMPARE(statusName(engine.state(missing).status), QString("NOT_CONNECTED"));
+    ioc.kill(); QVERIFY(ioc.waitForFinished());
+    QTRY_COMPARE_WITH_TIMEOUT(engine.state(n).severity, 4, 15000);
+    QVERIFY(!pv.canWrite(n->name));
+    startIoc();
+    QTRY_VERIFY_WITH_TIMEOUT(engine.state(n).severity == 0, 20000);
+    QTRY_VERIFY(pv.canWrite(n->name));
+    QVERIFY(pv.put(n->name, 20));
+    QTRY_COMPARE(engine.state(n).severity, 2);
+    QVERIFY(pv.put(n->name, 0));
+    QTRY_COMPARE(engine.state(n).severity, 0);
+  }
+  void pvaGlobalAcknowledgementIsLocal() {
+    // QSRV rejects ACKS/ACKT writes, so pva:// acknowledgement stays in this
+    // runtime; the record's own ACKS remains for Channel Access clients.
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pva://" + prefix + "pvaAlarm\n"
+                         "$SEVRPV pva://" + prefix + "pvaSeverity\n");
+    PvRouter pv({true});
+    pv.configureInitialAckT(d);
+    Engine engine(d, {true}, &pv);
+    auto n = d.channels()[0];
+    engine.start();
+    double severity = -9;
+    PvAccess observer;
+    observer.number("pva://" + prefix + "pvaSeverity", [&](double v) { severity = v; });
+    QTRY_VERIFY_WITH_TIMEOUT(engine.state(n).initialized && engine.state(n).severity == 0, 5000);
+    QVERIFY(pv.put(n->name, 20));
+    QTRY_COMPARE(engine.state(n).unack, 2);
+    QTRY_COMPARE(severity, 2.0);
+    engine.acknowledge(n);
+    QTRY_COMPARE(engine.state(n).unack, 0);
+    QCOMPARE(engine.state(n).severity, 2);
+    ChannelAccess ca;
+    QHash<QString, QString> fields;
+    bool done = false;
+    ca.readStrings({prefix + "pvaAlarm.ACKS"}, [&](QHash<QString, QString> v) { fields = v; done = true; });
+    QTRY_VERIFY(done);
+    QCOMPARE(fields.value(prefix + "pvaAlarm.ACKS"), QString("MAJOR"));
+    // Disabling transient acknowledgement lowers ACKS to the current severity.
+    QVERIFY(pv.put(n->name, 7));
+    QTRY_COMPARE(engine.state(n).severity, 1);
+    QCOMPARE(engine.state(n).unack, 1);
+    engine.modifyMask(n, AckT, 1);
+    QTRY_VERIFY(engine.state(n).mask[AckT]);
+    QVERIFY(pv.put(n->name, 0));
+    QTRY_COMPARE(engine.state(n).severity, 0);
+    QTRY_COMPARE(engine.state(n).unack, 0);
+    QTRY_COMPARE(severity, 0.0);
+    // Configured transient masks seed the runtime ACKT of a new router.
+    auto t = parseConfig("GROUP NULL root\nCHANNEL root pva://" + prefix + "pvaAlarm ---T-\n");
+    PvRouter seeded({true});
+    seeded.configureInitialAckT(t);
+    Engine transient(t, {true}, &seeded);
+    auto c = t.channels()[0];
+    transient.start();
+    QTRY_VERIFY_WITH_TIMEOUT(transient.state(c).initialized && transient.state(c).severity == 0, 5000);
+    QVERIFY(transient.state(c).mask[AckT]);
+    QVERIFY(seeded.put(c->name, 20));
+    QTRY_COMPARE(transient.state(c).unack, 2);
+    QVERIFY(seeded.put(c->name, 0));
+    QTRY_COMPARE(transient.state(c).unack, 0);
+  }
+  void pvaDescriptionsReadsAndForce() {
+    PvRouter pv;
+    QHash<QString, QString> values;
+    bool done = false;
+    const auto record = "pva://" + prefix + "pvaAlarm";
+    pv.readStrings({record + ".RTYP", record + ".HHSV", record + ".NOSUCHFIELD",
+                    prefix + "alarm.RTYP"},
+                   [&](QHash<QString, QString> v) { values = v; done = true; }, 1000);
+    QTRY_VERIFY_WITH_TIMEOUT(done, 5000);
+    QCOMPARE(values.value(record + ".RTYP"), QString("ai"));
+    QCOMPARE(values.value(record + ".HHSV"), QString("MAJOR"));
+    QCOMPARE(values.value(prefix + "alarm.RTYP"), QString("ai"));
+    QVERIFY(!values.contains(record + ".NOSUCHFIELD"));
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root " + record + "\n$FORCEPV pva://" + prefix +
+                         "pvaForce -D--- 1 0\n");
+    EngineOptions options;
+    options.description = true;
+    Engine engine(d, options, &pv);
+    auto n = d.channels()[0];
+    engine.start();
+    QTRY_COMPARE_WITH_TIMEOUT(engine.state(n).description, QString("QtALH PVA alarm"), 5000);
+    PvAccess driver;
+    driver.prepare("pva://" + prefix + "pvaForce");
+    QTRY_VERIFY(driver.put("pva://" + prefix + "pvaForce", 1));
+    QTRY_VERIFY(engine.state(n).mask[Disable]);
+    QVERIFY(driver.put("pva://" + prefix + "pvaForce", 0));
+    QTRY_VERIFY(!engine.state(n).mask[Disable]);
+  }
+  void pvaPassiveWrites() {
+    PvAccess pva({true, true, false, false});
+    int events = 0;
+    pva.monitor("pva://" + prefix + "pvaAlarm", [&](Event) { ++events; });
+    QTRY_VERIFY(events > 0);
+    QVERIFY(!pva.canWrite("pva://" + prefix + "pvaAlarm"));
+    QVERIFY(!pva.put("pva://" + prefix + "pvaAlarm", 99));
+    QVERIFY(!pva.put("pva://" + prefix + "pvaAlarm", 2, WriteKind::Acknowledge));
+  }
+  void pvaDuplicateObservers() {
+    PvAccess pv({true});
+    const auto name = "pva://" + prefix + "pvaAlarm";
+    int first = 0, second = 0;
+    Event a, b;
+    a.severity = b.severity = -1;
+    pv.monitor(name, [&](Event e) { a = e; }, &first);
+    QTRY_COMPARE(a.severity, 0);
+    pv.monitor(name, [&](Event e) { b = e; }, &second);
+    QTRY_COMPARE(b.severity, 0);
+    QVERIFY(pv.put(name, 20));
+    QTRY_COMPARE(a.acks, 2);
+    QTRY_COMPARE(b.acks, 2);
+    QVERIFY(pv.put(name, 2, WriteKind::Acknowledge));
+    QTRY_COMPARE(a.acks, 0);
+    QTRY_COMPARE(b.acks, 0);
+    pv.cancel(name, &first);
+    QVERIFY(pv.put(name, 0));
+    QTRY_COMPARE(b.severity, 0);
+    QCOMPARE(a.severity, 2);
+    pv.monitor(name, [&](Event e) { a = e; }, &first);
+    QTRY_COMPARE(a.severity, 0);
+    pv.cancel(name, &first);
+    pv.cancel(name, &second);
+    pv.monitor(name, [&](Event e) { b = e; }, &second);
+    QVERIFY(pv.put(name, 7));
+    QTRY_COMPARE(b.severity, 1);
+    QCOMPARE(a.severity, 0);
+    QVERIFY(pv.put(name, 0));
+    QTRY_COMPARE(b.severity, 0);
   }
   void cleanupTestCase() {
     ioc.kill();

@@ -28,6 +28,10 @@ int unacknowledged(const State& s) {
   return s.mask[Disable] || s.mask[Cancel] || s.mask[Ack] ? 0 : s.unack;
 }
 QString acknowledgementIdentity(const QString& name) {
+  // PVA names are opaque: dots need not separate IOC records and fields.
+  // Each PVA channel has its own runtime acknowledgement state.
+  if (name.startsWith(QLatin1String("pva://"), Qt::CaseInsensitive))
+    return "pva://" + name.mid(6);
   // EPICS resolves the record before the first dot. DBR_PUT_ACKT changes
   // that record's ACKT regardless of the addressed field (including .VAL).
   // Keep the original channel name for the actual write/access-rights check.

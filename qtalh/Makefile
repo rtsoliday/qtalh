@@ -7,12 +7,14 @@ HELP_DOCS = ../docs/qtalh-user-guide.md $(addprefix ../docs/site/,\
             configure/phoebus.md)
 ifeq ($(OS),Windows)
 CORE = core/analytics.cc core/model.cc core/config.cc core/engine.cc core/notifications.cc core/phoebus.cc
-SERVICES = services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/options.cc services/logging.cc services/ipc.cc
+SERVICES = services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/pv_access.cc services/pv_router.cc services/options.cc services/logging.cc services/ipc.cc
 GUI = ui/analytics.cc ui/notifications.cc ui/appearance.cc ui/workflows.cc ui/tools.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc ui/help.cc ui/about_banner.cc
 OBJECTS = $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.obj) $(SERVICES:.cc=.obj) $(GUI:.cc=.obj)) $(OBJ_DIR)/resources.obj
 # MSVC does not emit GCC-style .d files. Rebuild on project header changes.
 HEADERS = $(wildcard core/*.h services/*.h ui/*.h)
 LIBS = advapi32.lib $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(LDLIBS)
+# pvData headers do not build in MSVC standards-conformance mode (as in QtEDM).
+$(OBJ_DIR)/services/pv_access.obj $(OBJ_DIR)/tests/test_pva.obj: CXXFLAGS := $(filter-out /permissive-,$(CXXFLAGS))
 
 .PHONY: all clean distclean test test-core test-ui test-ioc test-helpers test-visual benchmark-cpu FORCE
 PROD = qtalh
@@ -30,7 +32,7 @@ $(OBJ_DIR)/test_%.moc: tests/test_%.cc $(HEADERS) $(BUILD_FILES)
 	@mkdir -p $(OBJ_DIR)
 	$(MOC) -D_WIN32 $(CPPFLAGS) $(INCLUDES) $(QT_CFLAGS) $< -o $@
 
-TESTS = core ui ioc helpers notifications analytics
+TESTS = core ui ioc pva helpers notifications analytics
 define test_rules
 $(OBJ_DIR)/tests/test_$(1).obj: $(OBJ_DIR)/test_$(1).moc
 $(OBJ_DIR)/test_$(1).exe: $(OBJECTS) $(OBJ_DIR)/tests/test_$(1).obj
@@ -82,7 +84,7 @@ endif
 endif
 INCLUDES = -I. -I$(OBJ_DIR) -I$(EPICS_BASE)/include -I$(EPICS_BASE)/include/compiler/$(EPICS_COMPILER) -I$(EPICS_BASE)/include/os/$(OS)
 CORE = core/analytics.cc core/model.cc core/config.cc core/engine.cc core/notifications.cc core/phoebus.cc
-SERVICES = services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/options.cc services/logging.cc services/ipc.cc
+SERVICES = services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/pv_access.cc services/pv_router.cc services/options.cc services/logging.cc services/ipc.cc
 GUI = ui/analytics.cc ui/notifications.cc ui/appearance.cc ui/workflows.cc ui/tools.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc ui/help.cc ui/about_banner.cc main.cc
 OBJECTS = $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o) $(SERVICES:.cc=.o) $(GUI:.cc=.o)) $(OBJ_DIR)/resources.o
 PROD = qtalh qtalh_printer qtalh_DB
@@ -119,8 +121,17 @@ $(OBJ_DIR)/test_ioc.moc: tests/test_ioc.cc
 	$(MOC) $(INCLUDES) $(QT_CFLAGS) $< -o $@
 $(OBJ_DIR)/tests/test_ioc.o: $(OBJ_DIR)/test_ioc.moc
 $(OBJ_DIR)/tests/test_ioc.o: CPPFLAGS += -DEPICS_TEST_BIN='"$(EPICS_BASE)/bin/$(EPICS_HOST_ARCH)"' -DTEST_OUTPUT='"$(abspath $(OBJ_DIR)/test-artifacts)"'
-$(OBJ_DIR)/test_ioc: $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o)) $(OBJ_DIR)/services/channel_access.o $(OBJ_DIR)/tests/test_ioc.o
+$(OBJ_DIR)/test_ioc: $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o)) $(addprefix $(OBJ_DIR)/services/,channel_access.o pv_access.o pv_router.o) $(OBJ_DIR)/tests/test_ioc.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(call qt_libs,Test Core)
+$(OBJ_DIR)/test_pva.moc: tests/test_pva.cc
+	@mkdir -p $(OBJ_DIR)
+	$(MOC) $(INCLUDES) $(QT_CFLAGS) $< -o $@
+$(OBJ_DIR)/tests/test_pva.o: $(OBJ_DIR)/test_pva.moc
+$(OBJ_DIR)/test_pva: $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o)) $(OBJ_DIR)/services/pv_access.o $(OBJ_DIR)/tests/test_pva.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(call qt_libs,Test Core)
+.PHONY: test-pva
+test-pva: $(OBJ_DIR)/test_pva
+	$(OBJ_DIR)/test_pva
 test-ioc: $(OBJ_DIR)/test_ioc
 	@mkdir -p $(OBJ_DIR)/test-artifacts
 	$(OBJ_DIR)/test_ioc
@@ -134,7 +145,7 @@ $(OBJ_DIR)/test_helpers: $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o)) $(OBJ_DIR)/serv
 test-helpers: all $(OBJ_DIR)/test_helpers
 	$(OBJ_DIR)/test_helpers
 
-test: test-core test-ui test-ui-motif test-ioc test-helpers test-notifications test-analytics
+test: test-core test-ui test-ui-motif test-ioc test-pva test-helpers test-notifications test-analytics
 
 $(OBJ_DIR)/test_analytics.moc: tests/test_analytics.cc
 	@mkdir -p $(OBJ_DIR)

@@ -634,7 +634,7 @@ void Window::setupEngine() {
   ca.reset();
 
   if (connectPv && !options.editor) {
-    ca = std::make_unique<ChannelAccess>(options.engine);
+    ca = std::make_unique<PvRouter>(options.engine);
     ca->error = [this](const QString& s) { error(s); };
     ca->configureInitialAckT(doc);
   }

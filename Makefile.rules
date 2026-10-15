@@ -392,6 +392,14 @@ else
   $(error EPICS import libraries not found in $(EPICS_BASE_LIB_DIR). Build Base first with 'make -C $(EPICS_BASE)' in a configured MSVC shell, or set EPICS_HOST_ARCH)
 endif
 EPICS_SYS_LIBS = ws2_32.lib
+# QtALH also connects "pva://" channels through the pvAccess client.
+ifeq ($(QTALH_GUI),1)
+PVA_LIBS = $(EPICS_BASE_LIB_DIR)/pvAccess.lib $(EPICS_BASE_LIB_DIR)/pvData.lib
+ifneq ($(words $(wildcard $(PVA_LIBS))),2)
+  $(error EPICS pvAccess import libraries not found in $(EPICS_BASE_LIB_DIR). QtALH requires EPICS 7 Base with pvAccess and pvData)
+endif
+EPICS_LIBS := $(PVA_LIBS) $(EPICS_LIBS)
+endif
 else
 ifeq ($(origin EPICS_HOST_ARCH),undefined)
 EPICS_HOST_ARCH_SCRIPT := $(call find_epics_host_arch,$(EPICS_BASE))
@@ -410,6 +418,14 @@ EPICS_COMPILER ?= $(if $(filter Darwin,$(OS)),clang,gcc)
 EPICS_LIBS = $(foreach lib,ca Com,$(firstword $(wildcard $(EPICS_BASE_LIB_DIR)/lib$(lib).a $(EPICS_BASE_LIB_DIR)/lib$(lib).$(EPICS_SHARED_EXT))))
 ifneq ($(words $(EPICS_LIBS)),2)
   $(error EPICS libraries not found in $(EPICS_BASE_LIB_DIR). Build Base first with 'make -C $(EPICS_BASE)', or set EPICS_HOST_ARCH)
+endif
+# QtALH also connects "pva://" channels through the pvAccess client.
+ifeq ($(QTALH_GUI),1)
+PVA_LIBS = $(foreach lib,pvAccess pvData,$(firstword $(wildcard $(EPICS_BASE_LIB_DIR)/lib$(lib).a $(EPICS_BASE_LIB_DIR)/lib$(lib).$(EPICS_SHARED_EXT))))
+ifneq ($(words $(PVA_LIBS)),2)
+  $(error EPICS pvAccess libraries not found in $(EPICS_BASE_LIB_DIR). QtALH requires EPICS 7 Base with pvAccess and pvData)
+endif
+EPICS_LIBS := $(PVA_LIBS) $(EPICS_LIBS)
 endif
 EPICS_LDFLAGS = -Wl,-rpath,$(EPICS_BASE_LIB_DIR)
 EPICS_SYS_LIBS = -lpthread -ldl -lrt -lm

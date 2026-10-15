@@ -55,3 +55,22 @@ record(ai, "$(P)statefulInput") {
   field(HIGH, "10")
   field(HSV, "MINOR")
 }
+
+# pvAccess channels, served by softIocPVA's QSRV alongside Channel Access.
+record(ai, "$(P)pvaAlarm") {
+  field(DESC, "QtALH PVA alarm")
+  field(VAL, "0")
+  field(PREC, "1")
+  field(HIGH, "5")
+  field(HSV, "MINOR")
+  field(HIHI, "10")
+  field(HHSV, "MAJOR")
+}
+record(bo, "$(P)pvaEnum") {
+  field(ZNAM, "Off")
+  field(ONAM, "On")
+  field(OSV, "MINOR")
+  field(VAL, "0")
+}
+record(ao, "$(P)pvaSeverity") { field(VAL, "0") }
+record(ao, "$(P)pvaForce") { field(VAL, "0") }

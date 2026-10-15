@@ -1,7 +1,7 @@
 #pragma once
 #include "core/engine.h"
 #include "appearance.h"
-#include "services/channel_access.h"
+#include "services/pv_router.h"
 #include "services/logging.h"
 #include "services/options.h"
 #include "services/notifications.h"
@@ -107,7 +107,7 @@ private:
   Document doc;
   Options options;
   bool connectPv, modified = false, quitting = false, dirty = true;
-  std::unique_ptr<ChannelAccess> ca;
+  std::unique_ptr<PvRouter> ca;
   std::unique_ptr<Engine> engine;
   std::unique_ptr<Logging> logging;
   std::unique_ptr<NotificationService> notifications;

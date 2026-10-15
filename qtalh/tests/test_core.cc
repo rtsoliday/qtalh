@@ -207,6 +207,29 @@ private slots:
     QCOMPARE(pv.writes[1].name, other->name); QCOMPARE(pv.writes[1].value, 1.0);
     QVERIFY(e.state(b).mask[AckT]); QVERIFY(!e.state(a).mask[AckT]);
   }
+  void pvaNamesWithDotsHaveIndependentAckT_data() {
+    QTest::addColumn<bool>("manual");
+    QTest::newRow("automatic") << false;
+    QTest::newRow("unrelated-manual-request") << true;
+  }
+  void pvaNamesWithDotsHaveIndependentAckT() {
+    QFETCH(bool, manual);
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pva://device.temperature\n"
+                         "CHANNEL root pva://device.pressure\n");
+    FakePv pv; pv.writable = false; Engine e(d, {true}, &pv);
+    auto a = d.channels()[0], b = d.channels()[1];
+    e.event(a, {}); e.event(b, {});
+    e.setMask(a, Mask::parse("T"), true);
+    e.setMask(b, Mask::parse(manual ? "-" : "T"), !manual);
+    pv.writes.clear(); pv.writable = true; e.tick();
+    QCOMPARE(pv.writes.size(), manual ? 1 : 2);
+    QCOMPARE(pv.writes[0].name, a->name);
+    QVERIFY(e.state(a).mask[AckT]);
+    if (!manual) {
+      QCOMPARE(pv.writes[1].name, b->name);
+      QVERIFY(e.state(b).mask[AckT]);
+    }
+  }
   void duplicatePvForceOwnership() {
     for (bool edit : {false, true}) {
       auto d = parseConfig("GROUP NULL root\nCHANNEL root shared\nCHANNEL root shared\n");

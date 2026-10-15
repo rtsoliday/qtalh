@@ -762,3 +762,28 @@ Clipboard serialization chooses a wrapper group name absent from the selected
 subtree and validates the payload before changing the clipboard or removing a
 Cut selection. Cross-window Cut/Paste and undo/redo cover groups named
 `__QTALH_CLIPBOARD__` and `__QTALH_CLIPBOARD__1`.
+
+## pvAccess channels (2026-10-15)
+
+QtALH extension; Motif ALH supports only Channel Access. PV names starting with
+`pva://` route to a pvAccess client (`services/pv_access.cc`) behind the same
+`PvService` interface as Channel Access, so the engine, configuration format,
+and unprefixed names are unchanged. pvAccess callbacks are queued to the Qt
+thread, matching the non-preemptive CA context. PVA support is part of every
+build and requires EPICS 7 Base with pvAccess and pvData.
+
+Alarm status comes from the condition QSRV places in `alarm.message`, and
+values follow `display.precision`, as `DBR_STSACK_STRING` reports them through
+CA. Missing PVs report `NOT_CONNECTED` after one second, as with CA. Force
+inputs ignore alarm-only updates, as CA `DBE_VALUE` subscriptions do.
+
+QSRV rejects writes to ACKS/ACKT (`dbPut Attempt to modify noMod field`,
+verified with softIocPVA from Base 7.0), and PVA alarms carry no acknowledgement
+fields. Global acknowledgement of a `pva://` channel is therefore kept in the
+running instance by applying `recGblResetAlarms`, `putAcks`, and `putAckt`
+rules. It is not shared with other instances or with CA clients of the record.
+PVA has no access-rights events, so the synthetic read/write-access
+states are not produced for these channels.
+`test-ioc` covers monitoring, enumerated values, writes, missing PVs, IOC restart, runtime
+acknowledgement with ACKT, descriptions, mixed CA/PVA field reads, Force PVs,
+and passive mode against softIocPVA.

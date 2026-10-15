@@ -47,7 +47,7 @@ they do not require Qt or EPICS. See the
 QtALH builds as a native x64 Windows application using MSVC, following the
 QtEDM build setup. Install Visual Studio 2022 with the x64 C++ tools, GNU Make
 (Strawberry Perl or Cygwin), Cygwin shell utilities, Qt for MSVC including
-**Multimedia**, and a built EPICS Base for `windows-x64`.
+**Multimedia**, and a built EPICS 7 Base for `windows-x64` (including pvAccess).
 
 From PowerShell or Command Prompt:
 
@@ -135,7 +135,7 @@ Outside a configured extensions tree, discovery and output paths are unchanged.
 Requirements common to the builds: Linux or macOS, GNU Make, C/C++ compilers, Perl,
 pkg-config, built EPICS Base with Channel Access/Com headers and libraries,
 and RPC development files (TI-RPC on Linux, the system SDK on macOS).
-QtALH additionally needs Qt **5.15 or newer**, or
+QtALH additionally needs EPICS 7 Base's pvAccess and pvData libraries, and Qt **5.15 or newer**, or
 Qt **6**, including Widgets, Network, PrintSupport, Multimedia, `moc`, and `rcc`.
 Qt Test is needed for tests. Motif ALH needs Motif, X11, Xt and Xmu development
 files. Explicit Qt builds do not include or link Motif/Xt.
@@ -226,7 +226,7 @@ make -j4 test-qtalh              # core, offscreen UI, IOC, and helper tests
 make -C qtalh test-core
 make -C qtalh test-ui            # offscreen UI; native macOS child for audio
 make -C qtalh test-ui-motif      # the same UI suite with the classic appearance
-make -C qtalh test-ioc           # starts its own softIoc on loopback
+make -C qtalh test-ioc           # starts its own softIocPVA on loopback
 make -C qtalh test-helpers       # requires legacy binaries and local rpcbind
 make -C qtalh test-visual        # requires built legacy ALH, X11, xwininfo, softIoc
 ```

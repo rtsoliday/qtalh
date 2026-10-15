@@ -1,7 +1,7 @@
 # QtALH user guide
 
-QtALH monitors EPICS Channel Access alarm records and edits legacy `.alhConfig`
-files. See the [README](../README.md#build-and-run) for installation and the
+QtALH monitors EPICS Channel Access and pvAccess alarm records and edits legacy
+`.alhConfig` files. See the [README](../README.md#build-and-run) for installation and the
 [compatibility inventory](qtalh-compatibility.md) for implementation evidence
 and differences from Motif ALH. This guide describes the Qt executable;
 [the original manual](../alh/documentation/ALH.html) describes legacy ALH.
@@ -32,7 +32,9 @@ For a runtime preview:
 bin/Linux-x86_64/qtalh -S -D -s -mainwindow examples/minimal.alhConfig
 ```
 
-This connects to the configured PV names using your EPICS CA environment.
+This connects to the configured PV names using your EPICS CA environment, or
+the PVA environment for `pva://` names (see pvAccess channels under
+configuration format).
 Unresolved names display ERROR. `--validate` checks parsing only, with no GUI
 or CA connections; it does not check PV existence, access rights, audio, or log
 permissions. Help, version, and successful validation exit with status 0;
@@ -305,6 +307,40 @@ letters and save in canonical `CDATL` positions; short/reordered forms such as
 Disable alone does not suppress alarm-file records; use NoLog for that. Timed
 NoAck is an operator setting and displays `H` in the mask summary.
 
+### pvAccess channels
+
+A PV name starting with `pva://` connects through pvAccess; every other name
+uses Channel Access, so existing configurations are unchanged. The prefix
+works wherever a PV is named: `CHANNEL`, `$SEVRPV`, `$ACKPV`, `$HEARTBEATPV`,
+`$FORCEPV`, and CALC inputs. Configure the client with the usual
+`EPICS_PVA_ADDR_LIST`, `EPICS_PVA_AUTO_ADDR_LIST`, and related variables.
+
+```text
+CHANNEL Vacuum pva://example:pressure
+$SEVRPV pva://example:vacuumSeverity
+```
+
+An alarm channel reads `value` and `alarm` from a normative-type PV. Severity
+is the PVA alarm severity. The status is the alarm condition named in
+`alarm.message`, as an IOC's PVA server (QSRV) reports it (for example `HIHI`).
+Other messages map to `UDF` or `COMM` for undefined or driver alarms, and to
+`SOFT` otherwise. Values display with `display.precision`; enumerated values
+display their state names, and writes set the enumeration index. Descriptions
+(`-desc`) read `pva://record.DESC`, and the alarm-limit tools read record fields
+the same way, so they need an EPICS IOC behind the name.
+
+PVA alarms carry no ACKS or ACKT, and QSRV rejects writes to those record
+fields. In global mode, QtALH therefore keeps the acknowledgement state for a
+`pva://` channel in the running instance. It applies the IOC's rules: an alarm
+change raises the unacknowledged severity unless transient acknowledgement retains
+a higher one; acknowledging clears it; and NoAckT lowers it to the current
+severity. The configured `T` mask sets the initial transient setting. These
+acknowledgements are not shared with other QtALH instances or Channel Access
+clients, and the record's own ACKS is unchanged. Configure the bare record name
+(Channel Access) where acknowledgements must be shared. PVA reports no access
+rights, so `NO_READ_ACCESS` and `NO_WRITE_ACCESS` do not appear; write failures
+are reported when the server rejects them.
+
 `INCLUDE parent filename` attaches another file beneath the named parent.
 Every relative include, including nested includes, resolves against `-f` or
 `ALARMHANDLER` (default `.`), not the containing include's directory. For example,
@@ -486,14 +522,14 @@ preventing file logging. Windows does not build these helpers and rejects
 | EPICS headers/libraries not found | Build Base first; set `EPICS_BASE` and `EPICS_HOST_ARCH` to that installation. See [build discovery](../README.md#linux-and-macos). |
 | Qt modules or build tools missing | Install matching Widgets, Network, PrintSupport, and Multimedia development files; tests also need Qt Test. Use `QT_VERSION=5` or `6` consistently and matching `moc`/`rcc`. |
 | Cannot open a display | Use the native GUI session or a working X11 display. Use `--validate` for a headless syntax check; test targets supply offscreen mode where appropriate. |
-| Channel remains ERROR | Verify the PV name, IOC availability, CA address environment, and read access. `-debug -noerrorpopup` exposes connection/access diagnostics on stderr. |
+| Channel remains ERROR | Verify the PV name, IOC availability, CA address environment (PVA environment for `pva://` names), and read access. `-debug -noerrorpopup` exposes connection/access diagnostics on stderr. |
 | Acknowledgement or output PV does not change | Check local/global/passive mode and IOC write access. Failed acknowledgements remain visible; manual ACKT changes require an explicit retry. |
 | Cannot open logs or lock files | Create the parent directory and check permissions on the selected files and checkpoint sidecar. A failed log destination change preserves the current destination. |
 | Sound fails | Check the audio path, Qt Multimedia plugins/backend, output device, Silence Forever, and beep threshold. Muted fixture playback verifies decoding, not speaker output. |
 | Helper or visual tests fail | Check the [test prerequisites](../qtalh/tests/README.md); missing rpcbind, legacy executables, softIoc, or X11 are failures, not skipped coverage. |
 
 For developer orientation, `qtalh/core/` contains parsing and alarm state,
-`qtalh/services/` contains CA/logging/options/protocols, and `qtalh/ui/` contains
+`qtalh/services/` contains CA/PVA/logging/options/protocols, and `qtalh/ui/` contains
 models, dialogs, and windows. Core depends on Qt Core and EPICS calculation
 routines, but not Widgets or CA. The service interfaces and clock/command/log
 callbacks support deterministic core tests. Preserve the original license and
