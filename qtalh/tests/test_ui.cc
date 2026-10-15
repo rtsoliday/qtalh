@@ -1,4 +1,5 @@
 #include "test_compat.h"
+#include "ca_repeater.h"
 #include "ui/window.h"
 #include "ui/dialogs.h"
 #include "ui/help.h"
@@ -1961,6 +1962,8 @@ private slots:
     environment.set("EPICS_CA_REPEATER_PORT", QByteArray::number(port.toInt() + 1));
     environment.set("EPICS_CAS_INTF_ADDR_LIST", "127.0.0.1");
     environment.set("EPICS_CAS_BEACON_ADDR_LIST", "127.0.0.1:" + QByteArray::number(port.toInt() + 1));
+    TestCaRepeater repeater;
+    QVERIFY(repeater.start(EPICS_TEST_BIN, port.toInt() + 1));
     QFile database(dir.filePath("heartbeat.db")); QVERIFY(database.open(QIODevice::WriteOnly));
     database.write(("record(ao,\"" + prefix + "beat\") { field(ASG,\"dynamic\") }\n"
         "record(ao,\"" + prefix + "permit\") { field(VAL,\"1\") }\n").toLatin1()); database.close();

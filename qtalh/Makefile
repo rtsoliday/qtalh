@@ -125,7 +125,7 @@ $(OBJ_DIR)/test_ioc.moc: tests/test_ioc.cc
 $(OBJ_DIR)/tests/test_ioc.o: $(OBJ_DIR)/test_ioc.moc
 $(OBJ_DIR)/tests/test_ioc.o: CPPFLAGS += -DEPICS_TEST_BIN='"$(EPICS_BASE)/bin/$(EPICS_HOST_ARCH)"' -DTEST_OUTPUT='"$(abspath $(OBJ_DIR)/test-artifacts)"'
 $(OBJ_DIR)/test_ioc: $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o)) $(addprefix $(OBJ_DIR)/services/,channel_access.o pv_access.o pv_router.o) $(OBJ_DIR)/tests/test_ioc.o
-	$(CXX) $(LDFLAGS) -o $@ $^ $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(call qt_libs,Test Core)
+	$(CXX) $(LDFLAGS) -o $@ $^ $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(call qt_libs,Test Core Network)
 $(OBJ_DIR)/test_pva.moc: tests/test_pva.cc
 	@mkdir -p $(OBJ_DIR)
 	$(MOC) $(INCLUDES) $(QT_CFLAGS) $< -o $@

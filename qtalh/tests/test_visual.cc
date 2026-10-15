@@ -1,5 +1,6 @@
 // Optional real-display comparison. Only the test IOC is contacted.
 #include "test_compat.h"
+#include "ca_repeater.h"
 #include "ui/window.h"
 #include "ui/dialogs.h"
 #include <QGuiApplication>
@@ -166,6 +167,8 @@ private slots:
     qputenv("EPICS_CA_REPEATER_PORT", QByteArray::number(port + 1));
     qputenv("EPICS_CAS_INTF_ADDR_LIST", "127.0.0.1");
     qputenv("EPICS_CAS_BEACON_ADDR_LIST", ("127.0.0.1:" + QString::number(port + 1)).toLatin1());
+    TestCaRepeater repeater;
+    QVERIFY(repeater.start(EPICS_TEST_BIN, port + 1));
     Child ioc;
     ioc.start(QString(EPICS_TEST_BIN) + "/softIoc",
               {"-m", "P=" + prefix, "-d", QFileInfo("tests/ioc.db").absoluteFilePath()});

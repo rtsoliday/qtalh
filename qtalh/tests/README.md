@@ -112,7 +112,10 @@ pages, 1,927 local links/assets, 41 option spellings, and 14 directives.
 
 IOC tests create their own loopback-only IOC with process-specific PV prefixes
 and ports, using [ioc.db](ioc.db) and [ioc.acf](ioc.acf). They do not write to
-production records. Unix helper tests use owned System V queues, local TCP
+production records. Each also starts its own `caRepeater` on its private
+repeater port and stops it at exit; otherwise Channel Access would start a
+detached repeater that outlives the test and holds piped output open.
+Unix helper tests use owned System V queues, local TCP
 capture servers, and a temporary RPC registration, which they clean up.
 An absent prerequisite fails the relevant test rather than silently skipping it.
 

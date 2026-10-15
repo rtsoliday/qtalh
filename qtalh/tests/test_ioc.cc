@@ -1,3 +1,4 @@
+#include "ca_repeater.h"
 #include "services/pv_router.h"
 #include "core/notifications.h"
 #include "core/analytics.h"
@@ -8,6 +9,7 @@
 using namespace alh;
 class IocTests : public QObject {
   Q_OBJECT
+  TestCaRepeater repeater;
   QProcess ioc;
   QString prefix;
   QTemporaryDir security;
@@ -46,6 +48,7 @@ private slots:
     qputenv("EPICS_PVA_SERVER_PORT", QByteArray::number(port + 2));
     qputenv("EPICS_PVA_BROADCAST_PORT", QByteArray::number(port + 3));
     qputenv("EPICS_PVAS_INTF_ADDR_LIST", "127.0.0.1");
+    QVERIFY(repeater.start(EPICS_TEST_BIN, port + 1));
     ioc.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
     startIoc();
   }
