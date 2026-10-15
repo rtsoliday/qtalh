@@ -54,10 +54,20 @@ On Windows, use the launcher from the repository root:
 .\build-windows.bat test 4
 ```
 
-It configures the MSVC, Qt, EPICS, DLL, and plugin paths and runs core, UI, IOC,
-and portable helper tests. Native lock lifetime, logging, and broadcasts are
+It configures the MSVC, Qt, EPICS, DLL, and plugin paths and runs core,
+notifications, analytics, modern/classic UI, IOC, and portable helper tests.
+Native lock lifetime, logging, and broadcasts are
 covered; Unix queues/RPC, POSIX locking, symlinks, and resource-limit cases are
 excluded at compilation. `test-visual` reports unsupported on Windows.
+The optional `test-gallery` target captures Qt dialogs in both appearances;
+Windows' native print dialog is outside the offscreen widget tree and is omitted.
+
+On 2026-10-15, native MSVC with Qt 6.11.2 and EPICS Base 7.0.10.1-DEV passed
+a clean application build and test compilation without compiler warnings.
+`build-windows.bat test 4` passed 1,064 checks with no failures and three
+expected skips (Linux `/dev/full` in both UI runs and the modern-only styling
+contract in the classic run). The optional Fusion suite passed 226 checks
+with one Linux-only skip; both dialog galleries passed three checks each.
 
 ## Isolation, artifacts, and focused runs
 

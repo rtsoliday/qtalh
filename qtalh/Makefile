@@ -59,9 +59,11 @@ test-gallery: $(OBJ_DIR)/test_visual.exe
 	QT_QPA_PLATFORM=offscreen QT_QPA_FONTDIR="$(QT_QPA_FONTDIR)" QTALH_TEST_STYLE=motif $< dialogGallery
 test-ui test-ui-fusion test-ui-motif: $(OBJ_DIR)/qtalh.exe
 test-ui-fusion: $(OBJ_DIR)/test_ui.exe
-	QT_QPA_PLATFORM=offscreen QT_QPA_FONTDIR="$(QT_QPA_FONTDIR)" QTALH_TEST_STYLE=fusion $(OBJ_DIR)/test_ui.exe
+	@mkdir -p $(OBJ_DIR)/test-artifacts
+	@QT_QPA_PLATFORM=offscreen QT_QPA_FONTDIR="$(QT_QPA_FONTDIR)" QTALH_TEST_STYLE=fusion $(OBJ_DIR)/test_ui.exe -o $(OBJ_DIR)/test-artifacts/ui-fusion.txt,txt; result=$$?; cat $(OBJ_DIR)/test-artifacts/ui-fusion.txt; exit $$result
 test-ui-motif: $(OBJ_DIR)/test_ui.exe
-	QT_QPA_PLATFORM=offscreen QT_QPA_FONTDIR="$(QT_QPA_FONTDIR)" QTALH_TEST_STYLE=motif $(OBJ_DIR)/test_ui.exe
+	@mkdir -p $(OBJ_DIR)/test-artifacts
+	@QT_QPA_PLATFORM=offscreen QT_QPA_FONTDIR="$(QT_QPA_FONTDIR)" QTALH_TEST_STYLE=motif $(OBJ_DIR)/test_ui.exe -o $(OBJ_DIR)/test-artifacts/ui-motif.txt,txt; result=$$?; cat $(OBJ_DIR)/test-artifacts/ui-motif.txt; exit $$result
 else
 OBJ_DIR = O.$(OS)-$(ARCH)-qt$(QT_VERSION)
 CXXFLAGS ?= -O2 -g -Wall -Wextra -std=c++17 -fPIC

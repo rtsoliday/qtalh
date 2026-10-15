@@ -513,7 +513,9 @@ private slots:
     // With no matching checkpoint, retain physical order for equal timestamps.
     checkpoint.seek(0); checkpoint.write("broken!"); QVERIFY(checkpoint.flush());
     check({"event-D", "event-B", "event-C"});
-    checkpoint.close(); QVERIFY(QFile::remove(checkpoint.fileName()));
+    // Windows cannot unlink the checkpoint while its writer has it open.
+    checkpoint.close(); log.setAlarmFile(dir.filePath("other-alarm"));
+    QVERIFY(QFile::remove(checkpoint.fileName()));
     check({"event-D", "event-B", "event-C"});
     auto cancelled = searchLogs(request, [] { return true; }); QVERIFY(cancelled.cancelled);
   }
@@ -3664,7 +3666,7 @@ private slots:
     QCOMPARE(command->font().pointSizeF(), points(contentFont()) + 2);
     QTest::keyClick(button, Qt::Key_Minus, Qt::ControlModifier);
     QCOMPARE(QApplication::font().pointSizeF(), base + 1);
-    QCOMPARE(second->font().pointSizeF(), base + 1);
+    QTRY_COMPARE(second->font().pointSizeF(), base + 1);
     QTest::keyClick(command, Qt::Key_0, Qt::ControlModifier);
     QCOMPARE(QApplication::font(), startup);
     QCOMPARE(reader->font(), originalReaderFont);
@@ -3707,7 +3709,7 @@ private slots:
     for (int column : {0, 1, 2, 4, 5, 6, 7, 8}) {
       auto cell = index.sibling(0, column);
       auto rect = view->visualRect(cell);
-      if (!rect.isEmpty()) QCOMPARE(view->indexAt(rect.center()), cell);
+      if (!rect.isEmpty()) QTRY_COMPARE(view->indexAt(view->visualRect(cell).center()), cell);
     }
     auto dark = QApplication::palette();
     dark.setColor(QPalette::Base, QColor("#202020")); dark.setColor(QPalette::Text, Qt::white);
@@ -4030,7 +4032,7 @@ private slots:
     auto summary = w->findChild<QDialog*>("alarmSummaryDialog");
     QVERIFY(summary && summary->isVisible() && summary->isEnabled());
     QVERIFY(!original);
-    auto tiles = summary->findChildren<MotifButton*>("summaryTile");
+    auto tiles = summary->findChildren<QPushButton*>("summaryTile");
     QCOMPARE(tiles.size(), 1);
     QVERIFY(tiles[0]->text().startsWith("Replacement\n"));
     tiles[0]->click();
@@ -4045,7 +4047,7 @@ private slots:
     auto dialog = w->findChild<QDialog*>("alarmSummaryDialog");
     QCOMPARE(dialog->findChild<QLabel*>("summaryTotals")->text(), QString("1 in alarm, 1 unacknowledged"));
     bool alarmVisible = false;
-    for (auto tile : dialog->findChildren<MotifButton*>("summaryTile"))
+    for (auto tile : dialog->findChildren<QPushButton*>("summaryTile"))
       alarmVisible |= tile->text().contains("1 in alarm");
     QVERIFY(alarmVisible);
   }
@@ -4161,10 +4163,10 @@ private slots:
     for (auto a : w->findChildren<QAction*>()) if (a->text() == "Alarm Summary Panel...") a->trigger();
     auto dialog = w->findChild<QDialog*>("alarmSummaryDialog");
     QVERIFY(dialog);
-    auto tiles = dialog->findChildren<MotifButton*>("summaryTile");
+    auto tiles = dialog->findChildren<QPushButton*>("summaryTile");
     QCOMPARE(tiles.size(), 3);
     MotifButton* vacuum = nullptr;
-    for (auto tile : tiles) if (tile->text().startsWith("Vacuum")) vacuum = tile;
+    for (auto tile : tiles) if (tile->text().startsWith("Vacuum")) vacuum = static_cast<MotifButton*>(tile);
     QVERIFY(vacuum);
     QVERIFY(vacuum->text().contains("1 in alarm") && vacuum->text().contains("1 unacknowledged"));
     QCOMPARE(dialog->findChild<QLabel*>("summaryTotals")->text(), QString("1 in alarm, 1 unacknowledged"));

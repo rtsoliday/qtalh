@@ -234,7 +234,13 @@ QFont contentFont() {
   auto font = smallerDefaultFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
   // Some platform plugins report the UI font for FixedFont. Ask fontconfig/the
   // platform font matcher for a monospace family in that case.
-  if (!QFontInfo(font).fixedPitch()) font.setFamily("monospace");
+  if (!QFontInfo(font).fixedPitch()) {
+#ifdef Q_OS_WIN
+    font.setFamily("Consolas");
+#else
+    font.setFamily("monospace");
+#endif
+  }
   font.setStyleHint(QFont::TypeWriter);
   font.setFixedPitch(true);
   return font;

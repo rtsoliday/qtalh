@@ -60,7 +60,7 @@ private slots:
           }
         });
         action->trigger();
-        QVERIFY(captured);
+        QVERIFY2(captured, qPrintable(actionName));
       };
       auto capture = [&](const QString& actionName, const QString& file) {
         QAction* action = nullptr;
@@ -100,7 +100,10 @@ private slots:
         captureModal("Channel...", "qt-insert-channel");
       } else {
         captureModal("About QtALH", "qt-about");
+#ifndef Q_OS_WIN
+        // Windows uses an OS print dialog, outside Qt's offscreen widget tree.
         captureModal("Print...", "qt-print");
+#endif
       }
       if (!editor) {
         capture("Modify Mask Settings...", "qt-mask");

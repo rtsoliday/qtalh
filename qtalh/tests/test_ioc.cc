@@ -19,9 +19,15 @@ class IocTests : public QObject {
     QVERIFY(output.open(QIODevice::WriteOnly | QIODevice::Truncate));
     output.write(input.readAll().replace("$(P)", prefix.toLatin1()));
     output.close();
+    ioc.setProcessChannelMode(QProcess::MergedChannels);
     ioc.start(QString(EPICS_TEST_BIN) + "/softIoc",
               {"-m", "P=" + prefix, "-a", security.filePath("access.acf"), "-d", database});
     QVERIFY(ioc.waitForStarted());
+    // Process creation precedes database initialization, especially on Windows.
+    // Do not spend one-shot read deadlines waiting for the test server to start.
+    QByteArray startup;
+    QTRY_VERIFY_WITH_TIMEOUT((startup += ioc.readAllStandardOutput())
+                                .contains("iocRun: All initialization complete"), 15000);
   }
 private slots:
   void initTestCase() {
@@ -1273,7 +1279,7 @@ private slots:
     ioc.waitForFinished();
     QFile output(QString(TEST_OUTPUT) + "/ioc.log");
     if (output.open(QIODevice::WriteOnly))
-      output.write(ioc.readAllStandardOutput() + ioc.readAllStandardError());
+      output.write(ioc.readAllStandardOutput());
   }
 };
 QTEST_GUILESS_MAIN(IocTests)

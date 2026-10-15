@@ -7,6 +7,10 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
+#ifdef Q_OS_WIN
+#include <fcntl.h>
+#include <io.h>
+#endif
 using namespace alh;
 namespace {
 NotificationSettings settings() {
@@ -20,7 +24,7 @@ NotificationSettings settings() {
   NotificationSubscription r;
   r.id = "rule";
   r.name = "Major alarms";
-  r.configuration = "/test.alh";
+  r.configuration = notificationConfiguration("/test.alh");
   r.stages = {{"initial", 60, {"ops"}}, {"escalate", 600, {"ops"}}};
   s.subscriptions << r;
   return s;
@@ -37,7 +41,7 @@ ChannelUpdate alarm(QString id = "pv") {
   return s;
 }
 void configure(NotificationPolicy& p, NotificationSettings s = settings()) {
-  p.configure(s, "/test.alh");
+  p.configure(s, notificationConfiguration("/test.alh"));
   p.enable(true);
 }
 struct Receiver : QTcpServer {
@@ -306,7 +310,7 @@ private slots:
     p.completed(e, true);
     auto s = settings();
     s.subscriptions[0].name = "Edited";
-    p.configure(s, "/test.alh");
+    p.configure(s, notificationConfiguration("/test.alh"));
     p.observe(a, 100000);
     p.tick(159999);
     QVERIFY(!p.take(e, 159999));
@@ -749,6 +753,10 @@ private slots:
 int main(int argc, char** argv) {
   QCoreApplication app(argc, argv);
   if (app.arguments().value(1) == "--fake-mail") {
+#ifdef Q_OS_WIN
+    // Preserve MIME CRLF bytes rather than applying CRT text-mode translation.
+    _setmode(_fileno(stdin), _O_BINARY);
+#endif
     QFile in, out;
     if (!in.open(stdin, QIODevice::ReadOnly))
       return 1;

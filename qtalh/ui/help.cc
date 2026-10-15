@@ -301,10 +301,7 @@ public:
     layout->addLayout(buttons);
     // A styled widget can retain its resolved font when the application font
     // changes. Apply the new font explicitly throughout this uniform text UI.
-    connect(qApp, &QGuiApplication::fontChanged, this, [this](const QFont& font) {
-      setFont(font);
-      for (auto widget : findChildren<QWidget*>()) widget->setFont(font);
-    });
+    qApp->installEventFilter(this);
     connect(close, &QPushButton::clicked, this, &QDialog::close);
     connect(online, &QPushButton::clicked, this, [] { QDesktopServices::openUrl(manualUrl); });
     connect(list, &QListWidget::currentItemChanged, this, [this](QListWidgetItem* current) {
@@ -349,6 +346,16 @@ public:
       browser->scrollToAnchor(anchor);
       return;
     }
+  }
+
+protected:
+  bool eventFilter(QObject* watched, QEvent* event) override {
+    if (watched == qApp && event->type() == QEvent::ApplicationFontChange) {
+      const auto font = QApplication::font();
+      setFont(font);
+      for (auto widget : findChildren<QWidget*>()) widget->setFont(font);
+    }
+    return QDialog::eventFilter(watched, event);
   }
 
 private:

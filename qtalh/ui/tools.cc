@@ -124,7 +124,17 @@ class ActiveAlarmFilter : public QSortFilterProxyModel {
 public:
   using QSortFilterProxyModel::QSortFilterProxyModel;
   bool unacknowledgedOnly = false;
-  void refilter() { invalidateFilter(); }
+  void setUnacknowledgedOnly(bool on) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 10, 0)
+    beginFilterChange();
+#endif
+    unacknowledgedOnly = on;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 10, 0)
+    endFilterChange(Direction::Rows);
+#else
+    invalidateFilter();
+#endif
+  }
 protected:
   bool filterAcceptsRow(int row, const QModelIndex& parent) const override {
     auto model = static_cast<ActiveAlarmModel*>(sourceModel());
@@ -365,8 +375,7 @@ void Window::showActiveAlarms() {
   connect(proxy, &QAbstractItemModel::dataChanged, dialog, updateButtons);
   connect(filter, &QLineEdit::textChanged, proxy, &QSortFilterProxyModel::setFilterFixedString);
   connect(unackOnly, &QCheckBox::toggled, dialog, [proxy](bool on) {
-    proxy->unacknowledgedOnly = on;
-    proxy->refilter();
+    proxy->setUnacknowledgedOnly(on);
   });
   connect(acknowledge, &QPushButton::clicked, dialog, [=] {
     for (auto n : selectedNodes(table)) engine->acknowledge(n);
@@ -730,7 +739,8 @@ void Window::showSummary() {
 void Window::refreshTools() {
   if (!engine || options.editor) return;
   if (activeAlarmsDialog) {
-    auto model = activeAlarmsDialog->findChild<ActiveAlarmModel*>("activeAlarmModel");
+    auto model = static_cast<ActiveAlarmModel*>(
+        activeAlarmsDialog->findChild<QAbstractTableModel*>("activeAlarmModel"));
     QVector<ActiveRow> rows;
     int shelved = 0, unacknowledged = 0;
     for (auto n : doc.channels()) {
@@ -815,7 +825,8 @@ void Window::refreshTools() {
       waiting += facility.unackCounts[severity];
     }
     const bool blink = (engine->now() / 1000) % 2;
-    for (auto tile : summaryDialog->findChildren<MotifButton*>("summaryTile")) {
+    for (auto button : summaryDialog->findChildren<QPushButton*>("summaryTile")) {
+      auto tile = static_cast<MotifButton*>(button);
       auto n = nodeOf(tile->property("summaryNode"));
       const auto shown = engine->presentation(n);
       const int inAlarm = shown.counts[1] + shown.counts[2] + shown.counts[3] + shown.counts[4];

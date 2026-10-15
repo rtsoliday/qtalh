@@ -115,13 +115,25 @@ inline Result read(QFile& file, const QString& positionPath,
   quint64 count = 0;
   QByteArray digest(32, 0);
   QDateTime earliest;
+  QByteArray previousTimestamp;
+  QDateTime previousTime;
   qint64 oldest = 0;
   const bool scanned = scan(file, 0, size, false,
       [&](quint64 index, qint64 offset, qint64, const QByteArray& header, const QByteArray& hash, QByteArray) {
     count = index + 1;
     for (auto& slot : positions) if (index == slot.next) slot.offset = offset;
     for (int i = 0; i < 32; ++i) digest[i] = char(digest.at(i) ^ hash.at(i));
-    const auto time = logTimestamp(QString::fromLocal8Bit(header));
+    // Local-time conversion is expensive on Windows. Consecutive records often
+    // share a second; reuse only the immediately preceding timestamp, keeping
+    // memory bounded and still parsing every change in chronological order.
+    const int xmlEnd = header.startsWith("<entry>") ? header.indexOf("</time>") : -1;
+    const int textEnd = header.indexOf(" : ");
+    const auto timestamp = header.left(xmlEnd >= 0 ? xmlEnd + 7 : textEnd >= 0 ? textEnd : header.size());
+    if (timestamp != previousTimestamp || !previousTime.isValid()) {
+      previousTimestamp = timestamp;
+      previousTime = logTimestamp(QString::fromLocal8Bit(header));
+    }
+    const auto time = previousTime;
     if (time.isValid() && (!earliest.isValid() || time < earliest)) {
       earliest = time; oldest = offset;
     }
