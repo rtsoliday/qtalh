@@ -13,7 +13,14 @@ endif
 RULES_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 RULES_PROFILE ?= $(if $(wildcard $(RULES_DIR)qtstriptool/Makefile),striptool,$(if $(wildcard $(RULES_DIR)alh/Makefile),qtalh,medm))
 BUILD_FILES = Makefile $(RULES_DIR)Makefile.rules $(RULES_DIR)Makefile.build
+# Conda's pkg-config wrapper searches its own Qt installation first. Prefer
+# the distribution tool on Linux, including inside the RHEL 8 build shell.
+# Set PKG_CONFIG explicitly to select another installation.
+ifeq ($(OS),Linux)
+PKG_CONFIG ?= $(firstword $(wildcard /usr/bin/pkg-config) pkg-config)
+else
 PKG_CONFIG ?= pkg-config
+endif
 PYTHON ?= $(if $(filter Windows,$(OS)),python,python3)
 
 ifneq ($(filter striptool qtalh,$(RULES_PROFILE)),)
@@ -720,16 +727,16 @@ endif
 # Detect Qt development environment using pkg-config
 # On Windows, Qt detection is handled separately in qtedm/Makefile
 ifneq ($(OS), Windows)
-  QT6_CFLAGS := $(shell pkg-config --cflags Qt6Widgets 2>/dev/null)
-  QT6_LIBS := $(shell pkg-config --libs Qt6Widgets 2>/dev/null)
+  QT6_CFLAGS := $(shell $(PKG_CONFIG) --cflags Qt6Widgets 2>/dev/null)
+  QT6_LIBS := $(shell $(PKG_CONFIG) --libs Qt6Widgets 2>/dev/null)
   ifneq ($(QT6_CFLAGS),)
     ifneq ($(QT6_LIBS),)
       HAVE_QT = 1
     endif
   endif
   ifneq ($(HAVE_QT), 1)
-    QT5_CFLAGS := $(shell pkg-config --cflags Qt5Widgets 2>/dev/null)
-    QT5_LIBS := $(shell pkg-config --libs Qt5Widgets 2>/dev/null)
+    QT5_CFLAGS := $(shell $(PKG_CONFIG) --cflags Qt5Widgets 2>/dev/null)
+    QT5_LIBS := $(shell $(PKG_CONFIG) --libs Qt5Widgets 2>/dev/null)
     ifneq ($(QT5_CFLAGS),)
       ifneq ($(QT5_LIBS),)
         HAVE_QT = 1

@@ -180,6 +180,14 @@ packages or changing `PKG_CONFIG_PATH` is unnecessary when `.pc` files are absen
 `QT_VERSION=5` or `6` forces the choice. `MOC` and `RCC` can be
 overridden for unusual installations and must match the selected Qt libraries.
 
+On Linux, the build prefers `/usr/bin/pkg-config` so an active Conda
+environment does not select Conda's Qt through its `pkg-config` wrapper.
+This also applies inside `rhel8-shell`, where `/usr` refers to the container.
+To select another installation, set `PKG_CONFIG` and, if needed,
+`PKG_CONFIG_PATH` explicitly, for example `make -j4 PKG_CONFIG=/path/to/pkg-config`.
+Run `make clean` before switching between host and container builds or Qt
+installations, then rebuild in the selected shell.
+
 Standalone EPICS Base discovery prefers `/usr/local/oag/base`, followed by nearby
 `epics-base` checkouts, the old extensions-relative location, and
 `$HOME/epics/base` or `$HOME/epics/base-7.0`. A sibling checkout can be shared
