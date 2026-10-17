@@ -321,6 +321,136 @@ private slots:
     channel->writer->ready();
     QTRY_COMPARE(channel->writer->submitted, QVector<double>{2});
   }
+  void boundedInboxPreservesOrder() {
+    PvAccess pv;
+    QVector<int> values;
+    pv.monitor("pva://alarm", [&](Event e) { values << e.value.toInt(); });
+    auto monitor = provider->channels.back()->monitor;
+    for (int i = 0; i < 1000; ++i) monitor->post(i, i % 3);
+    QVERIFY(pv.pendingUpdateCount() <= PvAccess::MaximumPendingUpdates);
+    QVERIFY(pv.pendingUpdateBytes() <= PvAccess::MaximumPendingUpdateBytes);
+    QTRY_COMPARE(values.size(), 1000);
+    for (int i = 0; i < values.size(); ++i) QCOMPARE(values[i], i);
+    QCOMPARE(pv.pendingUpdateCount(), size_t(0));
+    QCOMPARE(pv.pendingUpdateBytes(), size_t(0));
+  }
+  void inboxOverflow_data() {
+    QTest::addColumn<int>("count");
+    QTest::addColumn<int>("messageBytes");
+    QTest::newRow("count") << int(PvAccess::MaximumPendingUpdates + 10) << 0;
+    QTest::newRow("bytes") << 1 << int(PvAccess::MaximumPendingUpdateBytes / 2 + 100);
+  }
+  void inboxOverflow() {
+    QFETCH(int, count); QFETCH(int, messageBytes);
+    PvAccess pv;
+    QStringList errors;
+    pv.error = [&](const QString& s) { errors << s; };
+    Event last;
+    pv.monitor("pva://alarm", [&](Event e) { last = e; });
+    auto old = provider->channels.back()->monitor;
+    const std::string message(messageBytes, 'x');
+    for (int i = 0; i < count; ++i) old->post(i, 2, message);
+    QVERIFY(pv.pendingUpdateCount() <= PvAccess::MaximumPendingUpdates);
+    QVERIFY(pv.pendingUpdateBytes() <= PvAccess::MaximumPendingUpdateBytes);
+    QTRY_VERIFY(errors.join(' ').contains("observations lost"));
+    QCOMPARE(last.severity, 4);
+    QVERIFY(old->destroyed);
+    QTRY_VERIFY(provider->channels.back()->monitor != old);
+    auto fresh = provider->channels.back()->monitor;
+    QVERIFY(fresh != old);
+    old->post(999, 3); // Discard callbacks from the abandoned subscription.
+    fresh->post(7, 1);
+    QTRY_COMPARE(last.value, QString("7"));
+    QCOMPARE(last.severity, 1);
+  }
+  void largeConfigurationRecoversFromInboxOverflow() {
+    PvAccess pv;
+    int overflows = 0, delivered = 0;
+    pv.error = [&](const QString& s) { if (s.contains("buffer overflow")) ++overflows; };
+    const int count = int(PvAccess::MaximumPendingUpdates) + 100;
+    for (int i = 0; i < count; ++i)
+      pv.number("pva://input" + QString::number(i), [&](double v) {
+        if (std::isfinite(v)) ++delivered;
+      });
+    QTRY_COMPARE(provider->channels.size(), size_t(2 * count));
+    QCOMPARE(overflows, 1);
+    provider->channels.back()->monitor->post(7);
+    QTRY_COMPARE(delivered, 1);
+    QVERIFY(pv.pendingUpdateBytes() <= PvAccess::MaximumPendingUpdateBytes);
+  }
+  void boundedOrderedWrites() {
+    PvAccess pv;
+    QStringList errors;
+    pv.error = [&](const QString& s) { errors << s; };
+    pv.prepare("pva://output");
+    auto writer = provider->channels.back()->writer;
+    writer->ready();
+    QTRY_VERIFY(pv.canWrite("pva://output"));
+    QVERIFY(pv.put("pva://output", 0, WriteKind::AckValue));
+    for (size_t i = 1; i <= PvAccess::MaximumPendingWrites; ++i)
+      QVERIFY(pv.put("pva://output", double(i), WriteKind::AckValue));
+    QVERIFY(!pv.put("pva://output", 999, WriteKind::AckValue));
+    QCOMPARE(pv.pendingWriteCount("pva://output"), PvAccess::MaximumPendingWrites);
+    QVERIFY(errors.join(' ').contains("limit reached"));
+    for (size_t i = 1; i <= PvAccess::MaximumPendingWrites; ++i) {
+      writer->done();
+      QTRY_COMPARE(writer->submitted.size(), int(i + 1));
+      QCOMPARE(writer->submitted.back(), double(i));
+    }
+    QCOMPARE(pv.pendingWriteCount("pva://output"), size_t(0));
+  }
+  void latestStateWrites_data() {
+    QTest::addColumn<bool>("heartbeat");
+    QTest::newRow("severity") << false;
+    QTest::newRow("heartbeat") << true;
+  }
+  void latestStateWrites() {
+    QFETCH(bool, heartbeat);
+    PvAccess pv;
+    pv.prepare("pva://output");
+    auto writer = provider->channels.back()->writer;
+    writer->ready();
+    QTRY_VERIFY(pv.canWrite("pva://output"));
+    QVERIFY(pv.put("pva://output", 0));
+    for (int i = 1; i <= 1000; ++i)
+      QVERIFY(pv.put("pva://output", i, heartbeat ? WriteKind::Heartbeat : WriteKind::Severity));
+    QCOMPARE(pv.pendingWriteCount("pva://output"), size_t(1));
+    writer->done();
+    QTRY_COMPARE(writer->submitted, (QVector<double>{0, 1000}));
+  }
+  void writeTimeout_data() {
+    QTest::addColumn<bool>("ready");
+    QTest::newRow("setup") << false;
+    QTest::newRow("completion") << true;
+  }
+  void writeTimeout() {
+    QFETCH(bool, ready);
+    PvAccess pv;
+    pv.writeTimeoutMs = 30;
+    QStringList errors;
+    pv.error = [&](const QString& s) { errors << s; };
+    pv.prepare("pva://output");
+    auto channel = provider->channels.back();
+    auto old = channel->writer;
+    if (ready) old->ready();
+    QTRY_VERIFY(pv.canWrite("pva://output"));
+    QVERIFY(pv.put("pva://output", 1));
+    QVERIFY(pv.put("pva://output", 2));
+    QTRY_VERIFY(errors.join(' ').contains("timed out"));
+    QVERIFY(old->destroyed);
+    QCOMPARE(pv.pendingWriteCount("pva://output"), size_t(0));
+    QVERIFY(pv.put("pva://output", 3));
+    auto fresh = channel->writer;
+    QVERIFY(fresh != old);
+    fresh->ready();
+    QTRY_COMPARE(fresh->submitted, QVector<double>{3});
+    QVERIFY(pv.put("pva://output", 4));
+    old->ready(); old->done();
+    QCoreApplication::processEvents();
+    QCOMPARE(fresh->submitted.size(), 1);
+    fresh->done();
+    QTRY_COMPARE(fresh->submitted, (QVector<double>{3, 4}));
+  }
 };
 QTEST_GUILESS_MAIN(PvaTests)
 #include "test_pva.moc"

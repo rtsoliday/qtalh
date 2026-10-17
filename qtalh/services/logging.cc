@@ -114,16 +114,19 @@ struct AlarmLogFile : std::enable_shared_from_this<AlarmLogFile> {
   QPointer<Logging> asyncErrorOwner;
   quint64 positionSequence = 0;
   int nextPositionSlot = 1;
+  QMetaObject::Connection shutdownConnection;
   // Two 96-byte slots: magic/version, sequence, count, next, ring fingerprint,
   // then SHA-256 of the preceding 64 bytes. Integers are big endian.
   static constexpr int PositionSlotSize = 96;
   ~AlarmLogFile() {
+    QObject::disconnect(shutdownConnection);
     asyncError = {};
     finishPending();
 #ifndef Q_OS_WIN
     if (positionFd >= 0)
       ::close(positionFd);
 #endif
+    logIdentity::prune();
   }
 
   static Hash recordHash(int index, const QByteArray& record) {
@@ -528,7 +531,7 @@ std::shared_ptr<AlarmLogFile> acquireAlarmFile(const QString& name, bool truncat
       alarmFiles.insert(identity, shared);
   }
   std::weak_ptr<AlarmLogFile> weak = shared;
-  QObject::connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit,
+  shared->shutdownConnection = QObject::connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit,
                    QCoreApplication::instance(), [weak] {
     if (auto file = weak.lock()) file->finishPending();
   });

@@ -20,6 +20,15 @@ Channel Access uses a shared non-preemptive context, socket notifiers, and a 100
 
 `PvRouter` sends names starting with `pva://` to the pvAccess client and all others to Channel Access, behind the same `PvService` interface. pvAccess callbacks arrive on EPICS threads; their values are queued and delivered on the GUI thread, matching the CA model. Because PVA alarms have no ACKS/ACKT, the pvAccess client keeps acknowledgement state for each `pva://` record in the runtime.
 
+The PVA inbox holds at most 4,096 updates or 4 MiB of accounted payload and
+delivers at most 256 updates per GUI turn. Overflow reports lost observations,
+publishes a communication gap, and recreates connections in small batches to
+obtain fresh state. Stale callbacks are rejected by channel/operation identity.
+Each output has at most 128 pending writes and a 30-second setup/completion
+deadline. Consecutive pending severity or heartbeat writes retain the latest
+value; ordered writes are rejected visibly when full. A timeout cancels pending
+writes and reports uncertain acceptance of an in-flight write.
+
 Analytics and notifications subscribe independently through lifetime-managed
 engine observers. Observations carry before/after state, availability, suppression
 flags, and acknowledgement causes. The compatibility logging callbacks remain

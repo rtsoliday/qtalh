@@ -186,6 +186,42 @@ private slots:
     p.tick(1880000);
     QVERIFY(p.take(e, 1880000));
   }
+  void expiredAndObsoleteDeadlinesAreReleased() {
+    NotificationPolicy p;
+    auto s = settings();
+    configure(p, s);
+    NotificationEnvelope e;
+    e.subscription = "rule"; e.stage = "initial"; e.destination = "ops"; e.attempts = 1;
+    for (int i = 0; i < 1000; ++i) {
+      e.alarms = {{QString::number(i), alarm("pv" + QString::number(i))}};
+      p.attempted(e, i);
+    }
+    QCOMPARE(p.retainedDeadlines(), 1001);
+    p.enable(false);
+    p.tick(10001); // Destination deadline remains until the latest attempt expires.
+    QCOMPARE(p.retainedDeadlines(), 1001);
+    p.tick(11000);
+    QCOMPARE(p.retainedDeadlines(), 1000);
+    p.tick(1801000);
+    QCOMPARE(p.retainedDeadlines(), 0);
+    p.attempted(e, 2000000);
+    QCOMPARE(p.retainedDeadlines(), 2);
+    configure(p, s); // Unchanged settings preserve an active cooldown.
+    QCOMPARE(p.retainedDeadlines(), 2);
+    p.reconcile({e.alarms[0].state});
+    QCOMPARE(p.retainedDeadlines(), 2);
+    p.reconcile({alarm("replacement")});
+    QCOMPARE(p.retainedDeadlines(), 1);
+    e.alarms = {{"replacement", alarm("replacement")}};
+    p.attempted(e, 2000001);
+    QCOMPARE(p.retainedDeadlines(), 2);
+    s.subscriptions.clear();
+    p.configure(s, notificationConfiguration("/test.alh"));
+    QCOMPARE(p.retainedDeadlines(), 1);
+    s.destinations.clear();
+    p.configure(s, notificationConfiguration("/test.alh"));
+    QCOMPARE(p.retainedDeadlines(), 0);
+  }
   void resolutionDestinationsAndLateAcceptance() {
     auto s = settings();
     s.subscriptions[0].resolution = true;

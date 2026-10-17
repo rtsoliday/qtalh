@@ -43,6 +43,10 @@ Operators can hover over **G** to read guidance and **P** to preview related com
 
 Undo uses **Alt+Backspace**, and redo uses **Ctrl+Y**. The editor also supports cut/copy/paste and copying between editor windows.
 
+Undo and redo share a limit of 100 configuration snapshots and a 32 MiB memory
+budget. Older snapshots are discarded as needed. A configuration too large for
+one snapshot clears the undo/redo history.
+
 ## Validate and activate
 
 Save the file, then check it without connecting to any IOC:

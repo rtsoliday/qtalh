@@ -17,6 +17,7 @@ struct AnalyticsChannel {
   bool standingUnknown = true, ackUnknown = true;
   int severity = 0, unack = 0, flags = 0;
   qint64 last = 0, lastUtc = 0, standingSince = 0, ackSince = 0;
+  qint64 retiredAt = 0;
   std::array<AnalyticsStats, 2> totals;
 };
 // Interval [from,time) belongs to the state before this transition. Point events
@@ -32,6 +33,7 @@ struct AnalyticsSnapshot {
   qint64 started = 0, startedUtc = 0, now = 0, nowUtc = 0, coverage = 0;
   QVector<AnalyticsChannel> channels;
   std::deque<AnalyticsRecord> records;
+  bool metadataTruncated = false;
 };
 struct AnalyticsQuery {
   qint64 rangeMs = 3600000; // zero means session summaries
@@ -53,6 +55,7 @@ struct AnalyticsReport {
   AnalyticsQuery query;
   qint64 from = 0, to = 0, coverage = 0, fromUtc = 0, toUtc = 0, coverageUtc = 0;
   bool partial = false;
+  bool metadataTruncated = false;
   QVector<AnalyticsRow> rows;
   QVector<qint64> trend;
   std::array<qint64, AnalyticsHistogramBins> histogram{};
@@ -72,6 +75,10 @@ public:
   size_t recordBytes() const { return data.records.size() * sizeof(AnalyticsRecord); }
   int maximumRecords = 250000;
   size_t maximumBytes = 64 * 1024 * 1024;
+  // Current configuration metadata is retained in full. Removed channels have
+  // a separate count/byte budget and expire after one day.
+  int maximumRetiredChannels = 1000;
+  size_t maximumRetiredBytes = 4 * 1024 * 1024;
   QString configuration;
   quint64 generation() const { return data.generation; }
 
@@ -81,9 +88,12 @@ private:
   // Observations carry the engine's shared identity strings, so the string's
   // buffer address finds the channel without hashing the identity text.
   QHash<const QChar*, int> sharedIndex;
+  qint64 nextMetadataExpiry = 0;
   int channelIndex(const QString& identity);
   void append(int, AnalyticsRecord);
   void invalidate(int, qint64, qint64);
+  void trimRecords(qint64);
+  void compactChannels(qint64);
 };
 QString analyticsSuppression(int flags);
 QStringList analyticsHistogramLabels();

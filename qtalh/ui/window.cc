@@ -1624,8 +1624,8 @@ void Window::replace(Document d, bool snapshot) {
     selectedPath.prepend(qMakePair(n->group, ordinal));
   }
   if (snapshot) {
-    undo.push_back(writeConfig(doc));
     redo.clear();
+    rememberEdit(undo, writeConfig(doc));
     modified = true;
   }
   // These tools retain raw node pointers. WA_DeleteOnClose defers destruction
@@ -1793,11 +1793,35 @@ void Window::addNode(bool group, const QString& name) {
   d.filename = doc.filename;
   replace(std::move(d));
 }
+void Window::rememberEdit(QStringList& stack, QString snapshot) {
+  constexpr qint64 maximumBytes = 32 * 1024 * 1024;
+  constexpr int maximumSnapshots = 100;
+  auto bytes = [](const QString& s) { return qint64(s.capacity()) * 2 + 128; };
+  // A single oversized snapshot cannot fit; discard history rather than keep
+  // an apparently adjacent redo step which skips this configuration.
+  if (bytes(snapshot) > maximumBytes) {
+    undo.clear(); redo.clear();
+    return;
+  }
+  stack.push_back(std::move(snapshot));
+  qint64 total = 0;
+  for (const auto& s : undo) total += bytes(s);
+  for (const auto& s : redo) total += bytes(s);
+  while (undo.size() + redo.size() > maximumSnapshots || total > maximumBytes) {
+    // Prefer the oldest past state; keep the just-added snapshot so the most
+    // recent undo/redo can still be reversed when older history is evicted.
+    auto& oldest = !undo.isEmpty() &&
+        (&stack != &undo || undo.size() > 1 || redo.isEmpty()) ? undo : redo;
+    total -= bytes(oldest.front());
+    oldest.removeFirst();
+  }
+}
 void Window::undoEdit() {
   if (undo.isEmpty())
     return;
-  redo.push_back(writeConfig(doc));
-  auto d = parseConfig(undo.takeLast());
+  auto previous = undo.takeLast();
+  rememberEdit(redo, writeConfig(doc));
+  auto d = parseConfig(previous);
   d.filename = doc.filename;
   replace(std::move(d), false);
   modified = true;
@@ -1806,8 +1830,9 @@ void Window::undoEdit() {
 void Window::redoEdit() {
   if (redo.isEmpty())
     return;
-  undo.push_back(writeConfig(doc));
-  auto d = parseConfig(redo.takeLast());
+  auto next = redo.takeLast();
+  rememberEdit(undo, writeConfig(doc));
+  auto d = parseConfig(next);
   d.filename = doc.filename;
   replace(std::move(d), false);
   modified = true;
@@ -2615,7 +2640,7 @@ void Window::beepSeverity(bool global) {
       int previous = global ? doc.beepSeverity : engine->state(n).beepThreshold;
       if (severity == previous) return;
       if (options.editor) {
-        undo.push_back(writeConfig(doc)); redo.clear(); modified = true;
+        redo.clear(); rememberEdit(undo, writeConfig(doc)); modified = true;
       }
       // Global changes retain the deferred audit gap documented at the ALH
       // Beep Severity menu; per-node changes are audited by Engine::setBeep.

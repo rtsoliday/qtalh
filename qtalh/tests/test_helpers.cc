@@ -194,6 +194,32 @@ struct RpcServer {
 class HelperTests : public QObject {
   Q_OBJECT
 private slots:
+  void boundedLogIdentityCache() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    auto active = std::make_shared<int>(1);
+    QFile live(dir.filePath("live"));
+    QVERIFY(live.open(QIODevice::ReadWrite));
+    const auto liveKey = logIdentity::identity(live);
+    logIdentity::remember(live, live.fileName(), active);
+    QByteArray firstClosed;
+    for (int i = 0; i < logIdentity::ClosedLocationLimit + 20; ++i) {
+      QFile file(dir.filePath(QString::number(i)));
+      QVERIFY(file.open(QIODevice::ReadWrite));
+      if (!i) firstClosed = logIdentity::identity(file);
+      logIdentity::remember(file, file.fileName(), std::make_shared<int>(i));
+    }
+    logIdentity::prune();
+    QMutexLocker guard(&logIdentity::mutex);
+    int closed = 0;
+    for (const auto& lifetime : logIdentity::liveLocations)
+      if (lifetime.expired()) ++closed;
+    QVERIFY(closed <= logIdentity::ClosedLocationLimit);
+    QVERIFY(logIdentity::locations.contains(liveKey));
+    QVERIFY(!logIdentity::locations.contains(firstClosed));
+    QCOMPARE(logIdentity::locations.size(), logIdentity::liveLocations.size());
+    QCOMPARE(logIdentity::locations.size(), logIdentity::locationOrder.size());
+  }
 #ifdef Q_OS_WIN
   void windowsLockLifetime() {
     QTemporaryDir dir;

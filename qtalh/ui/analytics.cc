@@ -404,6 +404,8 @@ void Window::showAnalytics() {
                        .arg(report->totalActivations)
                        .arg(report->gaps)
                        .arg(report->incomplete);
+    if (report->metadataTruncated)
+      text += "\nPARTIAL SESSION: older removed-channel history was pruned to bound memory.";
     if (report->partial)
       text += "\nPARTIAL DETAIL: rolling history, timelines and chatter available from " +
               utc(report->coverageUtc) + ". Session totals are retained.";

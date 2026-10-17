@@ -107,6 +107,7 @@ void AlarmAnalytics::reset(qint64 now, qint64 utc) {
   data.startedUtc = utc;
   index.clear();
   sharedIndex.clear();
+  nextMetadataExpiry = 0;
 }
 int AlarmAnalytics::channelIndex(const QString& identity) {
   const auto buffer = identity.constData();
@@ -131,9 +132,14 @@ void AlarmAnalytics::append(int i, AnalyticsRecord r) {
     interval(c.totals[r.priorFlags != 0], r.priorSeverity, r.time - r.from);
   point(c.totals[r.flags != 0], r);
   data.records.push_back(r);
-  trim(r.time);
+  // Compaction remaps channels; callers still hold a reference to this channel.
+  trimRecords(r.time);
 }
 void AlarmAnalytics::trim(qint64 now) {
+  trimRecords(now);
+  if (nextMetadataExpiry && now >= nextMetadataExpiry) compactChannels(now);
+}
+void AlarmAnalytics::trimRecords(qint64 now) {
   qint64 cutoff = qMax(data.started, now - AnalyticsDay);
   while (!data.records.empty() &&
          (data.records.front().time < cutoff || recordCount() > maximumRecords ||
@@ -142,6 +148,56 @@ void AlarmAnalytics::trim(qint64 now) {
     data.records.pop_front();
   }
   data.coverage = qMax(data.coverage, cutoff);
+}
+void AlarmAnalytics::compactChannels(qint64 now) {
+  QVector<int> retired;
+  for (int i = 0; i < data.channels.size(); ++i)
+    if (data.channels[i].removed) retired << i;
+  std::sort(retired.begin(), retired.end(), [&](int a, int b) {
+    return data.channels[a].retiredAt > data.channels[b].retiredAt;
+  });
+  QVector<int> remap(data.channels.size(), 0);
+  size_t bytes = 0;
+  int count = 0, removed = 0;
+  nextMetadataExpiry = 0;
+  for (int i : retired) {
+    const auto& c = data.channels[i];
+    size_t cost = sizeof(AnalyticsChannel) + 128;
+    for (const auto& s : {c.identity, c.key, c.path, c.pv}) cost += size_t(s.capacity()) * 2 + 32;
+    for (const auto& s : c.ancestors) cost += size_t(s.capacity()) * 2 + 32;
+    if (c.retiredAt <= now - AnalyticsDay || count >= maximumRetiredChannels ||
+        cost > maximumRetiredBytes - qMin(bytes, maximumRetiredBytes)) {
+      remap[i] = -1;
+      ++removed;
+    } else {
+      ++count; bytes += cost;
+      const auto expiry = c.retiredAt + AnalyticsDay;
+      if (!nextMetadataExpiry || expiry < nextMetadataExpiry) nextMetadataExpiry = expiry;
+    }
+  }
+  if (!removed) return;
+  QVector<AnalyticsChannel> retained;
+  retained.reserve(data.channels.size() - removed);
+  for (int i = 0; i < data.channels.size(); ++i)
+    if (remap[i] != -1) {
+      remap[i] = retained.size();
+      retained << std::move(data.channels[i]);
+    }
+  data.channels = std::move(retained);
+  const auto end = std::remove_if(data.records.begin(), data.records.end(), [&](AnalyticsRecord& r) {
+    // Dropping an entire retired row does not reduce the detail coverage of
+    // retained channels. Report that separate loss through metadataTruncated.
+    if (remap[r.channel] < 0) return true;
+    r.channel = remap[r.channel];
+    return false;
+  });
+  data.records.erase(end, data.records.end());
+  for (auto it = index.begin(); it != index.end();)
+    if (remap[it.value()] < 0) it = index.erase(it);
+    else { it.value() = remap[it.value()]; ++it; }
+  sharedIndex.clear();
+  data.metadataTruncated = true;
+  ++data.generation;
 }
 void AlarmAnalytics::invalidate(int i, qint64 now, qint64 utc) {
   auto& c = data.channels[i];
@@ -170,8 +226,10 @@ void AlarmAnalytics::gap(qint64 now, qint64 utc) {
 void AlarmAnalytics::reconcile(const QVector<ChannelUpdate>& all, qint64 now, qint64 utc) {
   gap(now, utc);
   sharedIndex.clear();
-  for (auto& c : data.channels)
+  for (auto& c : data.channels) {
+    if (!c.removed) c.retiredAt = now;
     c.removed = true;
+  }
   QHash<QString, int> counts;
   for (const auto& s : all)
     ++counts[s.identity];
@@ -183,7 +241,7 @@ void AlarmAnalytics::reconcile(const QVector<ChannelUpdate>& all, qint64 now, qi
     QString key = s.identity;
     bool ambiguous = counts[key] != 1;
     int i = index.value(key, -1);
-    if (i >= 0 && ambiguous) {
+    if (i >= 0 && data.channels[i].ambiguous != ambiguous) {
       data.channels[i].removed = true;
       index.remove(key);
       i = -1;
@@ -200,8 +258,7 @@ void AlarmAnalytics::reconcile(const QVector<ChannelUpdate>& all, qint64 now, qi
       c.lastUtc = utc;
       i = data.channels.size();
       data.channels << c;
-      if (!ambiguous)
-        index[key] = i;
+      index[key] = i;
     }
     auto& c = data.channels[i];
     c.removed = false;
@@ -210,7 +267,8 @@ void AlarmAnalytics::reconcile(const QVector<ChannelUpdate>& all, qint64 now, qi
     c.flags = flags(s);
     c.ackUnknown = c.standingUnknown = true;
   }
-  trim(now);
+  compactChannels(now);
+  trimRecords(now);
 }
 void AlarmAnalytics::observe(const AlarmObservation& o, qint64 now, qint64 utc) {
   const auto& s = o.after;
@@ -290,6 +348,7 @@ AnalyticsReport AlarmAnalytics::query(const AnalyticsSnapshot& s, const Analytic
   out.to = s.now;
   out.coverage = qMax(out.from, s.coverage);
   out.partial = out.coverage > out.from;
+  out.metadataTruncated = s.metadataTruncated;
   out.toUtc = s.nowUtc;
   out.fromUtc = s.startedUtc + (out.from - s.started);
   out.coverageUtc = s.startedUtc + (out.coverage - s.started);
@@ -373,7 +432,8 @@ QByteArray analyticsCsv(const AnalyticsReport& r, int tab, bool chart) {
   line({"QtALH session analytics", "configuration", r.configuration, "session", r.session});
   line({"requested_from_utc", stamp(r.fromUtc), "to_utc", stamp(r.toUtc),
         "detail_coverage_from_utc", stamp(r.coverageUtc), "partial_detail",
-        r.partial ? "true" : "false"});
+        r.partial ? "true" : "false", "removed_channel_history_pruned",
+        r.metadataTruncated ? "true" : "false"});
   line({"scope", r.query.scope, "search", r.query.search, "suppression",
         QString::number(r.query.suppression), "chatter_count",
         QString::number(r.query.chatterCount), "chatter_window_seconds",

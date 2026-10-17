@@ -2,6 +2,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QList>
 #include <QMutex>
 #include <QMutexLocker>
 #include <memory>
@@ -54,6 +55,23 @@ inline QByteArray revision(QFile& file) {
 inline QMutex mutex;
 inline QHash<QByteArray, QString> locations;
 inline QHash<QByteArray, std::weak_ptr<void>> liveLocations;
+inline QList<QByteArray> locationOrder;
+inline constexpr int ClosedLocationLimit = 256;
+// Keep every active writer and a small recent cache for filesystems without
+// persistent locators. Expired weak pointers must not retain all past writers.
+inline void pruneLocked() {
+  int closed = 0;
+  for (int i = locationOrder.size() - 1; i >= 0; --i)
+    if (liveLocations.value(locationOrder[i]).expired() && ++closed > ClosedLocationLimit) {
+      locations.remove(locationOrder[i]);
+      liveLocations.remove(locationOrder[i]);
+      locationOrder.removeAt(i);
+    }
+}
+inline void prune() {
+  QMutexLocker guard(&mutex);
+  pruneLocked();
+}
 inline constexpr char attribute[] = "user.qtalh.checkpoint";
 inline QByteArray readLocation(QFile& file) {
   QByteArray bytes(8192, 0);
@@ -144,6 +162,9 @@ inline void remember(QFile& file, const QString& path, const std::shared_ptr<voi
     QMutexLocker guard(&mutex);
     locations.insert(key, path);
     liveLocations.insert(key, lifetime);
+    locationOrder.removeAll(key);
+    locationOrder.append(key);
+    pruneLocked();
   }
   // Persist once per writer, not per alarm. The identity-qualified locator
   // survives a rename and can also be used by readers in other processes.

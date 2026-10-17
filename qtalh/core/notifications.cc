@@ -294,6 +294,14 @@ void NotificationPolicy::configure(const NotificationSettings& s, const QString&
       it = current.erase(it);
     else
       ++it;
+  for (auto it = cooldown.begin(); it != cooldown.end();)
+    if (!keep.contains(it.key())) it = cooldown.erase(it);
+    else ++it;
+  QSet<QString> destinations;
+  for (const auto& d : s.destinations) destinations.insert(d.id);
+  for (auto it = destinationNext.begin(); it != destinationNext.end();)
+    if (!destinations.contains(it.key())) it = destinationNext.erase(it);
+    else ++it;
   settings_ = s;
   configuration_ = configuration;
   matches.clear();
@@ -374,6 +382,10 @@ void NotificationPolicy::reconcile(const QVector<ChannelUpdate>& all) {
   for (const auto& s : all)
     if (counts[s.identity] == 1)
       channels[s.identity] = s;
+  for (auto& deadlines : cooldown)
+    for (auto it = deadlines.begin(); it != deadlines.end();)
+      if (!channels.contains(it.key().first)) it = deadlines.erase(it);
+      else ++it;
   for (auto it = episodes.begin(); it != episodes.end(); ++it) {
     if (!channels.contains(it->state.identity))
       end(*it, false);
@@ -384,6 +396,7 @@ void NotificationPolicy::reconcile(const QVector<ChannelUpdate>& all) {
   }
 }
 void NotificationPolicy::tick(qint64 now, int queueLimit) {
+  pruneDeadlines(now);
   if (!enabled_)
     return;
   struct Group {
@@ -402,7 +415,9 @@ void NotificationPolicy::tick(qint64 now, int queueLimit) {
       if (resolution ? (e.resolutionDone.contains(dest) || e.resolutionQueued.contains(dest))
                      : (e.done.contains(t) || e.queued.contains(t)))
         return;
-      if (!resolution && cooldown.value(token(token(r->id, e.state.identity), t), 0) > now)
+      const auto deadlines = cooldown.constFind(r->id);
+      if (!resolution && deadlines != cooldown.cend() &&
+          deadlines->value(qMakePair(e.state.identity, t), 0) > now)
         return;
       QString gkey =
           token(token(token(r->id, QString::number(delay).rightJustified(12, '0')), stage), dest);
@@ -545,14 +560,35 @@ bool NotificationPolicy::take(NotificationEnvelope& e, qint64 now) {
 }
 void NotificationPolicy::attempted(const NotificationEnvelope& e, qint64 now) {
   destinationNext[e.destination] = now + 10000;
+  if (!nextExpiry || now + 10000 < nextExpiry) nextExpiry = now + 10000;
   if (e.attempts > 1 || e.kind == "resolution")
     return;
   auto r = subscription(e.subscription);
   if (!r)
     return;
   for (const auto& a : e.alarms)
-    cooldown[token(token(e.subscription, a.state.identity), token(e.stage, e.destination))] =
+    cooldown[e.subscription][qMakePair(a.state.identity, token(e.stage, e.destination))] =
         now + qint64(r->cooldownSeconds) * 1000;
+  const auto until = now + qint64(r->cooldownSeconds) * 1000;
+  if (!nextExpiry || until < nextExpiry) nextExpiry = until;
+}
+void NotificationPolicy::pruneDeadlines(qint64 now) {
+  if (nextExpiry && now < nextExpiry) return;
+  nextExpiry = 0;
+  auto prune = [&](auto& deadlines) {
+    for (auto it = deadlines.begin(); it != deadlines.end();)
+      if (it.value() <= now) it = deadlines.erase(it);
+      else {
+        if (!nextExpiry || it.value() < nextExpiry) nextExpiry = it.value();
+        ++it;
+      }
+  };
+  prune(destinationNext);
+  for (auto it = cooldown.begin(); it != cooldown.end();) {
+    prune(it.value());
+    if (it->isEmpty()) it = cooldown.erase(it);
+    else ++it;
+  }
 }
 void NotificationPolicy::completed(const NotificationEnvelope& e, bool accepted) {
   for (const auto& a : e.alarms) {

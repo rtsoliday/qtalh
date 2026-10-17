@@ -43,13 +43,28 @@ struct PvAccess::Inbox {
   };
   std::mutex lock;
   PvAccess* owner = nullptr;
-  std::vector<Update> updates;
-  bool scheduled = false;
+  std::deque<Update> updates;
+  size_t bytes = 0;
+  bool scheduled = false, overflow = false;
+  static size_t cost(const Update& u) {
+    return sizeof(Update) + 2 * (size_t(u.message.capacity()) + size_t(u.sample.text.capacity()) +
+                                size_t(u.sample.alarmMessage.capacity()));
+  }
   void post(Update u) {
     std::lock_guard<std::mutex> guard(lock);
     if (!owner)
       return;
-    updates.push_back(std::move(u));
+    if (!overflow) {
+      const auto size = cost(u);
+      if (updates.size() >= MaximumPendingUpdates || size > MaximumPendingUpdateBytes - bytes) {
+        // Lost data/control events require a fresh subscription/operation, not
+        // silent latest-value coalescing of alarm transitions.
+        updates.clear(); bytes = 0; overflow = true;
+      } else {
+        bytes += size;
+        updates.push_back(std::move(u));
+      }
+    }
     if (!scheduled) {
       scheduled = true;
       QMetaObject::invokeMethod(owner, [o = owner] { o->drain(); }, Qt::QueuedConnection);
@@ -331,6 +346,19 @@ PvAccess::~PvAccess() {
   clear();
   provider.reset();
 }
+size_t PvAccess::pendingUpdateCount() const {
+  std::lock_guard<std::mutex> guard(inbox->lock);
+  return inbox->updates.size();
+}
+size_t PvAccess::pendingUpdateBytes() const {
+  std::lock_guard<std::mutex> guard(inbox->lock);
+  return inbox->bytes;
+}
+size_t PvAccess::pendingWriteCount(const QString& name) const {
+  size_t n = 0;
+  for (auto c : channelsByName.value(name)) n += c->puts.size();
+  return n;
+}
 void PvAccess::report(const QString& message) {
   if (error)
     error(message);
@@ -378,6 +406,12 @@ PvAccess::Channel* PvAccess::add(const QString& name) {
   channelsById.insert(c->id, c);
   channelsByName[name].push_back(c);
   noteDeadline(c);
+  createChannel(c);
+  return channelsById.value(id);
+}
+void PvAccess::createChannel(Channel* c) {
+  const auto id = c->id;
+  const auto name = c->name;
   if (connectProvider() && (c = channelsById.value(id))) {
     try {
       c->ops->channelRequester = std::make_shared<ChannelRequester>(inbox, c->id);
@@ -387,7 +421,6 @@ PvAccess::Channel* PvAccess::add(const QString& name) {
       report("Create " + name + ": " + e.what());
     }
   }
-  return channelsById.value(id);
 }
 void PvAccess::subscribe(Channel* c) {
   auto& ops = *c->ops;
@@ -408,11 +441,14 @@ void PvAccess::ensurePut(Channel* c) {
   auto& ops = *c->ops;
   if (!ops.channel || ops.put)
     return;
+  c->putDeadline = monotonicNow() + qMax(1, writeTimeoutMs);
+  noteDeadline(c);
   try {
     ops.putSerial = ++nextId;
     ops.putRequester = std::make_shared<PutRequester>(inbox, c->id, ops.putSerial);
     ops.put = ops.channel->createChannelPut(ops.putRequester, request("field(value)"));
   } catch (const std::exception& e) {
+    c->putDeadline = 0;
     report("Write " + c->name + ": " + e.what());
   }
 }
@@ -421,8 +457,9 @@ void PvAccess::sendPut(Channel* c) {
   const auto owned = c->ops;
   auto& ops = *owned;
   while (c->connected && !c->putBusy && !c->puts.empty() && ops.putReady && ops.put) {
-    const double v = c->puts.front();
+    const double v = c->puts.front().value;
     c->puts.pop_front();
+    c->putOverflow = false;
     try {
       auto data = pvd::getPVDataCreate()->createPVStructure(ops.putStructure);
       pvd::BitSet::shared_pointer bits(new pvd::BitSet);
@@ -444,9 +481,12 @@ void PvAccess::sendPut(Channel* c) {
       }
       debugLog(options.debug, "PVA", QString("write %1 value=%2").arg(c->name).arg(v, 0, 'g', 17));
       c->putBusy = true;
+      c->putDeadline = monotonicNow() + qMax(1, writeTimeoutMs);
+      noteDeadline(c);
       ops.put->put(data, bits);
     } catch (const std::exception& e) {
       c->putBusy = false;
+      c->putDeadline = 0;
       report("Write " + c->name + ": " + e.what());
       c = channelsById.value(id);
       if (!c) return;
@@ -593,7 +633,19 @@ bool PvAccess::put(const QString& n, double v, WriteKind kind) {
       return false;
     if (!c->ops->put)
       return false;
-    c->puts.push_back(v);
+    if (!c->puts.empty() && c->puts.back().kind == kind &&
+        (kind == WriteKind::Severity || kind == WriteKind::Heartbeat)) {
+      c->puts.back().value = v;
+    } else {
+      if (c->puts.size() >= MaximumPendingWrites) {
+        if (!c->putOverflow) {
+          c->putOverflow = true;
+          report("Write " + n + ": pending write limit reached; write rejected");
+        }
+        return false;
+      }
+      c->puts.push_back({v, kind});
+    }
     sendPut(c);
     if (kind == WriteKind::Severity)
       pendingSeverity.remove(n);
@@ -658,13 +710,19 @@ void PvAccess::clear() {
   channels.clear();
   pendingSeverity.clear();
   changedRecords.clear();
+  restarting.clear();
+  {
+    std::lock_guard<std::mutex> guard(inbox->lock);
+    inbox->updates.clear(); inbox->bytes = 0; inbox->overflow = false;
+  }
   // Acknowledgement state outlives monitors, as an IOC record's ACKS does.
 }
 void PvAccess::noteDeadline(const Channel* c) {
-  if (c->cancelled || !c->connectionDeadline ||
-      (nextDeadline && c->connectionDeadline >= nextDeadline))
+  qint64 deadline = c->cancelled ? 0 : c->connectionDeadline;
+  if (c->putDeadline && (!deadline || c->putDeadline < deadline)) deadline = c->putDeadline;
+  if (!deadline || (nextDeadline && deadline >= nextDeadline))
     return;
-  nextDeadline = c->connectionDeadline;
+  nextDeadline = deadline;
   deadlineTimer.start(int(qBound(qint64(0), nextDeadline - monotonicNow(), qint64(1000))));
 }
 void PvAccess::checkDeadlines() {
@@ -676,6 +734,17 @@ void PvAccess::checkDeadlines() {
   nextDeadline = 0;
   // A PV that never existed sends no disconnect; report it after one second.
   QVector<quint64> expired;
+  QVector<quint64> writes;
+  for (auto& c : channels)
+    if (c->putDeadline && now >= c->putDeadline) writes << c->id;
+  for (auto id : writes)
+    if (auto c = channelsById.value(id)) {
+      c->putDeadline = 0;
+      c->putBusy = c->putOverflow = false;
+      c->puts.clear();
+      c->ops->stopPut();
+      report("Write " + c->name + ": operation timed out; pending writes cancelled (acceptance uncertain)");
+    }
   for (auto& c : channels)
     if (!c->cancelled && c->connectionDeadline && now >= c->connectionDeadline) {
       c->connectionDeadline = 0;
@@ -735,6 +804,8 @@ void PvAccess::disconnected(Channel* c) {
   c->ops->stopPut();
   const bool writing = c->putBusy || !c->puts.empty();
   c->putBusy = false;
+  c->putDeadline = 0;
+  c->putOverflow = false;
   c->puts.clear();
   const auto id = c->id;
   if (writing) {
@@ -842,13 +913,75 @@ void PvAccess::finishRead(quint64 id) {
   if (owned->done)
     owned->done(owned->values);
 }
-void PvAccess::drain() {
-  std::vector<Inbox::Update> updates;
+void PvAccess::recoverInbox() {
   {
     std::lock_guard<std::mutex> guard(inbox->lock);
-    updates.swap(inbox->updates);
-    inbox->scheduled = false;
+    inbox->updates.clear(); inbox->bytes = 0; inbox->overflow = false;
   }
+  report("PVA update buffer overflow: observations lost; requesting fresh channel state");
+  QVector<quint64> readIds;
+  for (const auto& r : reads) readIds << r->id;
+  for (auto id : readIds) finishRead(id);
+  QVector<quint64> ids;
+  restarting.clear();
+  for (const auto& c : channels) ids << c->id;
+  for (auto id : ids) {
+    auto c = channelsById.value(id);
+    if (!c) continue;
+    disconnected(c); // Publish an observation gap before any fresh sample.
+    if (!(c = channelsById.value(id))) continue;
+    c->ops.reset(); // Subsequent callbacks carry an obsolete channel id.
+    c->ops = std::make_shared<Operations>();
+    channelsById.remove(id);
+    c->id = ++nextId;
+    if (c->alarm) {
+      const auto freshId = c->id;
+      c->alarm = [this, freshId](Event event) { deliverAlarm(freshId, std::move(event)); };
+    }
+    c->ops->id = c->id;
+    c->ops->name = c->name;
+    c->haveObservation = false;
+    c->connectionDeadline = 0;
+    channelsById.insert(c->id, c);
+    restarting.push_back(c->id);
+  }
+  if (!restarting.empty() && !restartScheduled) {
+    restartScheduled = true;
+    QTimer::singleShot(100, this, [this] { resumeChannels(); });
+  }
+}
+void PvAccess::resumeChannels() {
+  restartScheduled = false;
+  // Large configurations must not reproduce the overflow by reconnecting all
+  // channels in one GUI turn. Leave time to drain connection/initial events.
+  for (int i = 0; i < 64 && !restarting.empty() && pendingUpdateCount() < 256; ++i) {
+    const auto id = restarting.front();
+    restarting.pop_front();
+    auto c = channelsById.value(id);
+    if (!c) continue;
+    c->connectionDeadline = monotonicNow() + 1000;
+    noteDeadline(c);
+    createChannel(c);
+    if ((c = channelsById.value(id))) subscribe(c);
+  }
+  if (!restarting.empty()) {
+    restartScheduled = true;
+    QTimer::singleShot(10, this, [this] { resumeChannels(); });
+  }
+}
+void PvAccess::drain() {
+  std::vector<Inbox::Update> updates;
+  bool overflow;
+  {
+    std::lock_guard<std::mutex> guard(inbox->lock);
+    overflow = inbox->overflow;
+    for (int i = 0; i < 256 && !inbox->updates.empty(); ++i) {
+      inbox->bytes -= Inbox::cost(inbox->updates.front());
+      updates.push_back(std::move(inbox->updates.front()));
+      inbox->updates.pop_front();
+    }
+  }
+  if (overflow) recoverInbox();
   for (auto& u : updates) {
     if (auto read = readsByItem.value(u.channel)) {
       auto item = std::find_if(read->items.begin(), read->items.end(),
@@ -893,6 +1026,7 @@ void PvAccess::drain() {
         break;
       ops.putReady = u.ok;
       ops.putStructure = u.structure;
+      c->putDeadline = 0;
       if (u.ok)
         sendPut(c);
       else {
@@ -900,6 +1034,7 @@ void PvAccess::drain() {
         // Keeping it would silently accumulate writes behind putReady=false.
         c->puts.clear();
         c->putBusy = false;
+        c->putOverflow = false;
         ops.stopPut();
         report("Write " + c->name + ": " + u.message);
       }
@@ -908,6 +1043,7 @@ void PvAccess::drain() {
       if (u.serial != ops.putSerial)
         break;
       c->putBusy = false;
+      c->putDeadline = 0;
       debugLog(options.debug, "PVA", "write " + c->name + ": " + (u.ok ? "done" : u.message));
       if (!u.ok) {
         report("Write " + c->name + ": " + u.message);
@@ -919,6 +1055,13 @@ void PvAccess::drain() {
     default:
       break;
     }
+  }
+  {
+    std::lock_guard<std::mutex> guard(inbox->lock);
+    if (inbox->updates.empty() && !inbox->overflow)
+      inbox->scheduled = false;
+    else
+      QMetaObject::invokeMethod(this, [this] { drain(); }, Qt::QueuedConnection);
   }
 }
 } // namespace alh

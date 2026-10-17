@@ -38,6 +38,13 @@ public:
   // Seed each record's runtime ACKT from the configuration's transient masks.
   void setInitialAckT(const QString&, bool);
   void configureInitialAckT(const Document&);
+  static constexpr size_t MaximumPendingUpdates = 4096;
+  static constexpr size_t MaximumPendingUpdateBytes = 4 * 1024 * 1024;
+  static constexpr size_t MaximumPendingWrites = 128;
+  int writeTimeoutMs = 30000;
+  size_t pendingUpdateCount() const;
+  size_t pendingUpdateBytes() const;
+  size_t pendingWriteCount(const QString&) const;
 
   // Values extracted on pvAccess threads; delivered on the Qt thread.
   struct Sample {
@@ -56,6 +63,7 @@ private:
     bool cancelled = false, delivered = false;
   };
   struct Channel {
+    struct Write { double value; WriteKind kind; };
     quint64 id = 0;
     QString name;
     const void* tag = nullptr;
@@ -70,7 +78,9 @@ private:
     bool haveLast = false, haveObservation = false;
     std::shared_ptr<Operations> ops;
     bool putBusy = false;
-    std::deque<double> puts;
+    qint64 putDeadline = 0;
+    bool putOverflow = false;
+    std::deque<Write> puts;
   };
   struct Record {
     int status = 0, severity = 0, acks = 0, ackt = 1, alarmStatus = 0;
@@ -97,8 +107,11 @@ private:
   quint64 nextId = 0;
   qint64 nextDeadline = 0;
   QTimer deadlineTimer;
+  std::deque<quint64> restarting;
+  bool restartScheduled = false;
   bool connectProvider();
   Channel* add(const QString&);
+  void createChannel(Channel*);
   void subscribe(Channel*);
   void ensurePut(Channel*);
   void sendPut(Channel*);
@@ -112,6 +125,8 @@ private:
   void deliverAlarm(quint64 id, Event);
   void finishRead(quint64 id);
   void drain();
+  void recoverInbox();
+  void resumeChannels();
   void connected(Channel*);
   void disconnected(Channel*);
   void monitorFailed(Channel*, const QString&);

@@ -2316,6 +2316,30 @@ private slots:
     w->redoEdit();
     QCOMPARE(w->document().root->children.size(), size_t(2));
   }
+  void boundedEditorUndo() {
+    auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\n"), options(true), false);
+    for (int i = 0; i < 115; ++i) w->addNode(false, "pv" + QString::number(i));
+    QCOMPARE(w->document().channels().size(), 115);
+    for (int i = 0; i < 120; ++i) w->undoEdit();
+    QCOMPARE(w->document().channels().size(), 15);
+    for (int i = 0; i < 120; ++i) w->redoEdit();
+    QCOMPARE(w->document().channels().size(), 115);
+  }
+  void editorUndoByteBudget() {
+    auto doc = parseConfig("GROUP NULL root\n");
+    doc.root->directives.push_back({"GUIDANCE_TEXT", QString(2 * 1024 * 1024, 'x')});
+    auto w = std::make_unique<Window>(std::move(doc), options(true), false);
+    for (int i = 0; i < 12; ++i) w->addNode(false, "pv" + QString::number(i));
+    w->undoEdit();
+    QCOMPARE(w->document().channels().size(), 11);
+    w->redoEdit();
+    QCOMPARE(w->document().channels().size(), 12);
+    for (int i = 0; i < 20; ++i) w->undoEdit();
+    const auto retained = w->document().channels().size();
+    QVERIFY(retained >= 4 && retained < 12);
+    for (int i = 0; i < 20; ++i) w->redoEdit();
+    QCOMPARE(w->document().channels().size(), 12);
+  }
   void editorUndoSave() {
     auto w = std::make_unique<Window>(sample(), options(true), false);
     w->show();

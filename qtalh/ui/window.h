@@ -127,6 +127,7 @@ private:
   QMediaPlayer* sound = nullptr;
   Node *selection = nullptr, *selectedGroup = nullptr;
   QStringList undo, redo;
+  void rememberEdit(QStringList&, QString);
   std::shared_ptr<Node> clipboard;
   QAction *undoAction = nullptr, *redoAction = nullptr;
   QPointer<QDialog> historyDialog, shelfListDialog, notificationDialog, analyticsDialog;

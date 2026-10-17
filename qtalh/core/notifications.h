@@ -57,6 +57,11 @@ public:
   void retry(NotificationEnvelope);
   QSet<QString> activeChannels() const;
   int pending() const { return queue.size(); }
+  int retainedDeadlines() const {
+    int n = destinationNext.size();
+    for (const auto& deadlines : cooldown) n += deadlines.size();
+    return n;
+  }
   bool throttled() const { return throttled_; }
   bool destinationReady(const QString& id, qint64 now) const {
     return destinationNext.value(id, 0) <= now;
@@ -78,12 +83,15 @@ private:
   QHash<QString, ChannelUpdate> channels;
   QHash<QString, Episode> episodes;
   QHash<QString, QString> current;
-  QHash<QString, qint64> cooldown, batchDeadline, destinationNext;
+  QHash<QString, QHash<QPair<QString, QString>, qint64>> cooldown; // Subscription, then channel/stage+destination.
+  QHash<QString, qint64> batchDeadline, destinationNext;
+  qint64 nextExpiry = 0;
   QVector<NotificationEnvelope> queue;
   QHash<QString, QVector<QString>> matches;
   const NotificationSubscription* subscription(const QString&) const;
   bool match(const NotificationSubscription&, const ChannelUpdate&) const;
   void end(Episode&, bool resolved);
   void collect();
+  void pruneDeadlines(qint64);
 };
 } // namespace alh

@@ -94,8 +94,13 @@ Rows with no process activity can still show unavailable or ambiguous channels.
 
 Reloading the same saved configuration preserves summaries for uniquely matched
 full hierarchy identities. It interrupts open measurements and waits for fresh
-observations. Removed channels retain their history with a Removed label;
-ambiguous identities are not merged. A failed configuration reload leaves the
+observations. Removed channels retain their history with a Removed label for
+up to 24 hours, subject to a limit of 1,000 removed channels and a 4 MiB metadata
+budget. Current configuration channels are retained in full. Evicting removed
+channels also discards their session totals and detail; a **PARTIAL SESSION**
+notice and the CSV `removed_channel_history_pruned` flag identify this loss.
+Repeated reloads reuse unchanged ambiguous entries; their alarm histories are
+not merged. A failed configuration reload leaves the
 session unchanged. Opening another configuration starts a new session.
 
 **Reset Analytics** clears only analytics and establishes new observation

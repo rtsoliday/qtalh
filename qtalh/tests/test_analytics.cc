@@ -237,6 +237,57 @@ private slots:
     a.reset(8000, 8000);
     QCOMPARE(report(a, 9000).rows.size(), 0);
   }
+  void boundedRetiredMetadata() {
+    AlarmAnalytics a;
+    a.maximumRetiredChannels = 2;
+    auto steady = sample("steady");
+    for (int i = 0; i < 20; ++i) {
+      const auto now = i * 1000;
+      auto changing = sample("pv" + QString::number(i));
+      a.reconcile({steady, changing}, now, now);
+      update(a, steady, now);
+      if (!i) { steady.severity = steady.unack = 2; update(a, steady, now + 1); }
+      update(a, changing, now);
+      changing.severity = changing.unack = 2;
+      update(a, changing, now + 2);
+      const auto snapshot = a.snapshot(now + 3, now + 3);
+      QVERIFY(snapshot.channels.size() <= 4);
+      for (const auto& r : snapshot.records)
+        QVERIFY(r.channel >= 0 && r.channel < snapshot.channels.size());
+    }
+    auto r = report(a, 20000);
+    QVERIFY(r.metadataTruncated);
+    QCOMPARE(r.rows[0].channel.pv, QString("steady"));
+    QCOMPARE(r.rows[0].stats.activations, qint64(1));
+    QCOMPARE(r.rows.last().channel.pv, QString("pv19"));
+    QCOMPARE(r.rows.last().stats.activations, qint64(1));
+    AnalyticsQuery rolling;
+    rolling.rangeMs = AnalyticsDay;
+    QCOMPARE(report(a, 20000, rolling).rows[0].stats.activations, qint64(1));
+    QVERIFY(analyticsCsv(r, 0).contains("\"removed_channel_history_pruned\",\"true\""));
+    a.trim(AnalyticsDay + 20000);
+    QCOMPARE(a.snapshot(AnalyticsDay + 20000, 0).channels.size(), 2);
+    a.maximumRetiredBytes = 0;
+    a.reconcile({steady}, AnalyticsDay + 21000, 0);
+    QCOMPARE(a.snapshot(AnalyticsDay + 21000, 0).channels.size(), 1);
+  }
+  void duplicateReloadDoesNotAccumulateMetadata() {
+    AlarmAnalytics a;
+    auto s = sample();
+    a.reconcile({s, s}, 0, 0);
+    const auto key = a.snapshot(0, 0).channels[0].key;
+    for (int i = 1; i <= 100; ++i) a.reconcile({s, s}, i, i);
+    auto snapshot = a.snapshot(101, 101);
+    QCOMPARE(snapshot.channels.size(), 1);
+    QCOMPARE(snapshot.channels[0].key, key);
+    QVERIFY(snapshot.channels[0].ambiguous);
+    a.reconcile({s}, 102, 102);
+    update(a, sample("pv", 2, 2), 103);
+    auto r = report(a, 104);
+    QCOMPARE(r.rows.size(), 2);
+    QVERIFY(r.rows[0].channel.removed);
+    QVERIFY(!r.rows[1].channel.ambiguous);
+  }
   void scopesAndCsv() {
     AlarmAnalytics a;
     auto s = sample("=unsafe,\"quoted\"");
