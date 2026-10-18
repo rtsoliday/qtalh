@@ -1733,6 +1733,30 @@ private slots:
     QCOMPARE(sequence[1], QString("ack other"));
     QCOMPARE(e.state(n).unack, 2); QCOMPARE(e.state(other).unack, 0);
   }
+  void shelfReturnEndsSilenceCurrent_data() {
+    QTest::addColumn<bool>("expire"); QTest::addColumn<bool>("acknowledged");
+    QTest::newRow("expiry") << true << false;
+    QTest::newRow("unshelve") << false << false;
+    QTest::newRow("acknowledged-expiry") << true << true;
+  }
+  void shelfReturnEndsSilenceCurrent() {
+    // Documented: an audible unacknowledged alarm returning from a shelf ends
+    // Silence Current, like a new alarm; Silence Forever and timed silence remain.
+    QFETCH(bool, expire); QFETCH(bool, acknowledged);
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
+    Engine e(d);
+    qint64 time = 1000; e.now = e.monotonicNow = [&] { return time; };
+    auto n = d.channels()[0];
+    e.event(n, {});
+    e.event(n, {3, 2, 0, 1, {}});
+    if (acknowledged) e.acknowledge(n);
+    e.setSilenceCurrent(true);
+    QCOMPARE(e.shelve(n, 1, "maintenance", "tester"), 1);
+    if (expire) { time = e.state(n).shelf.until; e.tick(); }
+    else e.unshelve(n);
+    QVERIFY(!e.state(n).shelf.until);
+    QCOMPARE(e.silenceCurrent, acknowledged);
+  }
   void shelvingUsernameAttribution() {
     auto doc = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
     Engine engine(doc); qint64 now = 1000; engine.now = engine.monotonicNow = [&] { return now; };

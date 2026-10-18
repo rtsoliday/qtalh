@@ -45,9 +45,11 @@ The channel tooltip also shows who set the current shelf.
   including shelves applied individually.
 
 At expiry, the current alarm presentation returns automatically. A cleared
-transient can reappear if it still requires acknowledgement. Existing silence
-settings and beep thresholds apply. Unshelve a channel before acknowledging it;
-bulk acknowledgement skips shelved channels.
+transient can reappear if it still requires acknowledgement. Beep thresholds,
+**Silence Forever**, and timed silence still apply. If a returning channel has
+an unacknowledged alarm that can sound, it ends **Silence Current**, as a new
+alarm does; unshelving early has the same effect. Unshelve a channel before
+acknowledging it; bulk acknowledgement skips shelved channels.
 
 ## What shelving changes
 

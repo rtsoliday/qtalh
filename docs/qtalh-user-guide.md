@@ -137,9 +137,11 @@ selected group, including shelves originally applied individually. Unshelve a
 channel before acknowledging it; bulk acknowledgement skips shelved channels.
 
 At expiry, current alarm presentation returns automatically. Outstanding
-unacknowledged alarms can sound again, subject to existing thresholds and silence
-settings. A latched transient can reappear even if the PV recovered while
-shelved. Explicit mask changes and acknowledgement by other clients still apply.
+unacknowledged alarms can sound again, subject to beep thresholds, Silence
+Forever, and timed silence. An outstanding alarm that can sound ends Silence
+Current, as a new alarm does; early unshelving has the same effect. A latched
+transient can reappear even if the PV recovered while shelved. Explicit mask
+changes and acknowledgement by other clients still apply.
 If Disable or Cancel remains set, expiry does not override it. Shelving is
 therefore different from **NoAck for One Hour**, which changes acknowledgement
 behavior, and **silencing**, which affects sound without removing alarm counts.
