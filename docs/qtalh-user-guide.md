@@ -447,7 +447,8 @@ when it connects without write access.
 A failed Channel Access alarm read displays `READ / ERROR` and marks the
 observation unavailable until a fresh valid alarm sample arrives. Like a
 disconnection, it is logged and runs ERROR severity commands; it also runs a
-`$STATCOMMAND READ` command. ALH ignored failed alarm reads.
+`$STATCOMMAND READ` command. ALH reported failed alarm reads but kept the
+previous alarm state and ran no commands.
 If connection or access loss is already known, its more specific ERROR status
 is retained.
 In global mode, communication failures have a separate local ERROR acknowledgement.
@@ -701,7 +702,7 @@ preventing file logging. Windows does not build these helpers and rejects
 | Qt modules or build tools missing | Install matching Widgets, Network, PrintSupport, and Multimedia development files; tests also need Qt Test. Use `QT_VERSION=5` or `6` consistently and matching `moc`/`rcc`. |
 | Cannot open a display | Use the native GUI session or a working X11 display. Use `--validate` for a headless syntax check; test targets supply offscreen mode where appropriate. |
 | Channel remains ERROR | Verify the PV name, IOC availability, CA address environment (PVA environment for `pva://` names), and read access. `-debug -noerrorpopup` exposes connection/access diagnostics on stderr. |
-| Acknowledgement or output PV does not change | Check local/global/passive mode and IOC write access. Failed acknowledgements remain visible; manual ACKT changes require an explicit retry. A refused `$ACKPV` stays pending in **View → Runtime Overrides…** until **Retry ACKPV** is clicked. |
+| Acknowledgement or output PV does not change | Check local/global/passive mode and IOC write access. Failed acknowledgements remain visible; manual ACKT changes require an explicit retry. A refused `$ACKPV` stays pending in **View → Runtime Overrides…** until a **Retry ACKPV** submission is accepted, or Cancel or a reload discards it. |
 | "Channel Access Exception" messages | Asynchronous CA errors, such as an IOC rejecting a write or a lost virtual circuit, are reported in the message area and operation log (and as a popup unless `-noerrorpopup`), as in ALH. After 25 reports one "Too many exceptions" notice is shown; later exceptions are printed only. |
 | Cannot open logs or lock files | Create the parent directory and check permissions on the selected files and checkpoint sidecar. A failed log destination change preserves the current destination. `Cannot lock logging lock file` means the lock file opened but its filesystem rejected POSIX locks (for example, NFS without a lock service); the instance stays Slave, so place the `-Lfile` lock on a filesystem with lock support. |
 | Sound fails | Check the audio path, Qt Multimedia plugins/backend, output device, Silence Forever, and beep threshold. Muted fixture playback verifies decoding, not speaker output. |

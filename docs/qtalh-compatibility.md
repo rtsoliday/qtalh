@@ -143,7 +143,7 @@ lowercase severities, which ALH ignores. `$STATCOMMAND` triggers must match a
 status name exactly; ALH's prefix match runs `READ_ACCESS` and `WRITE_ACCESS`
 commands on `READ` and `WRITE` status instead. Use the uppercase severity and
 status names in configurations shared with ALH. A `READ` command also runs on a failed
-Channel Access alarm read (see Communication errors), which ALH ignores.
+Channel Access alarm read (see Communication errors); ALH runs no command for it.
 
 Failed severity-output writes retain only the latest requested value for each PV.
 They retry when the PV connects or regains write access, and are discarded when
@@ -817,7 +817,9 @@ or ACKPV writes. Group acknowledgement continues with other channels. A sent wri
 not confirmed by the IOC before these side effects. If the IOC rejects it (for example
 `DISP=1` or an access-security change), ACKPV and the success records still occur, as
 in ALH, and the rejection is reported as a Channel Access exception in the
-message area and operation log (and a popup unless `-noerrorpopup`). The alarm stays
+message area and operation log (and a popup unless `-noerrorpopup`). After 25
+exceptions in one Channel Access context, one "Too many exceptions" notice is
+shown and later rejections are printed only on standard error. The alarm stays
 unacknowledged until the IOC monitor reports ACKS cleared.
 
 If ACKS is submitted but the separate ACKPV submission is rejected, QtALH now
@@ -833,8 +835,9 @@ Read-access loss, disconnection, and Cancel invalidate cached CA alarm events. R
 waits for fresh monitored data, avoiding replay of stale alarms and their commands or
 severity outputs. Write-only access loss retains readable, current observations.
 
-A failed CA alarm monitor callback also invalidates the observation. ALH only prints
-"alCaNewAlarmEvent failed" and keeps the previous alarm state. QtALH reports the CA
+A failed CA alarm monitor callback also invalidates the observation. ALH reports
+"alCaNewAlarmEvent failed" in its operation log and warning popup but keeps the
+previous alarm state. QtALH reports the CA
 error in the message area and raises `<READ,ERROR>`, or the more specific
 NOT_CONNECTED, NO_READ_ACCESS or NO_WRITE_ACCESS status when that loss is already
 known. Like other communication errors, this writes an alarm-log record, runs
@@ -908,10 +911,12 @@ mask, so the latest accepted request wins. Other rows retain their displayed
 feedback until their monitors confirm the setting; failed manual submissions
 still need an explicit retry. Only a request that names NoAckT is compared
 this way: Modify Mask NoAckT, a changed T box in Force Mask, or a Force PV.
-Requests for other bits (Add, Disable, NoAck, NoLog, the NoAck timer, Reset
-and Restore Selected) keep each row's own T bit and write ACKT only when that
-row's bit changes, as ALH's alChangeChanMask does, so a cancelled or not yet
-updated duplicate row cannot write its stale NoAckT. An accepted request yields
+Requests for other bits (Add, Disable, NoAck, NoLog, the NoAck timer, Reset,
+and Restore Selected of a Mask or NoAck row) keep each row's own T bit and
+write ACKT only when that row's bit changes, as ALH's alChangeChanMask does, so
+a cancelled or not yet updated duplicate row cannot write its stale NoAckT.
+Restoring a disabled Force PV re-enables it, and its mask is compared with the
+record like any Force PV. An accepted request yields
 to a later different value from a row that has already confirmed it, such as
 a change by another client or an IOC reboot.
 

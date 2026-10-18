@@ -82,7 +82,10 @@ lines, so imports keep every line within that limit: longer guidance lines are
 wrapped, longer descriptions are truncated, and longer commands and display URLs
 are kept as guidance text, each with a conversion note. A display URL that
 contains `"`, `$`, `` ` `` or `\` is also kept as guidance text with a note,
-because ALH passes guidance URLs to `/bin/sh` inside double quotes. Delay and count must be nonnegative integers; counts are limited
+because ALH passes guidance URLs to `/bin/sh` inside double quotes. Names
+cannot be shortened, so an import whose `GROUP` or `CHANNEL` line (parent,
+component or PV name) would still exceed the limit stops with an error; shorten
+the Phoebus component or PV name. Delay and count must be nonnegative integers; counts are limited
 to ALH's maximum of 1,000,000.
 
 Command text is copied unchanged, but the two systems run it differently.

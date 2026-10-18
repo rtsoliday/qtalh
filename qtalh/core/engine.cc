@@ -845,8 +845,8 @@ bool Engine::applyMask(Node* n, Mask requested, bool automatic, Node* forceSourc
       }
     }
     // Intentional ALH compatibility: enabling local NoAckT does not erase an
-    // already latched transient. It still needs explicit acknowledgement;
-    // future alarm transitions use the new setting.
+    // already latched transient. It stays until acknowledged or until a later
+    // alarm transition, which uses the new setting, replaces it.
     s.mask[AckT] = mask[AckT];
     if (mask[Cancel] && !old.mask[Cancel] && pv)
       pv->cancel(c->name, c);
