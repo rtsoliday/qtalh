@@ -902,6 +902,107 @@ private slots:
     QVERIFY(driver.put(prefix + "permit", 1));
     QTRY_COMPARE(severity, 0);
   }
+  // A failed alarm subscription event must keep a known, more specific
+  // access/connection diagnosis (cabefe4). The IOC itself sends such a failed
+  // event (ECA_NORDACCESS) after read access is denied, so exercise both the
+  // real server ordering and a deterministic injected failure.
+  void deniedReadKeepsNoReadAccess_data() {
+    QTest::addColumn<bool>("global");
+    QTest::addColumn<bool>("deniedAtStart");
+    QTest::newRow("local-revoked") << false << false;
+    QTest::newRow("global-revoked") << true << false;
+    QTest::newRow("local-denied-at-start") << false << true;
+    QTest::newRow("global-denied-at-start") << true << true;
+  }
+  void deniedReadKeepsNoReadAccess() {
+    QFETCH(bool, global); QFETCH(bool, deniedAtStart);
+    const auto name = prefix + "readAlarm";
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root " + name + "\n");
+    EngineOptions options; options.global = global;
+    ChannelAccess ca(options); Engine e(d, options, &ca); auto n = d.channels()[0];
+    ChannelAccess driver; driver.prepare(prefix + "readPermit");
+    double control = -1;
+    driver.number(prefix + "readAlarmSet", [&](double v) { control = v; });
+    QTRY_VERIFY(driver.put(prefix + "readPermit", 1));
+    QTRY_VERIFY(driver.put(prefix + "readAlarmSet", 0));
+    QTRY_COMPARE(control, 0.0);
+    QStringList statuses;
+    auto observation = e.observe([&](const AlarmObservation& o) {
+      statuses << statusName(o.after.status);
+    });
+    if (deniedAtStart) {
+      QVERIFY(driver.put(prefix + "readPermit", 0));
+      QTest::qWait(200); // The access-security input has been processed.
+      e.start();
+    } else {
+      e.start();
+      QTRY_VERIFY(e.state(n).initialized);
+      QTRY_COMPARE(e.state(n).severity, 0);
+      QTest::qWait(100);
+      QVERIFY(driver.put(prefix + "readPermit", 0));
+    }
+    QTRY_COMPARE(e.state(n).severity, 4);
+    // Let the IOC's denied/failed subscription event arrive after the rights callback.
+    QTest::qWait(1500);
+    const auto finalStatus = statusName(e.state(n).status);
+    QVERIFY(driver.put(prefix + "readPermit", 1));
+    QCOMPARE(finalStatus, QString("NO_READ_ACCESS"));
+    QVERIFY2(!statuses.contains("READ"), qPrintable(statuses.join(',')));
+    QTRY_COMPARE(e.state(n).severity, 0);
+  }
+  void injectedFailureKeepsAccessDiagnosis_data() {
+    QTest::addColumn<QString>("record");
+    QTest::addColumn<bool>("global");
+    QTest::addColumn<bool>("passive");
+    QTest::addColumn<int>("failure");
+    QTest::addColumn<QString>("expected");
+    QTest::newRow("no-read-local") << "readAlarm" << false << false << int(ECA_NORDACCESS) << "NO_READ_ACCESS";
+    QTest::newRow("no-read-global") << "readAlarm" << true << false << int(ECA_NORDACCESS) << "NO_READ_ACCESS";
+    QTest::newRow("no-write-global") << "protected" << true << false << int(ECA_GETFAIL) << "NO_WRITE_ACCESS";
+    QTest::newRow("no-write-passive-global") << "protected" << true << true << int(ECA_GETFAIL) << "READ";
+    QTest::newRow("no-write-local") << "protected" << false << false << int(ECA_GETFAIL) << "READ";
+    QTest::newRow("never-connected") << "missing_failed_monitor" << false << false << int(ECA_GETFAIL) << "NOT_CONNECTED";
+  }
+  void injectedFailureKeepsAccessDiagnosis() {
+    QFETCH(QString, record); QFETCH(bool, global); QFETCH(bool, passive);
+    QFETCH(int, failure); QFETCH(QString, expected);
+    const auto name = prefix + record;
+    const bool read = record == "readAlarm", write = record == "protected";
+    ChannelAccess driver, observer;
+    driver.prepare(prefix + "readPermit"); driver.prepare(prefix + "permit");
+    driver.prepare(prefix + "readAlarmSet");
+    QTRY_VERIFY(driver.put(prefix + "readPermit", 1));
+    QTRY_VERIFY(driver.put(prefix + "permit", 1));
+    if (read) QTRY_VERIFY(driver.put(prefix + "readAlarmSet", 0));
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root " + name + "\n");
+    EngineOptions options; options.global = global; options.passive = passive;
+    ChannelAccess ca(options); Engine e(d, options, &ca); auto n = d.channels()[0];
+    e.start();
+    if (read) {
+      QTRY_COMPARE(e.state(n).severity, 0);
+      QTest::qWait(100);
+      QVERIFY(driver.put(prefix + "readPermit", 0));
+      QTRY_COMPARE(statusName(e.state(n).status), QString("NO_READ_ACCESS"));
+    } else if (write) {
+      QTRY_COMPARE(e.state(n).severity, 0);
+      observer.prepare(name);
+      QTRY_VERIFY(observer.canWrite(name));
+      QVERIFY(driver.put(prefix + "permit", 0));
+      QTRY_VERIFY(!observer.canWrite(name));
+      if (global && !passive)
+        QTRY_COMPARE(statusName(e.state(n).status), QString("NO_WRITE_ACCESS"));
+    } else {
+      QTRY_COMPARE_WITH_TIMEOUT(statusName(e.state(n).status), QString("NOT_CONNECTED"), 5000);
+    }
+    QTest::qWait(300); // Drain server-originated access and monitor events.
+    QVERIFY(ChannelAccessTestAccess::failAlarm(ca, name, failure));
+    const auto status = statusName(e.state(n).status);
+    const auto severity = e.state(n).severity;
+    QVERIFY(driver.put(prefix + "readPermit", 1));
+    QVERIFY(driver.put(prefix + "permit", 1));
+    QCOMPARE(severity, 4);
+    QCOMPARE(status, expected);
+  }
   void changingAccessRights() {
     ChannelAccess ca({true, false, false, false});
     ca.prepare(prefix + "permit");
