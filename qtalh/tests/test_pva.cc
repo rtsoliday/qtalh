@@ -18,32 +18,50 @@
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
+#include <alarm.h>
+#include <atomic>
+#include <chrono>
 #include <cmath>
+#include <limits>
+#include <thread>
 namespace pva = epics::pvAccess;
 namespace pvd = epics::pvData;
 using namespace alh;
 namespace {
-pvd::StructureConstPtr scalarType() {
-  return pvd::getFieldCreate()->createFieldBuilder()
-      ->add("value", pvd::pvDouble)
-      ->addNestedStructure("alarm")
-        ->add("severity", pvd::pvInt)->add("status", pvd::pvInt)
-        ->add("message", pvd::pvString)->endNested()
-      ->createStructure();
+// A "value" field followed by the alarm fields of an NTScalar.
+pvd::StructureConstPtr withAlarm(pvd::FieldBuilderPtr value, bool display = false) {
+  value = value->addNestedStructure("alarm")
+      ->add("severity", pvd::pvInt)->add("status", pvd::pvInt)
+      ->add("message", pvd::pvString)->endNested();
+  if (display)
+    value = value->addNestedStructure("display")->add("precision", pvd::pvInt)->endNested();
+  return value->createStructure();
 }
-pvd::StructureConstPtr stringType() {
-  return pvd::getFieldCreate()->createFieldBuilder()
-      ->add("value", pvd::pvString)
-      ->addNestedStructure("alarm")
-        ->add("severity", pvd::pvInt)->add("status", pvd::pvInt)
-        ->add("message", pvd::pvString)->endNested()
-      ->createStructure();
+pvd::StructureConstPtr scalarType(pvd::ScalarType type = pvd::pvDouble, bool display = false) {
+  return withAlarm(pvd::getFieldCreate()->createFieldBuilder()->add("value", type), display);
+}
+pvd::StructureConstPtr arrayType(pvd::ScalarType type) {
+  return withAlarm(pvd::getFieldCreate()->createFieldBuilder()->addArray("value", type));
+}
+pvd::StructureConstPtr enumType() {
+  return withAlarm(pvd::getFieldCreate()->createFieldBuilder()
+      ->addNestedStructure("value")->add("index", pvd::pvInt)->addArray("choices", pvd::pvString)
+      ->endNested());
+}
+pvd::PVStructurePtr create(const pvd::StructureConstPtr& type) {
+  return pvd::getPVDataCreate()->createPVStructure(type);
+}
+template <typename Array, typename T>
+void putArray(const pvd::PVStructurePtr& data, const char* field, std::initializer_list<T> values) {
+  typename Array::svector items;
+  for (const auto& value : values) items.push_back(value);
+  data->getSubFieldT<Array>(field)->replace(pvd::freeze(items));
 }
 struct TestMonitor final : pva::Monitor, std::enable_shared_from_this<TestMonitor> {
   pva::MonitorRequester::shared_pointer requester;
   std::deque<pva::MonitorElementPtr> queue;
   pvd::Status startResult;
-  bool destroyed = false;
+  std::atomic<bool> destroyed{false}; // Set on the Qt thread; read by posting threads.
   pvd::Status start() override { return startResult; }
   pvd::Status stop() override { return pvd::Status::Ok; }
   void destroy() override { destroyed = true; }
@@ -54,30 +72,40 @@ struct TestMonitor final : pva::Monitor, std::enable_shared_from_this<TestMonito
   void release(const pva::MonitorElementPtr&) override {}
   void connect() { requester->monitorConnect(pvd::Status::Ok, shared_from_this(), scalarType()); }
   void fail() { requester->monitorConnect(pvd::Status::error("monitor refused"), shared_from_this(), {}); }
-  void post(double value, int severity = 0, const std::string& message = {}) {
-    auto data = pvd::getPVDataCreate()->createPVStructure(scalarType());
-    data->getSubField<pvd::PVDouble>("value")->put(value);
-    data->getSubField<pvd::PVInt>("alarm.severity")->put(severity);
-    data->getSubField<pvd::PVString>("alarm.message")->put(message);
+  // Marks the named fields as changed, or the whole structure (bit 0).
+  void postData(const pvd::PVStructurePtr& data, std::initializer_list<const char*> changed = {}) {
     auto element = std::make_shared<pva::MonitorElement>(data);
-    element->changedBitSet->set(0);
+    if (!changed.size()) element->changedBitSet->set(0);
+    for (auto field : changed)
+      element->changedBitSet->set(static_cast<pvd::uint32>(data->getSubFieldT(field)->getFieldOffset()));
     queue.push_back(element);
     requester->monitorEvent(shared_from_this());
   }
+  static pvd::PVStructurePtr scalar(double value, int severity = 0, const std::string& message = {},
+                                    int status = 0) {
+    auto data = create(scalarType());
+    data->getSubField<pvd::PVDouble>("value")->put(value);
+    data->getSubField<pvd::PVInt>("alarm.severity")->put(severity);
+    data->getSubField<pvd::PVInt>("alarm.status")->put(status);
+    data->getSubField<pvd::PVString>("alarm.message")->put(message);
+    return data;
+  }
+  void post(double value, int severity = 0, const std::string& message = {}, int status = 0) {
+    postData(scalar(value, severity, message, status));
+  }
   void postText(const std::string& value, int severity = 0) {
-    auto data = pvd::getPVDataCreate()->createPVStructure(stringType());
+    auto data = create(scalarType(pvd::pvString));
     data->getSubField<pvd::PVString>("value")->put(value);
     data->getSubField<pvd::PVInt>("alarm.severity")->put(severity);
-    auto element = std::make_shared<pva::MonitorElement>(data);
-    element->changedBitSet->set(0);
-    queue.push_back(element);
-    requester->monitorEvent(shared_from_this());
+    postData(data);
   }
 };
 struct TestPut final : pva::ChannelPut, std::enable_shared_from_this<TestPut> {
   pva::ChannelPutRequester::shared_pointer requester;
   std::weak_ptr<pva::Channel> channel;
   QVector<double> submitted;
+  pvd::PVStructurePtr lastData;
+  pvd::BitSetPtr lastBits;
   bool destroyed = false;
   pva::Channel::shared_pointer getChannel() override { return channel.lock(); }
   void lock() override {}
@@ -86,14 +114,32 @@ struct TestPut final : pva::ChannelPut, std::enable_shared_from_this<TestPut> {
   void lastRequest() override {}
   void destroy() override { destroyed = true; }
   void get() override {}
-  void put(const pvd::PVStructurePtr& data, const pvd::BitSetPtr&) override {
-    submitted << data->getSubField<pvd::PVDouble>("value")->get();
+  void put(const pvd::PVStructurePtr& data, const pvd::BitSetPtr& bits) override {
+    lastData = data;
+    lastBits = bits;
+    if (auto value = data->getSubField<pvd::PVDouble>("value")) submitted << value->get();
   }
-  void ready() { requester->channelPutConnect(pvd::Status::Ok, shared_from_this(), scalarType()); }
+  void ready(pvd::StructureConstPtr type = scalarType()) {
+    requester->channelPutConnect(pvd::Status::Ok, shared_from_this(), type);
+  }
   void refuse() { requester->channelPutConnect(pvd::Status::error("write refused"), shared_from_this(), {}); }
   void done() { requester->putDone(pvd::Status::Ok, shared_from_this()); }
   // QSRV rejects a put denied by access security when it completes.
   void reject() { requester->putDone(pvd::Status::error("Put not permitted"), shared_from_this()); }
+};
+struct TestGet final : pva::ChannelGet, std::enable_shared_from_this<TestGet> {
+  pva::ChannelGetRequester::shared_pointer requester;
+  std::weak_ptr<pva::Channel> channel;
+  int requests = 0;
+  pva::Channel::shared_pointer getChannel() override { return channel.lock(); }
+  void cancel() override {}
+  void lastRequest() override {}
+  void destroy() override {}
+  void get() override { ++requests; }
+  void ready() { requester->channelGetConnect(pvd::Status::Ok, shared_from_this(), scalarType()); }
+  void answer(const pvd::PVStructurePtr& data) {
+    requester->getDone(pvd::Status::Ok, shared_from_this(), data, std::make_shared<pvd::BitSet>());
+  }
 };
 struct TestChannel final : pva::Channel, std::enable_shared_from_this<TestChannel> {
   pva::ChannelProvider::shared_pointer provider;
@@ -101,6 +147,7 @@ struct TestChannel final : pva::Channel, std::enable_shared_from_this<TestChanne
   std::string name;
   std::shared_ptr<TestMonitor> monitor;
   std::shared_ptr<TestPut> writer;
+  std::shared_ptr<TestGet> reader;
   std::string getChannelName() override { return name; }
   std::string getRemoteAddress() override { return "test"; }
   pva::ChannelProvider::shared_pointer getProvider() override { return provider; }
@@ -119,11 +166,23 @@ struct TestChannel final : pva::Channel, std::enable_shared_from_this<TestChanne
     writer->channel = shared_from_this();
     return writer;
   }
+  pva::ChannelGet::shared_pointer createChannelGet(const pva::ChannelGetRequester::shared_pointer& callback,
+                                                  const pvd::PVStructurePtr&) override {
+    reader = std::make_shared<TestGet>();
+    reader->requester = callback;
+    reader->channel = shared_from_this();
+    return reader;
+  }
   void state(ConnectionState state) { requester->channelStateChange(shared_from_this(), state); }
 };
 struct TestProvider final : pva::ChannelProvider, std::enable_shared_from_this<TestProvider> {
   std::vector<std::shared_ptr<TestChannel>> channels;
-  bool connectOnCreate = true;
+  bool connectOnCreate = true; // false: a server that never answers the search.
+  std::shared_ptr<TestChannel> channel(const std::string& name) const {
+    for (auto it = channels.rbegin(); it != channels.rend(); ++it)
+      if ((*it)->name == name) return *it;
+    return {};
+  }
   std::string getProviderName() override { return "pva"; }
   void destroy() override {}
   pva::ChannelFind::shared_pointer channelFind(const std::string&,
@@ -141,6 +200,52 @@ struct TestProvider final : pva::ChannelProvider, std::enable_shared_from_this<T
     return channel;
   }
 };
+// Server values of the types extract() and sendPut() convert.
+pvd::PVStructurePtr valueOf(const QString& kind) {
+  pvd::PVStructurePtr data;
+  if (kind == "precision") {
+    data = create(scalarType(pvd::pvDouble, true));
+    data->getSubField<pvd::PVDouble>("value")->put(3.14159);
+    data->getSubField<pvd::PVInt>("display.precision")->put(2);
+  } else if (kind == "double") {
+    data = create(scalarType());
+    data->getSubField<pvd::PVDouble>("value")->put(2.5);
+  } else if (kind == "int") {
+    data = create(scalarType(pvd::pvInt));
+    data->getSubField<pvd::PVInt>("value")->put(-7);
+  } else if (kind == "boolean") {
+    data = create(scalarType(pvd::pvBoolean));
+    data->getSubField<pvd::PVBoolean>("value")->put(true);
+  } else if (kind.endsWith("string")) {
+    data = create(scalarType(pvd::pvString));
+    data->getSubField<pvd::PVString>("value")->put(kind == "numeric string" ? " 42 " : "OPEN");
+  } else if (kind == "double array") {
+    data = create(arrayType(pvd::pvDouble));
+    putArray<pvd::PVDoubleArray>(data, "value", {4.5, 9.0});
+  } else if (kind == "string array") {
+    data = create(arrayType(pvd::pvString));
+    putArray<pvd::PVStringArray>(data, "value", {std::string("7"), std::string("x")});
+  } else if (kind == "empty array") {
+    data = create(arrayType(pvd::pvDouble));
+  } else {
+    data = create(enumType());
+    data->getSubField<pvd::PVInt>("value.index")->put(kind == "enum" ? 1 : 5);
+    putArray<pvd::PVStringArray>(data, "value.choices", {std::string("Off"), std::string("On")});
+  }
+  return data;
+}
+QString writtenText(const pvd::PVStructurePtr& data) {
+  if (auto index = data->getSubField<pvd::PVInt>("value.index"))
+    return QString("index=%1").arg(index->get());
+  if (auto array = data->getSubField<pvd::PVScalarArray>("value")) {
+    pvd::shared_vector<const std::string> items;
+    array->getAs(items);
+    QStringList parts;
+    for (const auto& item : items) parts << QString::fromStdString(item);
+    return "[" + parts.join(',') + "]";
+  }
+  return QString::fromStdString(data->getSubFieldT<pvd::PVScalar>("value")->getAs<std::string>());
+}
 }
 class PvaTests : public QObject {
   Q_OBJECT
@@ -669,6 +774,254 @@ private slots:
     QCoreApplication::processEvents();
     QTest::qWait(100);
     QVERIFY2(errors.isEmpty(), qPrintable(errors.join("; ")));
+  }
+  void neverConnectedChannelsReportAfterDeadline() {
+    // A PV no server answers sends no disconnect: the one-second connection
+    // deadline reports it, writes are refused, and a late connection recovers.
+    provider->connectOnCreate = false;
+    PvAccess pv;
+    QStringList errors;
+    pv.error = [&](const QString& s) { errors << s; };
+    Event alarm;
+    alarm.severity = -1;
+    double input = 0;
+    pv.monitor("pva://alarm", [&](Event e) { alarm = e; });
+    pv.number("pva://input", [&](double v) { input = v; });
+    pv.prepare("pva://output");
+    QVERIFY(!pv.canWrite("pva://output"));
+    QVERIFY(!pv.put("pva://output", 1));
+    QVERIFY(errors.join(' ').contains("PV not connected or not writable: pva://output"));
+    QTRY_COMPARE_WITH_TIMEOUT(alarm.severity, 4, 3000);
+    QCOMPARE(alarm.status, int(ALARM_NSTATUS));
+    QTRY_VERIFY(std::isnan(input));
+    QVERIFY(errors.join(' ').contains("PV not connected: pva://input"));
+    for (const auto& channel : provider->channels) channel->state(pva::Channel::CONNECTED);
+    provider->channel("alarm")->monitor->post(1);
+    provider->channel("input")->monitor->post(5);
+    QTRY_COMPARE(alarm.value, QString("1"));
+    QCOMPARE(alarm.severity, 0);
+    QTRY_COMPARE(input, 5.0);
+    QTRY_VERIFY(pv.canWrite("pva://output"));
+    QVERIFY(pv.put("pva://output", 2));
+    auto output = provider->channel("output");
+    QVERIFY(output->writer);
+    output->writer->ready();
+    QTRY_COMPARE(output->writer->submitted, QVector<double>{2});
+  }
+  void forceInputIgnoresAlarmOnlyUpdates() {
+    // Force/CALC inputs follow value changes in the changed bitset only.
+    PvAccess pv;
+    QVector<double> values;
+    pv.number("pva://input", [&](double v) { values << v; });
+    auto monitor = provider->channels.back()->monitor;
+    monitor->post(5);
+    QTRY_COMPARE(values, QVector<double>{5});
+    monitor->postData(TestMonitor::scalar(5, 2, "HIGH", 3), {"alarm"});
+    monitor->postData(TestMonitor::scalar(5), {"alarm.severity", "alarm.status", "alarm.message"});
+    monitor->postData(TestMonitor::scalar(6), {"value"});
+    QTRY_COMPARE(values, (QVector<double>{5, 6}));
+  }
+  void valueExtraction_data() {
+    QTest::addColumn<QString>("kind");
+    QTest::addColumn<QString>("text");
+    QTest::addColumn<double>("number"); // NaN: not numeric.
+    const double none = std::numeric_limits<double>::quiet_NaN();
+    QTest::newRow("double with precision") << "precision" << "3.14" << 3.14159;
+    QTest::newRow("double") << "double" << "2.5" << 2.5;
+    QTest::newRow("int") << "int" << "-7" << -7.0;
+    QTest::newRow("boolean") << "boolean" << "1" << 1.0;
+    QTest::newRow("numeric string") << "numeric string" << " 42 " << 42.0;
+    QTest::newRow("text string") << "text string" << "OPEN" << none;
+    QTest::newRow("double array") << "double array" << "4.5" << 4.5;
+    QTest::newRow("string array") << "string array" << "7" << 7.0;
+    QTest::newRow("empty array") << "empty array" << "" << none;
+    QTest::newRow("enum") << "enum" << "On" << 1.0;
+    QTest::newRow("enum out of range") << "enum out of range" << "5" << 5.0;
+  }
+  void valueExtraction() {
+    QFETCH(QString, kind); QFETCH(QString, text); QFETCH(double, number);
+    PvAccess pv;
+    QStringList errors;
+    pv.error = [&](const QString& s) { errors << s; };
+    Event alarm;
+    int alarms = 0, inputs = 0;
+    double input = 0;
+    pv.monitor("pva://alarm", [&](Event e) { alarm = e; ++alarms; });
+    pv.number("pva://input", [&](double v) { input = v; ++inputs; });
+    provider->channel("alarm")->monitor->postData(valueOf(kind));
+    provider->channel("input")->monitor->postData(valueOf(kind));
+    QTRY_COMPARE(alarms, 1);
+    QTRY_COMPARE(inputs, 1);
+    QCOMPARE(alarm.value, text);
+    if (std::isnan(number)) {
+      QVERIFY(std::isnan(input));
+      QVERIFY(errors.join(' ').contains("PV value is not numeric: pva://input"));
+    } else {
+      QCOMPARE(input, number);
+      QVERIFY2(errors.isEmpty(), qPrintable(errors.join("; ")));
+    }
+  }
+  void writeConversions_data() {
+    QTest::addColumn<QString>("kind");
+    QTest::addColumn<double>("value");
+    QTest::addColumn<QString>("written");
+    QTest::newRow("int") << "int" << 3.0 << "3";
+    QTest::newRow("string") << "string" << 2.5 << "2.5";
+    QTest::newRow("double array") << "double array" << 2.5 << "[2.5]";
+    QTest::newRow("enum") << "enum" << 2.0 << "index=2";
+  }
+  void writeConversions() {
+    QFETCH(QString, kind); QFETCH(double, value); QFETCH(QString, written);
+    PvAccess pv;
+    QStringList errors;
+    pv.error = [&](const QString& s) { errors << s; };
+    pv.prepare("pva://output");
+    auto writer = provider->channels.back()->writer;
+    writer->ready(kind == "int" ? scalarType(pvd::pvInt)
+                  : kind == "string" ? scalarType(pvd::pvString)
+                  : kind == "double array" ? arrayType(pvd::pvDouble) : enumType());
+    QTRY_VERIFY(pv.canWrite("pva://output"));
+    QVERIFY(pv.put("pva://output", value));
+    QTRY_VERIFY(writer->lastData);
+    QVERIFY2(errors.isEmpty(), qPrintable(errors.join("; ")));
+    QCOMPARE(writtenText(writer->lastData), written);
+    // Only the written field is marked changed.
+    const auto field = writer->lastData->getSubFieldT(kind == "enum" ? "value.index" : "value");
+    QCOMPARE(writer->lastBits->cardinality(), pvd::uint32(1));
+    QVERIFY(writer->lastBits->get(static_cast<pvd::uint32>(field->getFieldOffset())));
+  }
+  void alarmStatusFromMessage_data() {
+    QTest::addColumn<int>("severity");
+    QTest::addColumn<int>("pvaStatus");
+    QTest::addColumn<QString>("message");
+    QTest::addColumn<int>("status");
+    // QSRV sends the STAT name; other servers may send free text.
+    QTest::newRow("STAT name") << 2 << 3 << "HIHI" << int(HIHI_ALARM);
+    QTest::newRow("driver text") << 2 << 2 << "link down" << int(COMM_ALARM);
+    QTest::newRow("undefined text") << 3 << 6 << "never processed" << int(UDF_ALARM);
+    QTest::newRow("other text") << 1 << 3 << "too warm" << int(SOFT_ALARM);
+    QTest::newRow("no alarm text") << 0 << 0 << "all clear" << int(NO_ALARM);
+  }
+  void alarmStatusFromMessage() {
+    QFETCH(int, severity); QFETCH(int, pvaStatus); QFETCH(QString, message); QFETCH(int, status);
+    PvAccess pv;
+    Event last;
+    last.status = -1;
+    pv.monitor("pva://alarm", [&](Event e) { last = e; });
+    provider->channels.back()->monitor->post(1, severity, message.toStdString(), pvaStatus);
+    QTRY_COMPARE(last.status, status);
+    QCOMPARE(last.severity, severity);
+  }
+  void rejectedCompletionIsReportedAndWritesContinue() {
+    PvAccess pv;
+    QStringList errors;
+    pv.error = [&](const QString& s) { errors << s; };
+    pv.prepare("pva://output");
+    auto writer = provider->channels.back()->writer;
+    writer->ready();
+    QTRY_VERIFY(pv.canWrite("pva://output"));
+    QVERIFY(pv.put("pva://output", 1));
+    QVERIFY(pv.put("pva://output", 2));
+    writer->reject();
+    QTRY_VERIFY(errors.join(' ').contains("Write pva://output: Put not permitted"));
+    QTRY_COMPARE(writer->submitted, (QVector<double>{1, 2}));
+    writer->done();
+    QCoreApplication::processEvents();
+    QVERIFY(pv.put("pva://output", 3));
+    QCOMPARE(writer->submitted, (QVector<double>{1, 2, 3}));
+    QVERIFY(!writer->destroyed);
+  }
+  void readStringsIssuesOneGetPerChannel() {
+    PvAccess pv;
+    int calls = 0;
+    QHash<QString, QString> result;
+    const auto done = [&](QHash<QString, QString> values) { ++calls; result = values; };
+    pv.readStrings({"pva://text", "pva://number"}, done, 60000);
+    auto text = provider->channel("text")->reader, number = provider->channel("number")->reader;
+    QVERIFY(text && number);
+    text->ready();
+    number->ready();
+    number->ready(); // A reconnect must not request the field twice.
+    QTRY_COMPARE(text->requests, 1);
+    QTRY_COMPARE(number->requests, 1);
+    auto open = create(scalarType(pvd::pvString));
+    open->getSubField<pvd::PVString>("value")->put("  open  ");
+    text->answer(open);
+    QCoreApplication::processEvents();
+    QCOMPARE(calls, 0); // Waits for every channel.
+    number->answer(TestMonitor::scalar(2.5));
+    number->answer(TestMonitor::scalar(9)); // A duplicate answer is ignored.
+    QTRY_COMPARE(calls, 1); // Long before the 60 s timeout.
+    QCOMPARE(number->requests, 1);
+    QCOMPARE(result.size(), 2);
+    QCOMPARE(result.value("pva://text"), QString("open"));
+    QCOMPARE(result.value("pva://number"), QString("2.5"));
+    // A channel that never answers ends the read at its timeout.
+    pv.readStrings({"pva://text", "pva://silent"}, done, 100);
+    text = provider->channel("text")->reader;
+    text->ready();
+    QTRY_COMPARE(text->requests, 1);
+    text->answer(open);
+    QTRY_COMPARE(calls, 2);
+    QCOMPARE(result.size(), 1);
+    QCOMPARE(result.value("pva://text"), QString("open"));
+  }
+  void inboxOverflowFinishesReadsInFlight() {
+    PvAccess pv;
+    int calls = 0;
+    pv.readStrings({"pva://text"}, [&](QHash<QString, QString>) { ++calls; }, 60000);
+    pv.monitor("pva://alarm", [](Event) {});
+    auto monitor = provider->channel("alarm")->monitor;
+    for (size_t i = 0; i <= PvAccess::MaximumPendingUpdates; ++i) monitor->post(double(i));
+    QTRY_COMPARE(calls, 1); // Lost answers end the read instead of waiting 60 s.
+  }
+  void destructionDiscardsLateCallbacks() {
+    // pvAccess threads may still call back after the service is destroyed,
+    // whether or not a drain of the shared inbox was already queued.
+    int calls = 0;
+    for (const bool queued : {true, false}) {
+      auto pv = std::make_unique<PvAccess>();
+      pv->monitor("pva://alarm", [&](Event) { ++calls; });
+      auto channel = provider->channels.back();
+      auto monitor = channel->monitor;
+      monitor->post(1);
+      QTRY_VERIFY(calls > 0);
+      calls = 0;
+      if (queued) monitor->post(2);
+      pv.reset();
+      QVERIFY(monitor->destroyed);
+      monitor->post(3);
+      channel->state(pva::Channel::DISCONNECTED);
+      QTest::qWait(20);
+      QCOMPARE(calls, 0);
+    }
+  }
+  void destructionWhileServerThreadPosts() {
+    auto pv = std::make_unique<PvAccess>();
+    std::atomic<int> calls{0};
+    pv->monitor("pva://alarm", [&](Event) { ++calls; });
+    auto monitor = provider->channels.back()->monitor;
+    std::atomic<bool> stop{false};
+    std::thread server([&] {
+      for (int i = 0; !stop; ++i) {
+        monitor->post(i % 3, i % 3);
+        if (i % 8 == 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+    });
+    struct Join { // Also on a failed check's early return.
+      std::atomic<bool>& stop;
+      std::thread& thread;
+      ~Join() { stop = true; if (thread.joinable()) thread.join(); }
+    } join{stop, server};
+    QTRY_VERIFY(calls > 20);
+    pv.reset();
+    const int seen = calls;
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    stop = true;
+    server.join();
+    QTest::qWait(20);
+    QCOMPARE(int(calls), seen);
+    QVERIFY(monitor->destroyed);
   }
 };
 QTEST_GUILESS_MAIN(PvaTests)
