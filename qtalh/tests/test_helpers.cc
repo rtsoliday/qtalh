@@ -1504,6 +1504,121 @@ private slots:
     }
     QCoreApplication::processEvents(); QCOMPARE(errors.size(), 1);
   }
+#ifndef Q_OS_WIN
+  // A shared log directory that the operator account cannot write (EACCES) is
+  // the usual production failure. Each destination reports its open error once
+  // per outage, records written meanwhile are lost (not replayed) rather than
+  // reported as written, and the two-second retry resumes both logs.
+  void unwritableLogDirectory_data() {
+    QTest::addColumn<int>("maximum");
+    QTest::newRow("bounded") << 3;
+    QTest::newRow("unlimited") << 0;
+  }
+  void unwritableLogDirectory() {
+    if (geteuid() == 0) QSKIP("Directory permissions do not restrict root");
+    QFETCH(int, maximum);
+    QTemporaryDir dir;
+    const auto logs = dir.filePath("logs");
+    QVERIFY(QDir().mkdir(logs));
+    struct Restore {
+      QString path;
+      ~Restore() { QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner); }
+    } restore{logs};
+    QVERIFY(QFile::setPermissions(logs, QFile::ReadOwner | QFile::ExeOwner)); // 0500
+    Options o; o.maxRecords = maximum;
+    o.alarmFile = logs + "/alarm"; o.opmodFile = logs + "/operations";
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
+    auto n = d.channels()[0];
+    Logging log(o, "root"); QStringList errors;
+    log.error = [&](const QString& text) { errors << text; };
+    const QString denied = std::strerror(EACCES);
+    QTRY_COMPARE(errors.size(), 2);
+    QCOMPARE(errors[0], "Cannot open alarm log " + o.alarmFile + ": " + denied);
+    QCOMPARE(errors[1], "Cannot open operation log " + o.opmodFile + ": " + denied);
+    State s;
+    for (int i = 1; i <= 3; ++i) {
+      s.value = QString("lost-%1").arg(i);
+      log.alarm(n, s, 1000 + i); log.operation(n, s.value);
+    }
+    QCoreApplication::processEvents();
+    QCOMPARE(errors.size(), 2); // Every record retried the open; none repeated the error.
+    const auto entries = QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot;
+    QCOMPARE(QDir(logs).entryList(entries), QStringList()); // Nothing written, not even a checkpoint.
+    QVERIFY(QFile::setPermissions(logs, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    // The service timer reopens both destinations without waiting for a record.
+    QTRY_VERIFY_WITH_TIMEOUT(QFile::exists(o.alarmFile) && QFile::exists(o.opmodFile), 6000);
+    s.value = "recovered";
+    log.alarm(n, s, 2000); log.operation(n, s.value);
+    QCoreApplication::processEvents();
+    QCOMPARE(errors.size(), 2);
+    for (const auto& path : {o.alarmFile, o.opmodFile}) {
+      QFile file(path); QVERIFY(file.open(QIODevice::ReadOnly));
+      const auto text = file.readAll();
+      QCOMPARE(text.count("recovered"), 1);
+      QVERIFY2(!text.contains("lost-"), text.constData());
+    }
+    QCOMPARE(QFile::exists(checkpointFor(o.alarmFile)), maximum > 0);
+  }
+  // A full filesystem (ENOSPC) while the alarm log is open. /dev/full fails
+  // every write(2) with ENOSPC, but it is a sequential character device: the
+  // default startup truncation fails on it (an open error), and a bounded ring
+  // first scans the log with seek(), which fails before any write. So use -T
+  // (no truncation) with an unlimited log, which appends with write(2) and
+  // therefore sees the real ENOSPC.
+  void alarmLogNoSpace() {
+#ifndef Q_OS_LINUX
+    QSKIP("Uses Linux /dev/full and /proc/self/fd");
+#else
+    QTemporaryDir dir; Options o; o.dated = true; o.maxRecords = 0;
+    o.alarmFile = dir.filePath("alarm"); o.opmodFile = dir.filePath("operations");
+    const auto noon = QDateTime(QDate::currentDate(), QTime(12, 0)).toMSecsSinceEpoch();
+    const auto destination = o.alarmFile + QDate::currentDate().toString(".yyyy-MM-dd");
+    QVERIFY(QFile::link("/dev/full", destination));
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
+    auto n = d.channels()[0];
+    Logging log(o, "root"); QStringList errors;
+    log.error = [&](const QString& text) { errors << text; };
+    QCoreApplication::processEvents();
+    QVERIFY2(errors.isEmpty(), qPrintable(errors.join('\n'))); // The device opens.
+    State s;
+    for (int i = 1; i <= 3; ++i) {
+      s.value = QString("lost-%1").arg(i);
+      log.alarm(n, s, noon + i);
+    }
+    QCoreApplication::processEvents();
+    // Unlike open and checkpoint failures, which are reported once per outage,
+    // a failed alarm write reports each record that it lost.
+    const QString full = "Cannot append alarm log: " + QString(std::strerror(ENOSPC));
+    QCOMPARE(errors, QStringList({full, full, full}));
+    // Free the space without reopening: point the writer's descriptor (the
+    // only one naming /dev/full) at a regular file; dup2 keeps its number.
+    QList<int> writers;
+    const auto entries = QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot;
+    for (const auto& entry : QDir("/proc/self/fd").entryList(entries)) {
+      char target[64] = {};
+      const auto link = QFile::encodeName("/proc/self/fd/" + entry);
+      if (::readlink(link.constData(), target, sizeof(target) - 1) > 0 && QByteArray(target) == "/dev/full")
+        writers << entry.toInt();
+    }
+    QCOMPARE(writers.size(), 1);
+    const auto freed = dir.filePath("freed");
+    const int replacement = ::open(QFile::encodeName(freed).constData(),
+                                   O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
+    QVERIFY(replacement >= 0);
+    const bool swapped = ::dup2(replacement, writers[0]) == writers[0];
+    ::close(replacement);
+    QVERIFY(swapped);
+    s.value = "recovered";
+    log.alarm(n, s, noon + 10);
+    QCoreApplication::processEvents();
+    QCOMPARE(errors.size(), 3); // Recovery needs no reopen and reports nothing.
+    QFile file(freed); QVERIFY(file.open(QIODevice::ReadOnly));
+    const auto text = file.readAll();
+    QCOMPARE(text.count('\n'), 1); // Lost records are not replayed.
+    QVERIFY(text.contains("recovered"));
+#endif
+  }
+#endif
   void pendingStartupBroadcast_data() {
     QTest::addColumn<int>("mode");
     QTest::newRow("message") << 0; QTest::newRow("reload") << 1; QTest::newRow("stop-logging") << 2;
