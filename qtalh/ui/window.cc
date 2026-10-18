@@ -2930,10 +2930,17 @@ void Window::exitOnInterrupt() {
   // while this instance's broadcast is being delivered, as exit_quit does.
   quitting = true;
   // A stack modal dialog of this window (file chooser, print dialog, message
-  // box) may be inside exec(). Closing the window there would delete it from
-  // that dialog's event loop and free the stack dialog. Reject such dialogs
-  // and exit once their exec() has returned.
+  // box) or a context menu may be inside exec(). Closing the window there
+  // would delete it from that event loop and free the stack object. Reject or
+  // close them and exit once their exec() has returned.
   bool waiting = false;
+  if (auto popup = QApplication::activePopupWidget())
+    for (auto w = popup->parentWidget(); w; w = w->parentWidget())
+      if (w == this || w == runtime) {
+        waiting = true;
+        popup->close();
+        break;
+      }
   for (auto window : QApplication::topLevelWidgets()) {
     if (!window->isModal() || window->testAttribute(Qt::WA_DeleteOnClose) ||
         (!window->isVisible() && window != QApplication::activeModalWidget()))

@@ -2787,6 +2787,18 @@ private slots:
       QVERIFY2(widget->objectName() != "exitConfirmation", "unexpected exit confirmation");
     QTRY_VERIFY(!w);
   }
+  void interruptDuringRuntimeContextMenuExitsAfterIt() {
+    // The compact runtime window's context menu is a stack QMenu in exec().
+    QPointer<Window> w = new Window(sample(), options(false), false);
+    w->showInitial();
+    QWidget* button = nullptr;
+    for (auto widget : QApplication::topLevelWidgets())
+      if (widget->objectName() == "runtimeWindow") button = widget->findChild<QWidget*>("runtimeAlarm");
+    QVERIFY(button);
+    QTimer::singleShot(100, w, [&] { w->exitOnInterrupt(); });
+    emit button->customContextMenuRequested(QPoint(2, 2));
+    QTRY_VERIFY(!w);
+  }
   void interruptDuringStackModalExitsAfterIt() {
     // -B SIGINT closes the window without confirmation. A stack modal dialog,
     // such as File > Open's chooser, may be inside exec(): it must be rejected
