@@ -1194,15 +1194,24 @@ private slots:
     const int limited = setrlimit(RLIMIT_FSIZE, &restricted);
     if (!limited) { write(3); write(4); }
     const int restored = setrlimit(RLIMIT_FSIZE, &original); std::signal(SIGXFSZ, handler);
-    QCOMPARE(limited, 0); QCOMPARE(restored, 0); QCOMPARE(errors.size(), 2);
+    // One outage is reported once, although each alarm retries the checkpoint.
+    QCOMPARE(limited, 0); QCOMPARE(restored, 0); QCOMPARE(errors.size(), 1);
     for (const auto& error : errors) QVERIFY(error.contains("Cannot save alarm log position"));
-    write(5); QCOMPARE(errors.size(), 2);
+    write(5); QCOMPARE(errors.size(), 1);
     const auto after = readLiveLog(before.cursor, o.alarmFile);
     QVERIFY(after.error.isEmpty()); QCOMPARE(after.cursor.validatedSequence, quint64(5));
     // Three new alarms exceed the retained ring. Do not present this as just
     // one new record appended to the obsolete pre-outage display.
     QVERIFY(after.reset); QVERIFY(after.limited); QCOMPARE(after.lines.size(), 1);
     QVERIFY(after.lines[0].contains("record-5"));
+    // A successful checkpoint ends the outage. Slot 0 is below the limit; the
+    // following slot-1 failure starts a new outage and is reported again.
+    handler = std::signal(SIGXFSZ, SIG_IGN);
+    const int relimited = setrlimit(RLIMIT_FSIZE, &restricted);
+    if (!relimited) { write(6); write(7); }
+    const int rerestored = setrlimit(RLIMIT_FSIZE, &original); std::signal(SIGXFSZ, handler);
+    QCOMPARE(relimited, 0); QCOMPARE(rerestored, 0); QCOMPARE(errors.size(), 2);
+    QVERIFY(errors[1].contains("Cannot save alarm log position"));
   }
 #endif
   void liveLogViews_data() {

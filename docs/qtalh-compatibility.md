@@ -399,8 +399,12 @@ Plain ALH logs remain supported. Without a matching checkpoint, recovery uses th
 oldest record timestamp; the original order of equal or out-of-order timestamps
 cannot be recovered reliably from the legacy format alone. An alarm write and its
 checkpoint are separate writes, as before: interruption between them can require
-that fallback. Position-save failures are reported while the alarm record remains
-in the log. Short/interrupted checkpoint writes are retried where possible.
+that fallback. A position-save failure is reported once, and again only after a
+checkpoint succeeds or the failure changes; every alarm record is still written to
+the log. Unlike ALH, which opens only the log file, bounded logging also creates
+the checkpoint in the log directory, so a pre-created log in a read-only directory
+records alarms but saves no write position. Short/interrupted checkpoint writes
+are retried where possible.
 
 Log timestamps are cached within their existing one-second precision, with older
 filter-event timestamps and clock reversals handled by changing the cache key.

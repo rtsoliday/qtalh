@@ -93,6 +93,8 @@ struct AlarmLogFile : std::enable_shared_from_this<AlarmLogFile> {
   qint64 nextOffset = 0;
   bool master = false;
   QString positionError, checkpointLocation;
+  // Checkpoint failure already reported during the current outage.
+  QString reportedPositionError;
   QByteArray digest = QByteArray(32, 0);
 #ifdef Q_OS_WIN
   QFile positionFile;
@@ -383,7 +385,8 @@ struct AlarmLogFile : std::enable_shared_from_this<AlarmLogFile> {
     return true;
   }
   // RetryRecovery is a pre-write failure that can safely be retried; -1 waits
-  // for a scan, 0 is a write/checkpoint failure (possibly committed), 1 is success.
+  // for a scan, 0 is a write/checkpoint failure (possibly committed), 1 is success
+  // or a repeat of the checkpoint failure already reported for this outage.
   int writeNow(const QByteArray& bytes, int maximum, bool wait) {
     positionError.clear();
     if (recovery.valid()) {
@@ -493,7 +496,17 @@ struct AlarmLogFile : std::enable_shared_from_this<AlarmLogFile> {
     }
     // Bind the cursor to the actual contents so stale metadata is ignored after
     // a legacy writer, truncation, or an interrupted write changes the log.
-    return ok && savePosition();
+    if (!ok) return 0;
+    if (savePosition()) {
+      reportedPositionError.clear();
+      return 1;
+    }
+    // The record itself is logged. ALH needs only the log file, so a sidecar
+    // that cannot be created (e.g. a read-only log directory) would otherwise
+    // report every alarm. Like open errors, report each failure once per outage.
+    if (positionError == reportedPositionError) return 1;
+    reportedPositionError = positionError;
+    return 0;
   }
 };
 namespace {

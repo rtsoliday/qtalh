@@ -2083,6 +2083,44 @@ private slots:
     QVERIFY(file.readAll().contains("retained"));
     QCOMPARE(QDir(dir.path()).entryList({"alarm.qtalh-position.*"}, QDir::Files).size(), 0);
   }
+#ifndef Q_OS_WIN
+  void positionCreateFailureReportedOnce() {
+    // ALH needs only the log file: a writable pre-created log in a read-only
+    // directory logs every alarm. Report the missing checkpoint once per outage.
+    if (geteuid() == 0) QSKIP("Directory permissions do not restrict root");
+    QTemporaryDir dir, operations;
+    Options o; // Default bounded retention.
+    o.alarmFile = dir.filePath("alarm");
+    o.opmodFile = operations.filePath("opmod");
+    QFile created(o.alarmFile);
+    QVERIFY(created.open(QIODevice::WriteOnly));
+    created.close();
+    struct Restore {
+      QString path;
+      ~Restore() { QFile::setPermissions(path, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner); }
+    } restore{dir.path()};
+    QVERIFY(QFile::setPermissions(dir.path(), QFile::ReadOwner | QFile::ExeOwner | QFile::ReadGroup |
+                                                  QFile::ExeGroup | QFile::ReadOther | QFile::ExeOther));
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv");
+    State state;
+    QStringList errors;
+    {
+      Logging log(o, "root");
+      log.error = [&](const QString& message) { errors << message; };
+      for (int i = 1; i <= 3; ++i) {
+        state.value = QString("record-%1").arg(i);
+        log.alarm(d.channels()[0], state, 1000);
+      }
+    }
+    QCOMPARE(errors.size(), 1);
+    QVERIFY(errors[0].contains("Cannot save alarm log position"));
+    QFile file(o.alarmFile);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const auto records = file.readAll();
+    for (int i = 1; i <= 3; ++i) QVERIFY(records.contains(QString("record-%1").arg(i).toLatin1()));
+    QCOMPARE(QDir(dir.path()).entryList({"alarm.qtalh-position*"}, QDir::Files).size(), 0);
+  }
+#endif
   void largeLogRecovery_data() {
     QTest::addColumn<bool>("xml");
     QTest::addColumn<bool>("checkpoint");
