@@ -128,6 +128,7 @@ struct TestPut final : pva::ChannelPut, std::enable_shared_from_this<TestPut> {
   void done() { requester->putDone(pvd::Status::Ok, shared_from_this()); }
   // QSRV rejects a put denied by access security when it completes.
   void reject() { requester->putDone(pvd::Status::error("Put not permitted"), shared_from_this()); }
+  void rejectWithoutReason() { requester->putDone(pvd::Status::error(""), shared_from_this()); }
 };
 struct TestGet final : pva::ChannelGet, std::enable_shared_from_this<TestGet> {
   pva::ChannelGetRequester::shared_pointer requester;
@@ -1012,6 +1013,30 @@ private slots:
     QVERIFY(pv.put("pva://output", 3));
     QCOMPARE(writer->submitted, (QVector<double>{1, 2, 3}));
     QVERIFY(!writer->destroyed);
+  }
+  void rejectionWithoutReasonIsReported() {
+    // A server rejection with an empty message is reported once per outage,
+    // like any other rejection, instead of never.
+    PvAccess pv;
+    QStringList errors;
+    pv.error = [&](const QString& s) { errors << s; };
+    pv.prepare("pva://output");
+    auto writer = provider->channels.back()->writer;
+    writer->ready();
+    QTRY_VERIFY(pv.canWrite("pva://output"));
+    QVERIFY(pv.put("pva://output", 1));
+    writer->rejectWithoutReason();
+    QTRY_COMPARE(errors, QStringList{"Write pva://output: write rejected; no reason given"});
+    QVERIFY(pv.put("pva://output", 2));
+    writer->rejectWithoutReason();
+    QCoreApplication::processEvents();
+    QCOMPARE(errors.size(), 1);
+    QVERIFY(pv.put("pva://output", 3));
+    writer->done();
+    QCoreApplication::processEvents();
+    QVERIFY(pv.put("pva://output", 4));
+    writer->rejectWithoutReason();
+    QTRY_COMPARE(errors.size(), 2);
   }
   void readStringsIssuesOneGetPerChannel() {
     PvAccess pv;

@@ -394,9 +394,12 @@ bool PvAccess::connectProvider() {
     report("pvAccess client provider is not available");
   return self && bool(provider);
 }
-void PvAccess::writeFailed(Channel* c, const QString& reason) {
+void PvAccess::writeFailed(Channel* c, const QString& message) {
   // PVA has no access-rights events: a server that rejects every put would
-  // otherwise produce one diagnostic per heartbeat or severity write.
+  // otherwise produce one diagnostic per heartbeat or severity write. An empty
+  // server message must still be reported, so give it a reason of its own.
+  const auto reason = message.trimmed().isEmpty() ? QStringLiteral("write rejected; no reason given")
+                                                   : message;
   if (c->writeError != reason) {
     c->writeError = reason;
     report("Write " + c->name + ": " + reason);
