@@ -78,6 +78,7 @@ private:
     bool haveLast = false, haveObservation = false;
     std::shared_ptr<Operations> ops;
     bool putBusy = false;
+    Write sending{0, WriteKind::Value}; // The in-flight write while putBusy.
     qint64 putDeadline = 0;
     bool putOverflow = false;
     std::deque<Write> puts;

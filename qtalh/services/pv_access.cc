@@ -457,7 +457,8 @@ void PvAccess::sendPut(Channel* c) {
   const auto owned = c->ops;
   auto& ops = *owned;
   while (c->connected && !c->putBusy && !c->puts.empty() && ops.putReady && ops.put) {
-    const double v = c->puts.front().value;
+    const auto write = c->puts.front();
+    const double v = write.value;
     c->puts.pop_front();
     c->putOverflow = false;
     try {
@@ -481,6 +482,7 @@ void PvAccess::sendPut(Channel* c) {
       }
       debugLog(options.debug, "PVA", QString("write %1 value=%2").arg(c->name).arg(v, 0, 'g', 17));
       c->putBusy = true;
+      c->sending = write;
       c->putDeadline = monotonicNow() + qMax(1, writeTimeoutMs);
       noteDeadline(c);
       ops.put->put(data, bits);
@@ -646,9 +648,9 @@ bool PvAccess::put(const QString& n, double v, WriteKind kind) {
       }
       c->puts.push_back({v, kind});
     }
+    // A queued severity stays pending until the server confirms it, so a
+    // disconnect, refusal, timeout or rejection replays it on connection.
     sendPut(c);
-    if (kind == WriteKind::Severity)
-      pendingSeverity.remove(n);
     return true;
   }
   debugLog(options.debug, "PVA", "write unavailable: " + n);
@@ -1049,6 +1051,9 @@ void PvAccess::drain() {
         report("Write " + c->name + ": " + u.message);
         if (!(c = channelsById.value(u.channel)))
           break;
+      } else if (c->sending.kind == WriteKind::Severity && pendingSeverity.contains(c->name) &&
+                 pendingSeverity.value(c->name) == c->sending.value) {
+        pendingSeverity.remove(c->name); // A newer requested severity stays pending.
       }
       sendPut(c);
       break;

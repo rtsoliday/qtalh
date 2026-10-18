@@ -75,6 +75,7 @@ struct TestPut final : pva::ChannelPut, std::enable_shared_from_this<TestPut> {
   void ready() { requester->channelPutConnect(pvd::Status::Ok, shared_from_this(), scalarType()); }
   void refuse() { requester->channelPutConnect(pvd::Status::error("write refused"), shared_from_this(), {}); }
   void done() { requester->putDone(pvd::Status::Ok, shared_from_this()); }
+  void reject() { requester->putDone(pvd::Status::error("write rejected"), shared_from_this()); }
 };
 struct TestChannel final : pva::Channel, std::enable_shared_from_this<TestChannel> {
   pva::ChannelProvider::shared_pointer provider;
@@ -450,6 +451,78 @@ private slots:
     QCOMPARE(fresh->submitted.size(), 1);
     fresh->done();
     QTRY_COMPARE(fresh->submitted, (QVector<double>{3, 4}));
+  }
+  void failedSeverityWriteRetriesOnReconnect_data() {
+    QTest::addColumn<QString>("failure");
+    QTest::newRow("disconnect before ready") << "disconnect";
+    QTest::newRow("refused setup") << "refused";
+    QTest::newRow("setup timeout") << "setup timeout";
+    QTest::newRow("rejected completion") << "rejected";
+    QTest::newRow("disconnect in flight") << "in flight";
+    QTest::newRow("completion timeout") << "completion timeout";
+  }
+  void failedSeverityWriteRetriesOnReconnect() {
+    // Failed severity-output writes retry when the PV connects, as Channel
+    // Access does (docs/qtalh-compatibility.md).
+    QFETCH(QString, failure);
+    PvAccess pv;
+    if (failure.contains("timeout")) pv.writeTimeoutMs = 30;
+    QStringList errors;
+    pv.error = [&](const QString& s) { errors << s; };
+    pv.prepare("pva://output");
+    auto channel = provider->channels.back();
+    auto old = channel->writer;
+    const bool sent = failure == "rejected" || failure == "in flight" || failure == "completion timeout";
+    if (sent) old->ready();
+    QTRY_VERIFY(pv.canWrite("pva://output"));
+    QVERIFY(pv.put("pva://output", 2, WriteKind::Severity));
+    QCOMPARE(old->submitted, sent ? QVector<double>{2} : QVector<double>{});
+    if (failure == "refused") {
+      old->refuse();
+      QTRY_VERIFY(errors.join(' ').contains("write refused"));
+    } else if (failure == "rejected") {
+      old->reject();
+      QTRY_VERIFY(errors.join(' ').contains("write rejected"));
+    } else if (failure.contains("timeout")) {
+      QTRY_VERIFY(errors.join(' ').contains("timed out"));
+      pv.writeTimeoutMs = 30000;
+    }
+    channel->state(pva::Channel::DISCONNECTED);
+    channel->state(pva::Channel::CONNECTED);
+    QCoreApplication::processEvents();
+    auto recovered = channel->writer;
+    QVERIFY(recovered != old);
+    recovered->ready();
+    QTRY_COMPARE(recovered->submitted, QVector<double>{2});
+    // A confirmed severity write is no longer pending.
+    recovered->done();
+    QCoreApplication::processEvents();
+    channel->state(pva::Channel::DISCONNECTED);
+    channel->state(pva::Channel::CONNECTED);
+    QCoreApplication::processEvents();
+    QVERIFY(channel->writer != recovered);
+    channel->writer->ready();
+    QCoreApplication::processEvents();
+    QCOMPARE(channel->writer->submitted, QVector<double>{});
+  }
+  void olderSeverityCompletionKeepsNewerValuePending() {
+    PvAccess pv;
+    pv.prepare("pva://output");
+    auto channel = provider->channels.back();
+    auto writer = channel->writer;
+    writer->ready();
+    QTRY_VERIFY(pv.canWrite("pva://output"));
+    QVERIFY(pv.put("pva://output", 1, WriteKind::Severity));
+    QVERIFY(pv.put("pva://output", 2, WriteKind::Severity));
+    writer->done(); // Confirms 1, not the newer queued 2.
+    QTRY_COMPARE(writer->submitted, (QVector<double>{1, 2}));
+    channel->state(pva::Channel::DISCONNECTED);
+    channel->state(pva::Channel::CONNECTED);
+    QCoreApplication::processEvents();
+    auto recovered = channel->writer;
+    QVERIFY(recovered != writer);
+    recovered->ready();
+    QTRY_COMPARE(recovered->submitted, QVector<double>{2});
   }
 };
 QTEST_GUILESS_MAIN(PvaTests)
