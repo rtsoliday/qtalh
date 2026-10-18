@@ -739,6 +739,59 @@ private slots:
     QTest::newRow("disconnect") << true;
     QTest::newRow("access-rights") << false;
   }
+  void freshAlarmCallbackCanDestroyService() {
+    // Fresh monitor updates must call a copy of the callback, as the
+    // disconnect and access paths do: a closure that destroys the adapter
+    // and then reads its own captures must not run from freed storage.
+    // (Detected by AddressSanitizer or valgrind.)
+    const auto name = prefix + "alarm";
+    ChannelAccess driver;
+    driver.prepare(name);
+    auto ca = std::make_unique<ChannelAccess>();
+    int events = 0;
+    bool destroy = false;
+    const QString tail(64, 'a');
+    ca->monitor(name, [&, tail](Event) {
+      ++events;
+      if (destroy) {
+        ca.reset();
+        events += tail.size();
+      }
+    });
+    QTRY_VERIFY(events > 0);
+    QTest::qWait(200);
+    destroy = true;
+    QTRY_VERIFY(driver.put(name, 20));
+    QTRY_VERIFY(!ca);
+    QVERIFY(driver.put(name, 0));
+    QTest::qWait(200);
+  }
+  void freshNumericCallbackCanCancelItself() {
+    const auto name = prefix + "force";
+    ChannelAccess driver;
+    driver.prepare(name);
+    QTRY_VERIFY(driver.put(name, 0));
+    ChannelAccess ca;
+    int owner = 0, values = 0;
+    bool cancel = false;
+    const QString tail(64, 'b');
+    ca.number(name, [&, tail](double) {
+      ++values;
+      if (cancel) {
+        ca.cancelNumbers(&owner);
+        values += tail.size();
+      }
+    }, &owner);
+    QTRY_VERIFY(values > 0);
+    QTest::qWait(200);
+    cancel = true;
+    const int before = values;
+    QVERIFY(driver.put(name, 3));
+    QTRY_VERIFY(values > before);
+    QVERIFY(driver.put(name, 0));
+    QTest::qWait(200);
+    QCOMPARE(values, before + 1 + tail.size());
+  }
   void alarmCallbackCanDestroyService() {
     QFETCH(bool, disconnect);
     const auto name = prefix + "alarm";

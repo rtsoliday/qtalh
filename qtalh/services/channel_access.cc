@@ -458,8 +458,10 @@ void ChannelAccess::updated(Channel* c, const Callback& a) {
   if (c->text) {
     // Descriptions require read access only. Preserve the last valid text while
     // disconnected or unreadable instead of replacing it with an alarm value.
+    // Call copies: a callback may cancel this channel or destroy the adapter.
     if (a.type == DBR_STRING && ca_read_access(c->id))
-      c->text(a.text);
+      if (const auto callback = c->text)
+        callback(a.text);
     return;
   }
   if (c->numeric) {
@@ -470,7 +472,8 @@ void ChannelAccess::updated(Channel* c, const Callback& a) {
       return;
     }
     c->numericError.clear();
-    c->numeric(a.number);
+    if (const auto callback = c->numeric)
+      callback(a.number);
     return;
   }
   if (a.type != DBR_STSACK_STRING)
@@ -489,8 +492,8 @@ void ChannelAccess::updated(Channel* c, const Callback& a) {
     if (options.global && !options.passive && !ca_write_access(c->id))
       e = {ALARM_NSTATUS + 2, 4, 0, -1, "0"};
   }
-  if (c->alarm)
-    c->alarm(e);
+  if (const auto callback = c->alarm)
+    callback(e);
 }
 bool ChannelAccess::canWrite(const QString& name) const {
   if (options.passive)
