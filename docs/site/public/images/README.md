@@ -2,7 +2,7 @@
 
 The modern screenshots were regenerated on 2026-10-15 with macOS, Qt 5.15.19,
 and the `offscreen` platform to restore the missing referenced assets.
-`main-window.png` retains its 2026-10-14 Linux/Qt 5.15.9 capture.
+`main-window.png` retains its 2026-09-11 Linux capture.
 They show repository-owned synthetic test data; no
 production PVs were connected. The modern captures use the default appearance
 and its smaller default font. Native window decorations, fonts, colors, and

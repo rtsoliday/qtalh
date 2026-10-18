@@ -77,7 +77,7 @@ Use the repository's synthetic UI/gallery fixtures rather than a production
 facility. The current main-window and dialog captures can be refreshed with:
 
 ```sh
-make -C qtalh QT_VERSION=5 test-ui test-ui-fusion test-gallery
+make -C qtalh QT_VERSION=5 test-ui test-ui-motif test-gallery
 ```
 
 Copy the selected images from the build's `test-artifacts/` directory using the
