@@ -184,7 +184,7 @@ INCLUDE paths retain their separate configuration-directory rule.
 | `-l dir` | Log directory. Default: the configuration directory. Create it before starting. |
 | `-a file` | Alarm filename, relative to the log directory unless absolute or explicitly prefixed with `./` or `../`. Default: `ALH-default.alhAlarm`. |
 | `-o file` | Operation filename, relative to the log directory unless absolute or explicitly prefixed with `./` or `../`. Default: `ALH-default.alhOpmod`. |
-| `-m count` | Alarm retention in records; default 2000, or unlimited with `-L`. An explicit `-m` overrides either default; `0` means unlimited. Does not bound the operation log. |
+| `-m count` | Alarm retention in records; default 2000, or unlimited with `-L`. An explicit `-m` overrides either default; `0` means unlimited. Does not bound the operation log. Without `-T` or `-L`, startup empties an existing alarm file, as in ALH. |
 | `-T` | Append `.yyyy-MM-dd` to each log filename, using local dates. The alarm record limit still applies. |
 | `-xml` | Write legacy XML-like entry records; these are not a complete XML document. |
 | `-L` | Coordinate master/slave alarm logging with a lock. Alarm retention defaults to unlimited unless `-m` is supplied. |
@@ -481,8 +481,12 @@ bin/Linux-x86_64/qtalh -l logs -a alarm.log -o operation.log -m 2000 -L my.alhCo
 Replace `my.alhConfig` with your configuration. Without `-L`, alarm logs retain the
 most recent 2000 records by default using a circular file. With `-L`, they append
 without a record limit, matching ALH. An explicit `-m` overrides either default;
-the example above opts into 2000 records. Physical line order after wrapping is
-not chronological. Operation logs append without a record limit. Their facility prefix uses the
+the example above opts into 2000 records. Without `-T` or `-L`, QtALH empties an
+existing alarm log when it opens it at startup or through **Setup → New Alarm Log
+File…**, as ALH does, so earlier alarm records do not survive a restart. A log
+that another window in the same process is already writing is shared, not
+emptied. With `-T` or `-L`, QtALH reopens an existing alarm log without emptying
+it, and new records continue the file. Physical line order after wrapping is not chronological. Operation logs append without a record limit. Their facility prefix uses the
 root group's alias, or its name if no alias is set, and follows alias changes on
 reload. Database headers retain the underlying facility identifier. Dated logs
 route each alarm by its event's local date, so delayed alarms crossing midnight

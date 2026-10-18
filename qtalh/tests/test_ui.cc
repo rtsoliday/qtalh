@@ -106,6 +106,8 @@ private slots:
     QVERIFY(!splitter->childrenCollapsible());
     QVERIFY(browser->toPlainText().contains("$FORCEPV"));
     QVERIFY(browser->toPlainText().contains("100,000 records or 10 MiB"));
+    // Default-mode startup empties the alarm log (HelperTests::alarmLogOpenModes).
+    QVERIFY(browser->toPlainText().contains("Without -T or -L, startup empties an existing alarm file"));
     // A subsection must not truncate the configuration topic's INCLUDE and directive text.
     QVERIFY(browser->toPlainText().contains("Include cycles and excessive nesting are errors"));
     // Runtime Overrides restores and mask changes can write to the IOC in global active mode.

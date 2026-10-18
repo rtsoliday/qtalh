@@ -751,6 +751,43 @@ private slots:
     alarm.seek(0);
     QCOMPARE(alarm.readAll(), text);
   }
+  // As in ALH (fopen "w+" unless -T or -L), opening an alarm log at startup or
+  // through Setup -> New Alarm Log File empties it; -T and -L keep its records.
+  // The user guide documents this; keep the documented modes pinned.
+  void alarmLogOpenModes_data() {
+    QTest::addColumn<bool>("dated"); QTest::addColumn<bool>("lock"); QTest::addColumn<int>("maximum");
+    QTest::newRow("default") << false << false << 2000;
+    QTest::newRow("unlimited") << false << false << 0;
+    QTest::newRow("dated") << true << false << 2000;
+    QTest::newRow("lock") << false << true << 0;
+    QTest::newRow("lock-bounded") << false << true << 2000;
+  }
+  void alarmLogOpenModes() {
+    QFETCH(bool, dated); QFETCH(bool, lock); QFETCH(int, maximum);
+    QTemporaryDir dir; Options o; o.config = dir.filePath("config");
+    o.alarmFile = dir.filePath("alarm"); o.opmodFile = dir.filePath("opmod");
+    o.dated = dated; o.lock = lock; o.maxRecords = maximum;
+    const auto suffix = dated ? QDate::currentDate().toString(".yyyy-MM-dd") : QString();
+    auto seed = [&](const QString& base) {
+      QFile file(base + suffix);
+      return file.open(QIODevice::WriteOnly) && file.write("01-Jan-2026 00:00:01 : previous-record\n") > 0;
+    };
+    auto kept = [&](const QString& base) {
+      QFile file(base + suffix);
+      return file.open(QIODevice::ReadOnly) && file.readAll().contains("previous-record");
+    };
+    QVERIFY(seed(o.alarmFile));
+    Logging log(o, "root"); QStringList errors;
+    log.error = [&](const QString& error) { errors << error; };
+    QCOMPARE(log.alarmPath(), o.alarmFile + suffix);
+    QCOMPARE(kept(o.alarmFile), dated || lock);
+    const auto selected = dir.filePath("selected");
+    QVERIFY(seed(selected));
+    log.setAlarmFile(selected);
+    QCOMPARE(log.alarmPath(), selected + suffix);
+    QCOMPARE(kept(selected), dated || lock);
+    QVERIFY2(errors.isEmpty(), qPrintable(errors.join('\n')));
+  }
 #ifndef Q_OS_WIN
   // POSIX allows replacing a pathname while the original log is still open.
   void renamedLogRecovery_data() {

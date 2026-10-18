@@ -411,6 +411,10 @@ sockets does not determine record order. With database logging enabled,
 acknowledgements emit the legacy code-6 `Ack Channel---` record for each affected
 channel, including channels acknowledged through a parent group.
 Physical printers and production RPC services are intentionally not used.
+Without `-T` or `-L`, ALH opens the alarm log with `fopen(..., "w+")`; QtALH
+likewise empties the alarm log it opens at startup or through **Setup → New Alarm
+Log File…**. With `-T` or `-L`, both reopen an existing alarm log without
+emptying it.
 Alarm logs are registered under their canonical path after creation. Before
 truncating a newly opened path, its native file identity is compared with active
 writers, so directory symlinks, file symlinks, and hard links share one writer and
@@ -428,8 +432,8 @@ of the checkpoint. Position updates alternate between slots using `pwrite` on Un
 Recovery selects the newest intact checkpoint whose fingerprint matches the log.
 A torn or stale checkpoint is rejected; a matching checkpoint in the other slot
 remains usable, including when the second slot is truncated. This preserves
-insertion order across restart, capacity changes, and master handoff even when
-timestamps are equal. The incremental fingerprint combines hashes of individual
+insertion order across restart (with `-T` or `-L`; otherwise startup empties the
+log), capacity changes, and master handoff even when timestamps are equal. The incremental fingerprint combines hashes of individual
 records and their physical slots without rehashing the entire log per alarm.
 
 Earlier experimental QtALH JSON metadata formats are not supported.

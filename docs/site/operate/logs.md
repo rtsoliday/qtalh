@@ -42,7 +42,7 @@ also work while this dialog has focus.
 
 ## Understand circular files
 
-The default alarm file holds 2000 records unless `-L` is used, which defaults to unlimited retention as in ALH. An explicit `-m count` overrides either default (`0` means unlimited). After wrapping, physical line order is not chronological. The historical browser sorts recognized timestamps; events sharing one-second timestamps may still have ambiguous relative order.
+The default alarm file holds 2000 records unless `-L` is used, which defaults to unlimited retention as in ALH. An explicit `-m count` overrides either default (`0` means unlimited). Without `-T` or `-L`, starting QtALH or choosing another file with **Setup → New Alarm Log File…** empties that alarm file, as ALH does; with `-T` or `-L`, an existing alarm file is reopened without being emptied. After wrapping, physical line order is not chronological. The historical browser sorts recognized timestamps; events sharing one-second timestamps may still have ambiguous relative order.
 
 PV values and descriptions containing line breaks appear as `\n` and `\r` in text logs, or `&#10;` and `&#13;` in XML logs. Each new alarm remains one physical line. Bounded-log recovery also repairs older multiline records when their record boundaries can be recognized.
 
