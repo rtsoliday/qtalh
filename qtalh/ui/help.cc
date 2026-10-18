@@ -102,10 +102,13 @@ QVector<Topic> helpTopics() {
       "| Ctrl++ or Ctrl+= / Ctrl+- / Ctrl+0 | Increase / decrease / reset font size (except Motif mode) |\n\n"
       "Help search is case-insensitive, highlights every match, and wraps at both ends."});
   topics.append({"file-selection", "File selection", "Reference",
-      "Choose a directory and file, or enter a filename in **Selection**. Edit the "
-      "**Filter** path and press Enter or click **Filter** to update the lists. "
-      "Double-click a directory to enter it, or a file to choose it. **Cancel** keeps "
-      "the current file. Saving over an existing file asks for confirmation."});
+      "The modern and other Qt styles use Qt's file dialog: browse to a directory, "
+      "then choose a file or type a filename, and pick a file type from the filter list.\n\n"
+      "With `-style motif`, choose a directory and file, or enter a filename in "
+      "**Selection**. Edit the **Filter** path and press Enter or click **Filter** to "
+      "update the lists. Double-click a directory to enter it, or a file to choose it.\n\n"
+      "In every style, **Cancel** keeps the current file, and saving over an existing "
+      "file asks for confirmation."});
   section("troubleshooting", "Reference");
   return topics;
 }

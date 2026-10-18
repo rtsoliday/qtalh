@@ -352,6 +352,10 @@ private slots:
       auto find = modalGuide->findChild<QLineEdit*>("helpFind");
       find->setText("filename");
       QVERIFY(!modalGuide->findChild<QTextBrowser*>("helpBrowser")->extraSelections().isEmpty());
+      // The File selection topic covers the default Qt dialog as well as the Motif chooser.
+      const auto guideText = modalGuide->findChild<QTextBrowser*>("helpBrowser")->toPlainText();
+      QVERIFY(guideText.contains("The modern and other Qt styles use Qt's file dialog"));
+      QVERIFY(guideText.contains("With -style motif, choose a directory and file"));
       modal.reject();
     }
     QVERIFY(!modalGuide);
