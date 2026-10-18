@@ -458,17 +458,15 @@ void Window::showAnalytics() {
                     "unknown/interrupted response times are excluded.\nCharts and chatter use "
                     "retained detail beginning %18.")
                 .arg(r.channel.path, r.channel.pv, quality(r.channel),
-                     analyticsSuppression(r.channel.flags))
-                .arg(r.stats.activations)
-                .arg(duration(r.stats.activeMs), duration(r.stats.observedMs),
-                     r.channel.standingUnknown ? "at least " : "", duration(r.standingMs))
-                .arg(r.stats.ackCount)
-                .arg(r.stats.incomplete)
-                .arg(r.stats.ackCount ? duration(r.stats.ackSumMs / r.stats.ackCount) : "—",
+                     analyticsSuppression(r.channel.flags), QString::number(r.stats.activations),
+                     duration(r.stats.activeMs), duration(r.stats.observedMs),
+                     QString(r.channel.standingUnknown ? "at least " : ""), duration(r.standingMs),
+                     QString::number(r.stats.ackCount), QString::number(r.stats.incomplete),
+                     r.stats.ackCount ? duration(r.stats.ackSumMs / r.stats.ackCount) : "—",
                      r.stats.ackCount ? duration(r.stats.ackMaxMs) : "—",
-                     r.channel.ackUnknown ? "at least " : "", duration(r.outstandingMs))
-                .arg(r.stats.gaps)
-                .arg(utc(r.channel.lastUtc), utc(report->coverageUtc)));
+                     QString(r.channel.ackUnknown ? "at least " : ""), duration(r.outstandingMs),
+                     QString::number(r.stats.gaps), utc(r.channel.lastUtc),
+                     utc(report->coverageUtc)));
         l->addWidget(text);
         d->resize(650, 450);
         d->show();

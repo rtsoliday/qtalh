@@ -1780,6 +1780,49 @@ private slots:
     for (auto action : w->findChildren<QAction*>())
       QVERIFY(action->text() != "Notifications...");
   }
+  void placeholdersInNamesAreLiteral() {
+    QTemporaryDir dir;
+    auto document = parseConfig("GROUP NULL top%3\nCHANNEL top%3 pv%2\n");
+    document.filename = dir.filePath("alarms.alh");
+    NotificationSettings settings;
+    NotificationDestination destination;
+    destination.id = "ops"; destination.name = "Operators";
+    destination.kind = "webhook"; destination.url = "http://127.0.0.1:1/test";
+    settings.destinations << destination;
+    NotificationSubscription subscription;
+    subscription.id = "rule"; subscription.name = "Pumps%1";
+    subscription.configuration = notificationConfiguration(document.filename);
+    subscription.stages = {{"initial", 60, {"ops"}}, {"escalate", 600, {"ops"}}};
+    settings.subscriptions << subscription;
+    NotificationStore store; store.load(); store.save(settings);
+    auto w = std::make_unique<Window>(std::move(document), options(false), false);
+    w->show();
+    for (auto action : w->findChildren<QAction*>())
+      if (action->text() == "Notifications...") action->trigger();
+    auto notifications = w->findChild<QDialog*>("notificationsDialog"); QVERIFY(notifications);
+    auto rules = notifications->findChild<QListWidget*>("notificationSubscriptions");
+    const auto rule = rules->count() == 1 ? rules->item(0)->text() : QString();
+    store.save(NotificationSettings{});
+    QCOMPARE(rule, QString("Pumps%1 — 2 stages"));
+    auto service = w->alarmAnalytics(); QVERIFY(service);
+    qint64 now = 0; service->monotonicNow = [&] { return now; };
+    service->utcNow = [&] { return 1700000000000 + now; }; service->reset();
+    auto channel = w->document().channels()[0];
+    w->alarmEngine().event(channel, {0, 0, 0, 1, "0"});
+    now += 1000; w->alarmEngine().event(channel, {3, 2, 2, 1, "20"});
+    now += 1000;
+    for (auto action : w->findChildren<QAction*>())
+      if (action->text() == "Alarm Analytics...") action->trigger();
+    auto dialog = w->findChild<QDialog*>("analyticsDialog"); QVERIFY(dialog);
+    auto table = dialog->findChild<QTableView*>("analyticsTable0");
+    QTRY_COMPARE(table->model()->rowCount(), 1);
+    table->setCurrentIndex(table->model()->index(0, 0));
+    dialog->findChild<QPushButton*>("analyticsDetails")->click();
+    auto details = dialog->findChild<QDialog*>("analyticsChannelDetails"); QVERIFY(details);
+    auto text = details->findChild<QPlainTextEdit*>()->toPlainText();
+    QVERIFY2(text.contains("top%3") && text.contains("\nPV: pv%2\n") &&
+             text.contains("\nActivations: 1\n"), qPrintable(text));
+  }
 
   void shelvingContextMenu() {
     auto w = std::make_unique<Window>(parseConfig(

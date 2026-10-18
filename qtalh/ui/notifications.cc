@@ -321,8 +321,8 @@ void Window::showNotifications() {
     for (const auto& r : draft->subscriptions)
       if (r.configuration == notificationConfiguration(doc.filename)) {
         auto item = new QListWidgetItem(QString("%1%2 — %3 stages")
-                                            .arg(r.enabled ? "" : "[Disabled] ", r.name)
-                                            .arg(r.stages.size()),
+                                            .arg(r.enabled ? "" : "[Disabled] ", r.name,
+                                                 QString::number(r.stages.size())),
                                         rules);
         item->setData(Qt::UserRole, r.id);
       }

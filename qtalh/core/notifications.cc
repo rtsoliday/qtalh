@@ -244,10 +244,8 @@ QString notificationText(const NotificationEnvelope& e) {
   for (const auto& a : e.alarms) {
     const auto& s = a.state;
     text += QString("%1 (%2)\n  Value: %3; severity: %4; status: %5; unacknowledged severity: %6\n")
-                .arg(s.path, s.pv, s.value)
-                .arg(s.severity)
-                .arg(s.status)
-                .arg(s.unack);
+                .arg(s.path, s.pv, s.value, QString::number(s.severity), QString::number(s.status),
+                     QString::number(s.unack));
     if (e.kind == "resolution")
       text += s.severity ? "  Episode acknowledged; alarm was still active at acknowledgement.\n"
                          : "  Alarm cleared / acknowledged for this episode.\n";

@@ -289,7 +289,8 @@ void NotificationService::dispatch(NotificationEnvelope e) {
     finish(e, false, false, "Destination no longer exists");
     return;
   }
-  record(QString("Submitting: %1; message %2; attempt %3").arg(d.name, e.id).arg(e.attempts));
+  record(QString("Submitting: %1; message %2; attempt %3")
+             .arg(d.name, e.id, QString::number(e.attempts)));
   if (d.kind == "email") {
     QByteArray message;
     try {

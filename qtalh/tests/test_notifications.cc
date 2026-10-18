@@ -762,6 +762,29 @@ private slots:
     }
     QCOMPARE(count, 100);
   }
+  void placeholdersInTextAreLiteral() {
+    NotificationEnvelope e;
+    auto a = alarm();
+    a.path = "Root/Tank%5";
+    a.value = "Pump 2%1";
+    a.severity = 2;
+    a.status = 1;
+    a.unack = 2;
+    e.alarms << NotificationAlarm{"x", a};
+    QVERIFY(notificationText(e).contains(
+        "Root/Tank%5 (pv)\n  Value: Pump 2%1; severity: 2; status: 1; unacknowledged severity: 2\n"));
+    QTemporaryDir dir;
+    Receiver receiver;
+    NotificationService service(nullptr, dir.filePath("settings.json"));
+    auto s = settings();
+    s.destinations[0].name = "Pager%1";
+    s.destinations[0].url = receiver.url();
+    service.apply(s);
+    service.sendTest("ops");
+    QTRY_VERIFY(service.activity.join('\n').contains("Accepted/submitted"));
+    QVERIFY(service.activity.join('\n').contains(QRegularExpression(
+        "Submitting: Pager%1; message [^;]+; attempt 1(\n|$)")));
+  }
   void engineObserverAndLocalReload() {
     auto doc = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
     Engine engine(doc, {});
