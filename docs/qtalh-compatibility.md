@@ -684,6 +684,9 @@ Cancel and Disable update group severity and execute group severity commands
 without writing group SEVRPVs, matching ALH. Disabled channels still publish -1
 where required. Add/Enable of cached active alarms and subsequent monitor
 transitions continue to publish channel and group severity outputs.
+Unlike ALH, enabling a channel at NO_ALARM in global active mode also writes 0
+to its SEVRPV. ALH writes nothing then, so the output keeps its previous value
+(-1 after Disable) until the next severity change.
 
 
 ## Guidance terminators, filter integers, and logging compatibility
