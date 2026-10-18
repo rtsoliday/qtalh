@@ -1171,6 +1171,52 @@ private slots:
     QCOMPARE(parseConfig("GROUP NULL root\n$GUIDANCE\nHelp\n" + ending)
                  .root->option("GUIDANCE_TEXT"), QString("Help"));
   }
+  void guidanceEndsAtAnyDollarLine_data() {
+    QTest::addColumn<QString>("stray");
+    QTest::newRow("directive") << "$ALIAS Pump A";
+    QTest::newRow("spaced-end") << "  $ END";
+    QTest::newRow("unknown") << "\t$EOF";
+    QTest::newRow("next-block") << "$GUIDANCE";
+  }
+  void guidanceEndsAtAnyDollarLine() {
+    // ALH ends inline guidance at any line whose first non-blank character is
+    // '$' ("Invalid End" unless it is $END) and then reads pv:b and pv:c as
+    // channels. Reject the block rather than swallow them into guidance text.
+    QFETCH(QString, stray);
+    QVERIFY_THROWS_EXCEPTION(ParseError,
+        parseConfig("GROUP NULL top\nCHANNEL top pv:a\n$GUIDANCE\nCheck pump A.\n" + stray +
+                    "\nCHANNEL top pv:b\nCHANNEL top pv:c\n$GUIDANCE\nCheck pump C.\n$END\n"));
+    // The editor's save check rejects guidance text that ALH would end early.
+    auto d = parseConfig("GROUP NULL top\nCHANNEL top pv:a\n");
+    d.channels()[0]->setOption("GUIDANCE_TEXT", "Check pump A.\n" + stray + "\nCHANNEL top injected");
+    QVERIFY_THROWS_EXCEPTION(ParseError, parseConfig(writeConfig(d)));
+    // ALH's blanks are spaces and tabs; other text before '$' stays guidance.
+    const auto text = QString(QChar(0xA0)) + "$5 fee";
+    QCOMPARE(parseConfig("GROUP NULL top\n$GUIDANCE\n" + text + "\n$END\n").root->option("GUIDANCE_TEXT"),
+             text);
+  }
+  void phoebusGuidanceDollarLinesEscaped() {
+    QStringList notes;
+    auto d = parsePhoebusXml(
+        "<config name=\"root\"><pv name=\"pv\"><guidance><title>T</title><details>"
+        "Check pump.\n$ALIAS Pump one\n  $END\nCHANNEL root injected</details></guidance></pv></config>",
+        {}, &notes);
+    QCOMPARE(d.channels().size(), 1);
+    QCOMPARE(d.channels()[0]->option("GUIDANCE_TEXT"),
+             QString("Check pump.\n\\$ALIAS Pump one\n  \\$END\nCHANNEL root injected"));
+    QVERIFY(!notes.isEmpty());
+    // Read the saved file with ALH's rule: the first '$' line ends a block.
+    bool inGuidance = false;
+    for (const auto& line : writeConfig(d).split('\n')) {
+      const auto trimmed = line.trimmed();
+      if (!inGuidance)
+        inGuidance = trimmed == "$GUIDANCE";
+      else if (trimmed.startsWith('$')) {
+        QCOMPARE(trimmed, QString("$END"));
+        inGuidance = false;
+      }
+    }
+  }
   void countFilterIntegerBases_data() {
     QTest::addColumn<QString>("arguments");
     QTest::addColumn<int>("count"); QTest::addColumn<int>("seconds");

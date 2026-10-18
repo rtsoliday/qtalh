@@ -587,7 +587,10 @@ transitions continue to publish channel and group severity outputs.
 ## Guidance terminators, filter integers, and logging compatibility
 
 Inline guidance uses ALH's `$END` prefix recognition, including trailing comments.
-Subsequent channel declarations remain configuration rather than guidance text.
+Like ALH, any other line whose first character after spaces and tabs is `$`
+ends the block. ALH reports it as an invalid end; Qt rejects the configuration
+rather than treating subsequent channel declarations as guidance text. Phoebus
+import writes guidance lines that begin with `$` as `\$`.
 Count-filter integers retain ALH's decimal, octal, and hexadecimal interpretation
 and are normalized to decimal when saved; range validation remains in effect.
 

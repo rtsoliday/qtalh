@@ -185,6 +185,12 @@ public:
               ended = true;
               break;
             }
+            // ALH also ends the block, reporting an invalid end, at any other
+            // line whose first character after spaces and tabs is '$'. Reject it
+            // rather than swallow subsequent declarations into guidance text.
+            static const QRegularExpression invalidEnd("^[ \\t]*\\$");
+            if (lines[i].contains(invalidEnd))
+              fail("Guidance must end with $END, not " + lines[i].trimmed());
             body.push_back(lines[i]);
           }
           if (!ended)
