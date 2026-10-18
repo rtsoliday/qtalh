@@ -18,7 +18,7 @@ in `alh/`; all Qt runtime changes are under `qtalh/`.
 | FORCEPV, FORCEPV_CALC, FORCEPV_CALC_A through F | force.c / core/engine.cc | Scalar force/reset IOC test; constant CALC/reconfiguration tests; EPICS postfix evaluator |
 | ALARMCOUNTFILTER | alFilter.c / core/engine.cc | Deterministic filter timeout and edge handling |
 | SEVRCOMMAND, STATCOMMAND | alLib.c / core/engine.cc | Captured command callbacks for upward/downward/status transitions |
-| Transactional open/insert/save | alConfig.c / core/config.cc, ui/window.cc | Bad directives, bad parents, bad CALC, include cycle, atomic QSaveFile; editor save/undo test |
+| Transactional open/insert/save (whole-file rejection; see [configuration errors](#configuration-errors-and-migration)) | alConfig.c / core/config.cc, ui/window.cc | Bad directives, bad parents, bad CALC, include cycle, atomic QSaveFile; editor save/undo test |
 | Local latch and transient alarms | alLib.c, acknowledge.c / core/engine.cc | Local acknowledgement and transient-mask regressions |
 | Global ACKS/ACKT | alCA.c, alLib.c / services/channel_access.cc, core/engine.cc | Real IOC acknowledgement and startup ACKT tests |
 | Cancel/Disable/NoAck/NoAckT/NoLog | mask.c, showmask.c / core/engine.cc | Mask, log suppression, subscription cancellation tests |
@@ -194,6 +194,38 @@ command, alias, and guidance text remains intact. CALC accepts trailing comments
 after a valid expression while preferring a valid full expression, so spaced
 expressions and the `#` not-equal operator remain supported. `$SEVRPV -`
 is an unset placeholder: the first subsequent real PV takes precedence.
+
+### Configuration errors and migration
+
+QtALH uses a configuration only when every line of it and its includes is
+valid. Legacy ALH reads line by line: it logs an `Input error` for a line it
+cannot use, or silently ignores the problem, and loads the rest of the file.
+QtALH can therefore reject a file that ALH has run for years. At startup and
+with `--validate`, QtALH prints the first problem and exits with status 1, so
+no alarms are monitored until the file is corrected. GUI Open/Insert and
+broadcast reloads report the error and keep the current configuration.
+Examples of lines that ALH tolerates but QtALH rejects:
+
+| Line | Legacy ALH | QtALH |
+| --- | --- | --- |
+| Unrecognized statement, such as `FOO bar` | `Invalid input line`; skipped | `Unknown statement` |
+| `GROUP` or `CHANNEL` naming a parent that is not the current group or an ancestor | `Cannot find parent`; skipped | `Parent group not found` |
+| Unrecognized or stray `$` line, such as a second `$END` | `Invalid Optional Line`; skipped | `Unsupported directive` |
+| `$STATCOMMAND` or `$ALARMCOUNTFILTER` after a group | `Context not a channel`; skipped | `applies to channels` |
+| `$ACKPV` after a group | Not checked | `ACKPV applies to channels` |
+| Extra non-comment tokens on `GROUP`, `CHANNEL` (after the mask), `INCLUDE`, or `$HEARTBEATPV` lines | Ignored | Declaration or heartbeat error |
+| Non-numeric `$HEARTBEATPV` interval | 1 second | Heartbeat interval error |
+| `$BEEPSEVERITY` or `$BEEPSEVR` value that is not a severity, such as `HIGH` | Ignored; earlier threshold kept | `Unknown severity` |
+| Severity with a suffix, such as `$BEEPSEVR MAJOR_ALARM` or `UP_MAJOR_ALARM` | Prefix match (`MAJOR`) | `Unknown severity` |
+| `$SEVRCOMMAND` trigger without `UP_`/`DOWN_`, or with an unknown severity | Usually runs as `ANY` (downward if the trigger starts with `D`) | Trigger or severity error |
+| `$STATCOMMAND` with an unknown status | Stored; never runs | `Unknown status command trigger` |
+
+ALH applies directives that follow a skipped declaration to an earlier group or
+channel, so review them when correcting the declaration. Before migrating, run
+`qtalh --validate` with the production `-f` directory (or `ALARMHANDLER`) on
+every top-level configuration. Each run reports one problem; repeat until the
+file validates. `Input error` entries in ALH's operation log identify lines that
+ALH already skips; silently ignored lines produce no entry.
 
 ## Operator and editor workflows
 

@@ -2174,6 +2174,27 @@ $GUIDANCE https://example.invalid/guide
     QTest::newRow("nonfinite heartbeat") << "GROUP NULL a\n$HEARTBEATPV beat nan 1";
     QTest::newRow("overflow heartbeat") << "GROUP NULL a\n$HEARTBEATPV beat 1e100 1";
     QTest::newRow("bad heartbeat") << "GROUP NULL a\n$HEARTBEATPV beat 0 1";
+    // Lines legacy ALH skips with an input error, or silently tolerates, reject
+    // the whole file here. Keep in sync with "Configuration errors and migration"
+    // in docs/qtalh-compatibility.md.
+    QTest::newRow("unknown statement") << "GROUP NULL a\nCHANNEL a pv\nFOO bar";
+    QTest::newRow("group missing parent") << "GROUP NULL a\nGROUP missing b";
+    QTest::newRow("stray end") << "GROUP NULL a\nCHANNEL a pv\n$END";
+    QTest::newRow("group statcommand") << "GROUP NULL a\n$STATCOMMAND HIHI true";
+    QTest::newRow("group count filter") << "GROUP NULL a\n$ALARMCOUNTFILTER 2 5";
+    QTest::newRow("group ackpv") << "GROUP NULL a\n$ACKPV ack 1";
+    QTest::newRow("group extra token") << "GROUP NULL a extra";
+    QTest::newRow("channel extra token") << "GROUP NULL a\nCHANNEL a pv ----- extra";
+    QTest::newRow("include extra token") << "GROUP NULL a\nINCLUDE a file extra";
+    QTest::newRow("heartbeat extra token") << "GROUP NULL a\n$HEARTBEATPV beat 1 1 extra";
+    QTest::newRow("heartbeat text interval") << "GROUP NULL a\n$HEARTBEATPV beat fast";
+    QTest::newRow("unknown facility beep") << "$BEEPSEVERITY HIGH\nGROUP NULL a";
+    QTest::newRow("unknown beep") << "GROUP NULL a\n$BEEPSEVR HIGH";
+    QTest::newRow("suffixed beep") << "GROUP NULL a\n$BEEPSEVR MAJOR_ALARM";
+    QTest::newRow("unprefixed sevrcommand") << "GROUP NULL a\n$SEVRCOMMAND MAJOR true";
+    QTest::newRow("unknown sevrcommand") << "GROUP NULL a\n$SEVRCOMMAND UP_FOO true";
+    QTest::newRow("suffixed sevrcommand") << "GROUP NULL a\n$SEVRCOMMAND UP_MAJOR_ALARM true";
+    QTest::newRow("unknown statcommand") << "GROUP NULL a\nCHANNEL a pv\n$STATCOMMAND NOSUCH true";
   }
   void malformed() {
     QFETCH(QString, text);

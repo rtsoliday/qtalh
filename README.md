@@ -299,6 +299,9 @@ includes are expanded, and comments/formatting are not retained. Open/insert
 failures leave the current document intact. `ALARMHANDLER` and `ALHMAINFONT`
 are supported. `-S` is passive mode; `-D` disables file logging and does **not**
 prevent CA writes. Unsupported Xt resource overrides produce a diagnostic.
+QtALH rejects the whole file for lines that ALH skips with an input error or
+silently tolerates, so check existing files with `--validate`
+([details](docs/qtalh-compatibility.md#configuration-errors-and-migration)).
 
 The editor's **File → Activate ALH** opens a runtime copy of the current edits.
 Properties and action dialogs follow the selected group/channel. Properties

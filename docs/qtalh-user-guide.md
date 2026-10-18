@@ -422,6 +422,15 @@ child groups, and discards comments and original formatting. Runtime Save As
 exports masks without changing the original configuration's reload, lock, or
 broadcast identity; editor Save As changes the document filename.
 
+QtALH rejects the whole configuration when any line in it or its includes is
+invalid. Legacy ALH logs an `Input error` for many such lines, or ignores them,
+and loads the rest. A file that ALH accepts can therefore stop QtALH from
+starting: it prints the first problem and exits with status 1. Reloads keep the
+current configuration. Before migrating, run `qtalh --validate` on each existing
+configuration, with the same `-f` directory, and repeat until it passes; each
+run reports one problem. The [compatibility inventory](qtalh-compatibility.md#configuration-errors-and-migration)
+lists lines that ALH tolerates.
+
 ### pvAccess channels
 
 A PV name starting with `pva://` connects through pvAccess; every other name
