@@ -16,6 +16,7 @@ QtALH reads its own path/font settings and uses EPICS Base (Channel Access and p
 | `EPICS_PVA_AUTO_ADDR_LIST` | pvAccess automatic address discovery. |
 | `EPICS_PVA_BROADCAST_PORT` | pvAccess search (UDP) port. |
 | `DISPLAY` | X11 display, also selectable with `-display`. |
+| `USER` | Sender name in the `FROM: User=` line of `-B` broadcasts (**Action → Send Message…**, **Stop Alarm Logging…**, and **Reload Facility…**). |
 | `QT_QPA_PLATFORM` | Qt platform backend, such as `xcb` or `offscreen`. |
 | `QT_PLUGIN_PATH` | Additional Qt plugin directories, including a split Multimedia SDK. |
 | `COMSPEC` | Windows command shell; defaults to `cmd.exe`. |

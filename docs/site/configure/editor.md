@@ -48,6 +48,18 @@ Undo and redo share a limit of 100 configuration snapshots and a 32 MiB memory
 budget. Older snapshots are discarded as needed. A configuration too large for
 one snapshot clears the undo/redo history.
 
+## Reports, printing, and inserting files
+
+- **Insert → Configuration File…** reads another configuration and adds its
+  root group, with everything below it, under the selected group (or the
+  selected channel's group).
+- **File → Report…** writes an indented text outline of the groups and
+  channels, with each channel's mask, to an `.alhReport` file.
+  **File → Print…** prints the same outline; the runtime's File menu also has
+  **Print…**.
+- **File → Close All** closes the open editor windows. Each window asks before
+  discarding unsaved changes.
+
 ## Validate and activate
 
 Save the file, then check it without connecting to any IOC:

@@ -29,6 +29,8 @@ PV wildcards match the entire PV name. `*` matches any number of characters and
 `[a-c]` and `[!x]` are supported; separators entered literally match themselves.
 
 Every runtime starts **paused**, even when saved subscriptions are enabled.
+When the open configuration has subscriptions, the status area shows
+**Notifications Enabled: YES** or **NO** for this runtime.
 Multiple enabled runtimes operate independently and can send duplicate messages.
 Notifications are available in local, global, and passive runtime modes, but not
 in the configuration editor. Closing the runtime stops its notification work.

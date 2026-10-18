@@ -115,6 +115,10 @@ private slots:
     QVERIFY(browser->toPlainText().contains("Auto ack of transient alarms on enable"));
     QVERIFY(browser->toPlainText().contains("mask changes also write to the IOC"));
     QVERIFY(!browser->toPlainText().contains(":::"));
+    // Log-file switching, editor reports and the notification indicator are documented.
+    QVERIFY(browser->toPlainText().contains("Use Log Series"));
+    QVERIFY(browser->toPlainText().contains("writes an indented text outline"));
+    QVERIFY(browser->toPlainText().contains("Notifications Enabled: YES"));
     QHash<QString, int> anchors;
     QSet<QString> links;
     for (auto block = browser->document()->begin(); block.isValid(); block = block.next())

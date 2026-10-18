@@ -14,6 +14,8 @@ Beyond ALH, the runtime offers an Active Alarms table, Find Alarm, Alarm Details
 (including the record's alarm limits read from the IOC), Runtime Overrides, an
 Alarm Summary panel, and Phoebus alarm XML import/export (also `--to-phoebus` and
 `--from-phoebus`). These work in every appearance, including `-style motif`.
+QtALH also adds timed shelving, opt-in personal notifications and escalation,
+and session alarm analytics.
 PV names prefixed with `pva://` are monitored over pvAccess; all other names
 use Channel Access as in ALH (see
 [pvAccess channels](docs/qtalh-user-guide.md#pvaccess-channels)).

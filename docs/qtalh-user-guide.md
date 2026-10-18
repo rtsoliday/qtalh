@@ -244,8 +244,17 @@ every appearance:
 - **Alarm Summary Panel…**: a tile per top-level group with alarm counts.
 
 **File → Import/Export Phoebus XML…** and `--to-phoebus`/`--from-phoebus`
-convert to and from the Phoebus alarm-server format. See the docs site pages
-*Active alarms, search & details* and *Phoebus XML import & export*.
+convert to and from the Phoebus alarm-server format. See
+[Active alarms, search & details](site/operate/alarm-tools.md) and
+[Phoebus XML import & export](site/configure/phoebus.md).
+
+Other menu commands follow ALH. **View → Configuration File** shows the loaded
+configuration as read-only text with Find. **Setup → New Alarm Log File…** and
+**Setup → New Operation Modification Log File…** switch this runtime's log files;
+see [Read alarm logs](site/operate/logs.md#change-log-files). The editor's
+**File → Report…**, **File → Print…**, **File → Close All**, and
+**Insert → Configuration File…** are described in
+[Create & edit a configuration](site/configure/editor.md#reports-printing-and-inserting-files).
 
 ### Choosing an appearance
 

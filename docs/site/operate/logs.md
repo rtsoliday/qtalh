@@ -40,6 +40,18 @@ also work while this dialog has focus.
 
 ![Modern current alarm history showing a synthetic HIHI/MAJOR transition](/images/modern-history.png)
 
+## Change log files
+
+In a runtime, **Setup → New Alarm Log File…** and **Setup → New Operation
+Modification Log File…** switch this runtime's alarm or operation log to the
+file you choose; **Cancel** keeps the current file. Without `-T` or `-L`,
+choosing an existing alarm log empties it, as described under **Understand
+circular files** below. With `-T`, the date suffix is
+added to the chosen name, as in ALH. If you choose an existing dated file such
+as `alarm.log.2026-10-17`, QtALH asks whether to **Use Log Series** (continue
+the dated series of `alarm.log`) or **Use as Basename** (keep the date as part
+of the name and add the current date after it).
+
 ## Understand circular files
 
 The default alarm file holds 2000 records unless `-L` is used, which defaults to unlimited retention as in ALH. An explicit `-m count` overrides either default (`0` means unlimited). Without `-T` or `-L`, starting QtALH or choosing another file with **Setup → New Alarm Log File…** empties that alarm file, as ALH does; with `-T` or `-L`, an existing alarm file is reopened without being emptied. If such a file is bounded (`-T`, or `-L` with an explicit `-m`) and already holds more records than the limit, the first alarm keeps only its newest records; ALH appends instead. Copy the file first or use `-m 0` to keep every record. After wrapping, physical line order is not chronological. The historical browser sorts recognized timestamps; events sharing one-second timestamps may still have ambiguous relative order.
