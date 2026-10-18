@@ -2271,6 +2271,36 @@ private slots:
     QCOMPARE(foreign, 0);
     driver.reset(); w.reset();
   }
+  void destroyingVisibleWindowDetachesViews() {
+    // The QWidget base destructor hides a visible window after the Window's
+    // Document and Engine are destroyed. The focused alarm view then repaints
+    // its current row, which must no longer come from the old model.
+    struct Watch : QObject {
+      QTreeView* view = nullptr;
+      bool armed = false, seen = false, attached = false;
+      bool eventFilter(QObject*, QEvent* event) override {
+        if (armed && (event->type() == QEvent::FocusOut || event->type() == QEvent::Hide)) {
+          seen = true;
+          attached = attached || view->model();
+        }
+        return false;
+      }
+    } watch;
+    auto w = std::make_unique<Window>(sample(), options(false), false);
+    w->show();
+    w->activateWindow();
+    QVERIFY(QTest::qWaitForWindowActive(w.get()));
+    watch.view = w->findChild<QTreeView*>("alarmTree");
+    QVERIFY(watch.view);
+    watch.view->setCurrentIndex(watch.view->model()->index(0, 0));
+    watch.view->setFocus();
+    QTRY_VERIFY(watch.view->hasFocus());
+    watch.view->installEventFilter(&watch);
+    watch.armed = true;
+    w.reset();
+    QVERIFY(watch.seen);
+    QVERIFY(!watch.attached);
+  }
   void initialGeometry_data() {
     QTest::addColumn<int>("mode"); QTest::addColumn<QString>("geometry");
     for (int mode : {0, 1, 2})

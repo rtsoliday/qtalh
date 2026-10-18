@@ -627,6 +627,11 @@ Window::~Window() {
   beepTimer.stop();
   if (sound)
     sound->stop();
+  // The QWidget base destructor hides a visible window after the Document
+  // and Engine members are destroyed; the resulting focus change makes the
+  // views read their current index. Detach them first, as replace() does.
+  if (treeView) treeView->setModel(nullptr);
+  if (groupView) groupView->setModel(nullptr);
   if (analytics) analytics->detach();
   if (notifications) notifications->detach();
   engine.reset();
