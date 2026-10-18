@@ -2,7 +2,10 @@
 
 These runtime tools add views for finding and understanding alarms. They work
 with every appearance, including `-style motif`, and do not change how the alarm
-tree, acknowledgement or logging behave.
+tree, acknowledgement or logging behave. Their **Acknowledge** and **Restore
+Selected** buttons act like the matching main-window commands, including the
+IOC writes those commands make in global active mode; see
+[Runtime Overrides](#runtime-overrides).
 
 ## Active Alarms
 
@@ -59,6 +62,27 @@ severities (including the facility-wide ALH threshold), disabled Force PVs, NoAc
 timers and shelves, with current and configured values. Select rows and click **Restore Selected** to return them to
 the configuration; each change is recorded in the operation log. Use it at shift
 handover to find forgotten disabled alarms.
+
+Restoring is an operator action, not only a display change. A Mask row returns
+the channel to its configured mask, as **Reset** in Force Mask does; a NoAck row
+ends **NoAck for One Hour**; a Force PV row enables the Force PV again, which
+reapplies its current value. In global active mode (`-global` without `-S`) a
+restore makes the same IOC writes as those commands:
+
+- ACKT, when the NoAckT (`T`) bit changes;
+- ACKS and the configured `$ACKPV`, when removing Disable or NoAck exposes a
+  cleared transient alarm that is still unacknowledged. The alarm is then
+  acknowledged for every ALH and Channel Access client, and the operation log
+  records *Auto ack of transient alarms on enable*;
+- the configured `$SEVRPV`, when Disable changes or removing Cancel resumes
+  monitoring.
+
+Mask rows also list masks applied by an active Force PV, such as a maintenance
+interlock. Restoring one overrides the Force PV until its value next changes.
+Check **Alarm Details** for the Force PV state before restoring masks in bulk.
+In local mode a restore writes nothing to the IOC; in passive mode (`-S`)
+**Restore Selected** is unavailable. Restoring beep severities and shelves never
+writes to the IOC.
 
 ## Alarm Summary Panel
 

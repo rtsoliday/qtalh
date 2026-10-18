@@ -220,7 +220,10 @@ every appearance:
   an explanation of why the channel alarms, and the record's alarm limits read
   from the IOC.
 - **Runtime Overrides…**: masks, beep severities, Force PVs, NoAck timers and
-  shelves that differ from the configuration, with Restore Selected.
+  shelves that differ from the configuration, with Restore Selected. Restoring
+  a mask, NoAck timer or Force PV acts like the matching Action command, so in
+  global active mode it can write ACKT, ACKS, `$ACKPV` and `$SEVRPV`. Restoring
+  a mask set by an active Force PV overrides that Force PV.
 - **Alarm Summary Panel…**: a tile per top-level group with alarm counts.
 
 **File → Import/Export Phoebus XML…** and `--to-phoebus`/`--from-phoebus`

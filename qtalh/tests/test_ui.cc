@@ -108,6 +108,9 @@ private slots:
     QVERIFY(browser->toPlainText().contains("100,000 records or 10 MiB"));
     // A subsection must not truncate the configuration topic's INCLUDE and directive text.
     QVERIFY(browser->toPlainText().contains("Include cycles and excessive nesting are errors"));
+    // Runtime Overrides restores and mask changes can write to the IOC in global active mode.
+    QVERIFY(browser->toPlainText().contains("Auto ack of transient alarms on enable"));
+    QVERIFY(browser->toPlainText().contains("mask changes also write to the IOC"));
     QVERIFY(!browser->toPlainText().contains(":::"));
     QHash<QString, int> anchors;
     QSet<QString> links;

@@ -14,6 +14,8 @@ Masks control monitoring, participation in alarm summaries, acknowledgement requ
 
 Use **Modify Mask** (**Ctrl+S**) or **Force Mask** (**Ctrl+M**) for the selected node. Acting on a group applies the change to descendant channels. In passive mode, restricted operations remain unavailable. Global transient-setting writes require IOC write access; failures retain the previous displayed bit and can be retried explicitly.
 
+In global active mode (`-global` without `-S`), mask changes also write to the IOC. Changing NoAckT writes the record's ACKT. Removing Disable or NoAck from a channel whose cleared transient alarm is still unacknowledged writes ACKS and the configured `$ACKPV`, which acknowledges the alarm for every client. Changing Disable, or removing Cancel so that monitoring resumes, writes the configured `$SEVRPV`. The same writes happen when a Force PV applies or resets a mask, and when **Restore Selected** in [Runtime Overrides](/operate/alarm-tools#runtime-overrides) restores a mask, NoAck timer or Force PV. Local mode makes none of these writes.
+
 Canonical configuration order is `CDATL`. For example, `-D--L` enables Disable and NoLog; `-----` clears all five bits.
 
 **Modify Mask Settings** changes one field immediately and preserves the other
