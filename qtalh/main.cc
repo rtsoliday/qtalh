@@ -8,6 +8,7 @@
 #include <QStyleFactory>
 #include <QTextStream>
 #include <epicsVersion.h>
+#include <clocale>
 int main(int argc, char** argv) {
   try {
     QStringList args;
@@ -62,6 +63,10 @@ int main(int argc, char** argv) {
     char* qtArgv[] = {program.data(), platformFlag.data(), platform.data(), nullptr};
     qtArgv[qtArgc] = nullptr;
     QApplication app(qtArgc, qtArgv);
+    // QApplication adopts the user's locale on Unix. Keep C numeric parsing so
+    // FORCEPV values, CALC literals and EPICS settings use '.' decimals, as in
+    // legacy ALH and the headless modes above.
+    std::setlocale(LC_NUMERIC, "C");
     QApplication::setApplicationName("qtalh");
     QApplication::setOrganizationName("EPICS");
     alh::initializeAppearance(options.style);

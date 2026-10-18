@@ -23,6 +23,7 @@
 #include <QCryptographicHash>
 #include <QtEndian>
 #include <atomic>
+#include <clocale>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #include <QAudioOutput>
 #endif
@@ -2950,6 +2951,52 @@ private slots:
       QVERIFY2(output.contains(expected), output.constData());
       QVERIFY(!output.contains("invalid style override"));
     }
+  }
+  void numericLocaleCommandLine() {
+    // QApplication adopts the user's locale on Unix. FORCEPV values and CALC
+    // literals still use '.' decimals, as in legacy ALH and --validate.
+    const QByteArray previous = std::setlocale(LC_NUMERIC, nullptr);
+    QByteArray comma;
+    for (const char* name : {"de_DE.UTF-8", "de_DE.utf8", "fr_FR.UTF-8", "fr_FR.utf8"})
+      if (std::setlocale(LC_NUMERIC, name) && std::localeconv()->decimal_point[0] == ',') {
+        comma = name;
+        break;
+      }
+    std::setlocale(LC_NUMERIC, previous.constData());
+    if (comma.isEmpty()) QSKIP("No comma-decimal locale is installed");
+    const auto executable = QDir(QCoreApplication::applicationDirPath()).filePath("qtalh");
+    QTemporaryDir dir;
+    auto run = [&](const QString& name, const QByteArray& text) {
+      const auto path = dir.filePath(name);
+      QFile file(path);
+      if (!file.open(QIODevice::WriteOnly) || file.write(text) != text.size()) return QByteArray();
+      file.close();
+      QProcess process;
+      auto env = QProcessEnvironment::systemEnvironment();
+      env.insert("LC_ALL", comma);
+      process.setProcessEnvironment(env);
+      process.setWorkingDirectory(dir.path());
+      process.setReadChannel(QProcess::StandardError);
+      process.start(executable, {"-platform", "offscreen", "-S", "-D", "-s", "-noerrorpopup",
+                                 "-debug", "-l", dir.path(), path});
+      if (!process.waitForStarted()) return QByteArray();
+      QByteArray output;
+      for (int attempt = 0; attempt < 20 && !output.contains("Force Mask") &&
+                            process.state() == QProcess::Running; ++attempt) {
+        process.waitForReadyRead(500); output += process.readAllStandardError();
+      }
+      process.terminate();
+      if (!process.waitForFinished(3000)) { process.kill(); process.waitForFinished(); }
+      return output + process.readAllStandardError();
+    };
+    // The constant 1.5 result matches force value 1.5 (not a truncated 1).
+    auto output = run("force.alhConfig", "GROUP NULL root\n$FORCEPV CALC -D--- 1.5 2.5\n"
+                                          "$FORCEPV_CALC A\n$FORCEPV_CALC_A 1.5\n");
+    QVERIFY2(output.contains("root: Force Mask -D---"), output.constData());
+    // A decimal CALC literal compiles.
+    output = run("calc.alhConfig", "GROUP NULL root\n$FORCEPV CALC -D--- 1 NE\n"
+                                   "$FORCEPV_CALC A>0.5\n$FORCEPV_CALC_A 0.75\n");
+    QVERIFY2(output.contains("root: Force Mask -D---"), output.constData());
   }
   void propertiesEditRoundTrip() {
     auto d = parseConfig("GROUP NULL root\nCHANNEL root pv -D---\n$ACKPV ack 2\n"
