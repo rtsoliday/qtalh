@@ -427,6 +427,8 @@ void Window::showShelvedAlarms() {
   timer->start(1000);
   refreshShelfList();
   table->resizeColumnsToContents();
+  // Enter in the table must not press an action as the implicit default button.
+  for (auto button : dialog->findChildren<QPushButton*>()) button->setAutoDefault(false);
   dialog->resize(qMax(1050, table->horizontalHeader()->length() + table->verticalHeader()->width() + 80), 400);
   dialog->show();
 }

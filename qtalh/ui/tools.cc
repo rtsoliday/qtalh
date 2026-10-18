@@ -401,6 +401,8 @@ void Window::showActiveAlarms() {
   table->resizeColumnsToContents();
   table->setColumnWidth(3, qMax(table->columnWidth(3), 220));
   updateButtons();
+  // Enter in the filter or table must not press an action as the implicit default button.
+  for (auto button : dialog->findChildren<QPushButton*>()) button->setAutoDefault(false);
   sizeDialog(dialog, QSize(900, 420));
   dialog->show();
 }
@@ -689,6 +691,8 @@ void Window::showOverrides() {
   refreshTools();
   table->resizeColumnsToContents();
   updateButtons();
+  // Enter in the table must not press an action as the implicit default button.
+  for (auto button : dialog->findChildren<QPushButton*>()) button->setAutoDefault(false);
   sizeDialog(dialog, QSize(820, 380));
   dialog->show();
 }

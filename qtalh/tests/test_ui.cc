@@ -4262,6 +4262,49 @@ private slots:
     QCOMPARE(engine.state(channels[2]).shelf.until, qint64(0));
     QVERIFY(dialog->findChild<QLabel*>("runtimeOverridesStatus")->text().startsWith("No runtime overrides"));
   }
+  void toolDialogsIgnoreEnter() {
+    // Enter in a filter or list never presses an operator action as an implicit default button.
+    auto w = std::make_unique<Window>(sample(), options(false), false);
+    w->show();
+    auto& engine = w->alarmEngine();
+    const auto channels = w->document().channels();
+    for (auto n : channels) engine.event(n, {0, 0, 0, 1, "0"});
+    engine.event(channels[2], {3, 2, 2, 1, "12"});
+    w->findChild<QAction*>("Active Alarms...")->trigger();
+    QPointer<QDialog> active = w->findChild<QDialog*>("activeAlarmsDialog");
+    QVERIFY(active);
+    auto activeTable = active->findChild<QTableView*>("activeAlarmsTable");
+    QTRY_COMPARE(activeTable->model()->rowCount(), 1);
+    activeTable->selectRow(0);
+    QVERIFY(active->findChild<QPushButton*>("activeAcknowledge")->isEnabled());
+    QTest::keyClick(active->findChild<QLineEdit*>("activeAlarmsFilter"), Qt::Key_Return);
+    QTest::keyClick(activeTable, Qt::Key_Return);
+    QTest::keyClick(activeTable, Qt::Key_Enter, Qt::KeypadModifier);
+    QCOMPARE(engine.state(channels[2]).unack, 2);
+    QVERIFY(active && active->isVisible());
+    engine.setBeep(channels[0], 2);
+    w->findChild<QAction*>("Runtime Overrides...")->trigger();
+    QPointer<QDialog> overrides = w->findChild<QDialog*>("runtimeOverridesDialog");
+    QVERIFY(overrides);
+    auto overridesTable = overrides->findChild<QTableWidget*>("runtimeOverridesTable");
+    QTRY_COMPARE(overridesTable->rowCount(), 1);
+    overridesTable->selectRow(0);
+    QVERIFY(overrides->findChild<QPushButton*>("restoreOverrides")->isEnabled());
+    QTest::keyClick(overridesTable, Qt::Key_Return);
+    QCOMPARE(engine.state(channels[0]).beepThreshold, 2);
+    QVERIFY(overrides && overrides->isVisible());
+    engine.shelve(channels[1], 30, "Maintenance", "tester");
+    w->findChild<QAction*>("Shelved Alarms...")->trigger();
+    QPointer<QDialog> shelved = w->findChild<QDialog*>("shelvedAlarmsDialog");
+    QVERIFY(shelved);
+    auto shelvedTable = shelved->findChild<QTableWidget*>("shelvedAlarmsTable");
+    QCOMPARE(shelvedTable->rowCount(), 1);
+    shelvedTable->selectRow(0);
+    QVERIFY(shelved->findChild<QPushButton*>("unshelveSelected")->isEnabled());
+    QTest::keyClick(shelvedTable, Qt::Key_Return);
+    QVERIFY(engine.state(channels[1]).shelf.until != 0);
+    QVERIFY(shelved && shelved->isVisible());
+  }
   void alarmSummaryPanel() {
     auto w = std::make_unique<Window>(sample(), options(false), false);
     w->show();
