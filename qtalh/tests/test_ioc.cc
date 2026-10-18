@@ -613,6 +613,50 @@ private slots:
     QTRY_COMPARE(e.state(n).severity, 0);
     QVERIFY(e.channelUpdate(n).available);
   }
+  void failedAlarmMonitorSideEffects_data() {
+    QTest::addColumn<bool>("global");
+    QTest::newRow("local") << false;
+    QTest::newRow("global") << true;
+  }
+  void failedAlarmMonitorSideEffects() {
+    // Legacy ALH's alCaNewAlarmEvent (alh/alCA.c) only
+    // prints errMsg for a failed alarm monitor callback and returns. QtALH
+    // (F-713) turns it into the record status READ with severity ERROR.
+    // Record the operator-visible side effects of that event.
+    QFETCH(bool, global);
+    const auto name = prefix + "alarm", output = prefix + "severity";
+    ChannelAccess driver;
+    driver.prepare(name);
+    driver.prepare(output);
+    QTRY_VERIFY(driver.put(name, 0));
+    QTRY_VERIFY(driver.put(output, -1));
+    double sevrpv = -1;
+    driver.number(output, [&](double v) { sevrpv = v; });
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root " + name +
+        "\n$STATCOMMAND READ read-status-command\n$SEVRCOMMAND UP_ERROR up-error\n$SEVRPV " +
+        output + "\n");
+    ChannelAccess ca({global}); Engine e(d, {global}, &ca);
+    auto n = d.channels()[0];
+    QStringList commands, logged;
+    e.command = [&](QString command) { commands << command; };
+    e.alarmLog = [&](Node*, const State& s, qint64) {
+      logged << statusName(s.status) + "/" + severityName(s.severity);
+    };
+    e.start();
+    QTRY_COMPARE(e.state(n).severity, 0);
+    QTest::qWait(150); // Drain the initial healthy monitor and access events.
+    if (global) QTRY_COMPARE(sevrpv, 0.0);
+    commands.clear(); logged.clear();
+    QVERIFY(ChannelAccessTestAccess::failAlarm(ca, name, ECA_GETFAIL));
+    QTest::qWait(300);
+    QCOMPARE(statusName(e.state(n).status), QString("READ"));
+    QCOMPARE(severityName(e.state(n).severity), QString("ERROR"));
+    QVERIFY(commands.contains("read-status-command"));
+    QVERIFY(commands.contains("up-error"));
+    QCOMPARE(logged, QStringList({"READ/ERROR"}));
+    if (global) QCOMPARE(sevrpv, 4.0);
+    else QCOMPARE(sevrpv, -1.0);
+  }
   void failedAlarmMonitorDiagnosticCanRemoveOwner_data() {
     QTest::addColumn<QString>("action");
     for (const auto& action : {"clear", "cancel", "replace", "destroy"})

@@ -255,6 +255,11 @@ QString explain(const State& s, const QHash<QString, QString>& limits) {
   else if (status == "COS") text = "The record changed state; change of state is configured as " + severity + ".";
   else if (status == "LINK") text = "One of the record's input links is disconnected or failed (" + severity + ").";
   else if (status == "UDF") text = "The record's value is undefined; it has not processed successfully (" + severity + ").";
+  // IOC severities are bounded to INVALID; READ with ERROR is the synthetic
+  // event for a failed Channel Access alarm monitor callback, not the record.
+  else if (status == "READ" && s.severity == ErrorSeverity)
+    text = "QtALH's Channel Access alarm monitor for this PV failed; the last reading is no longer "
+           "valid and recovery waits for a fresh alarm sample. The message area shows the CA error.";
   else if (status == "COMM" || status == "TIMEOUT" || status == "READ" || status == "WRITE")
     text = "The record reports a hardware " + status.toLower() + " problem (" + severity + ").";
   else if (status == "NOT_CONNECTED") text = "QtALH cannot connect to this PV; check the IOC and network.";

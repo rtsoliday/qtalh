@@ -441,7 +441,9 @@ outage, until the PV becomes writable or a write to it succeeds. A `pva://`
 output reports it once per outage too, until the PV connects or a write to it
 completes.
 A failed Channel Access alarm read displays `READ / ERROR` and marks the
-observation unavailable until a fresh valid alarm sample arrives.
+observation unavailable until a fresh valid alarm sample arrives. Like a
+disconnection, it is logged and runs ERROR severity commands; it also runs a
+`$STATCOMMAND READ` command. ALH ignored failed alarm reads.
 If connection or access loss is already known, its more specific ERROR status
 is retained.
 In global mode, communication failures have a separate local ERROR acknowledgement.

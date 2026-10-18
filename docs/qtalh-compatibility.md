@@ -142,7 +142,8 @@ change in that direction. `$BEEPSEVERITY` and `$BEEPSEVR` also accept numeric or
 lowercase severities, which ALH ignores. `$STATCOMMAND` triggers must match a
 status name exactly; ALH's prefix match runs `READ_ACCESS` and `WRITE_ACCESS`
 commands on `READ` and `WRITE` status instead. Use the uppercase severity and
-status names in configurations shared with ALH.
+status names in configurations shared with ALH. A `READ` command also runs on a failed
+Channel Access alarm read (see Communication errors), which ALH ignores.
 
 Failed severity-output writes retain only the latest requested value for each PV.
 They retry when the PV connects or regains write access, and are discarded when
@@ -820,6 +821,16 @@ passive mode prevents retry. This also covers automatic transient acknowledgemen
 Read-access loss, disconnection, and Cancel invalidate cached CA alarm events. Recovery
 waits for fresh monitored data, avoiding replay of stale alarms and their commands or
 severity outputs. Write-only access loss retains readable, current observations.
+
+A failed CA alarm monitor callback also invalidates the observation. ALH only prints
+"alCaNewAlarmEvent failed" and keeps the previous alarm state. QtALH reports the CA
+error in the message area and raises `<READ,ERROR>`, or the more specific
+NOT_CONNECTED, NO_READ_ACCESS or NO_WRITE_ACCESS status when that loss is already
+known. Like other communication errors, this writes an alarm-log record, runs
+`$SEVRCOMMAND` ERROR commands, latches the local ERROR acknowledgement in global mode
+and writes `$SEVRPV` 4 in global active mode. It also runs a `$STATCOMMAND READ`
+command, because `READ` is the same status name as an IOC record READ alarm; such a
+record alarm has a severity no higher than INVALID.
 
 Repeated `GROUP NULL` declarations attach to the current group in both top-level and
 included configuration files, matching ALH. Saves normalize these parent references.

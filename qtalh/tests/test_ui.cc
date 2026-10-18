@@ -5221,6 +5221,32 @@ private slots:
                  qPrintable(dialog->findChild<QLabel*>("alarmExplanation")->text()));
     QVERIFY(!dialog->findChild<QLabel*>("alarmExplanation")->text().contains("NO_ALARM alarm"));
   }
+  void alarmDetailsDescribeFailedChannelAccessRead() {
+    // ChannelAccess::updated() delivers {READ_ALARM, ERROR} when QtALH's
+    // own alarm subscription callback fails while the channel is connected and
+    // readable (F-713). The IOC record did not report a READ alarm: IOC
+    // severities are bounded to INVALID, so READ/ERROR is always this
+    // client-side failure. Alarm Details must not blame record hardware.
+    auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root pv\n"), options(false), false);
+    auto& engine = w->alarmEngine(); auto n = w->document().channels()[0];
+    engine.event(n, {0, 0, 0, 1, "5.5"});
+    engine.event(n, {READ_ALARM, 4, 0, -1, "0"});
+    QCOMPARE(statusName(engine.state(n).status), QString("READ"));
+    QCOMPARE(severityName(engine.state(n).severity), QString("ERROR"));
+    auto group = w->findChild<QTreeView*>("groupContents");
+    group->setCurrentIndex(group->model()->index(0, 2));
+    w->findChild<QAction*>("Alarm Details...")->trigger();
+    auto dialog = w->findChild<QDialog*>("alarmDetailsDialog");
+    QVERIFY(dialog);
+    const auto explanation = dialog->findChild<QLabel*>("alarmExplanation")->text();
+    QVERIFY2(!explanation.contains("record reports a hardware read problem"), qPrintable(explanation));
+    QVERIFY2(explanation.contains("Channel Access"), qPrintable(explanation));
+    // A genuine record READ alarm (IOC severity <= INVALID) keeps its wording.
+    engine.event(n, {READ_ALARM, 3, 0, 1, "1"});
+    QTRY_VERIFY2(dialog->findChild<QLabel*>("alarmExplanation")->text().contains(
+                     "The record reports a hardware read problem (INVALID)."),
+                 qPrintable(dialog->findChild<QLabel*>("alarmExplanation")->text()));
+  }
   void alarmDetailsDescribeHeldChange() {
     // A held change of an active alarm names both the held alarm and the input.
     auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root pv\n$ALARMCOUNTFILTER 0 10\n"), options(false), false);

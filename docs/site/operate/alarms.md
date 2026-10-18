@@ -70,7 +70,7 @@ Group indications summarize their eligible descendant channels. Cancelled and di
 | MINOR / yellow | Minor alarm severity. |
 | MAJOR / red | Major alarm severity. |
 | INVALID / white | Invalid record severity. |
-| ERROR / white | QtALH has a connection/access error or is waiting for an initial usable event. |
+| ERROR / white | QtALH has a connection/access error, its Channel Access alarm read failed (`READ` status), or it is waiting for an initial usable event. |
 
 An alarm can be **currently normal and still unacknowledged** after a transient. Inspect both the current state and acknowledgement indication; [Alarm lifecycle](/understand/alarm-lifecycle) explains how they differ.
 
