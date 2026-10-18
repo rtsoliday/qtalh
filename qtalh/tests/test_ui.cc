@@ -2019,6 +2019,124 @@ private slots:
     ioc.process.kill(); QVERIFY(ioc.process.waitForFinished(3000));
     QTRY_VERIFY(!timer->isActive());
   }
+  void reloadReplacesLiveChannels() {
+    // A runtime reload releases the window's only CA context and pvAccess client,
+    // then connects the new file. Outputs, Force inputs and monitors must follow it.
+    QTemporaryDir dir;
+    const auto pid = QCoreApplication::applicationPid();
+    const auto prefix = "qtalh_ui_reload_" + QString::number(pid) + ":";
+    // Above the heartbeat test's 39000-40999 range; uses port..port+3.
+    const int port = 41000 + pid % 2000;
+    struct Environment {
+      QMap<QByteArray, QByteArray> previous;
+      void set(const QByteArray& name, const QByteArray& value) { previous[name] = qgetenv(name.constData()); qputenv(name.constData(), value); }
+      ~Environment() { for (auto it = previous.cbegin(); it != previous.cend(); ++it)
+        if (it.value().isNull()) qunsetenv(it.key().constData()); else qputenv(it.key().constData(), it.value()); }
+    } environment;
+    auto number = [](int value) { return QByteArray::number(value); };
+    environment.set("EPICS_CA_AUTO_ADDR_LIST", "NO");
+    environment.set("EPICS_CA_ADDR_LIST", "127.0.0.1:" + number(port));
+    environment.set("EPICS_CA_SERVER_PORT", number(port));
+    environment.set("EPICS_CA_REPEATER_PORT", number(port + 1));
+    environment.set("EPICS_CAS_INTF_ADDR_LIST", "127.0.0.1");
+    environment.set("EPICS_CAS_BEACON_ADDR_LIST", "127.0.0.1:" + number(port + 1));
+    environment.set("EPICS_PVA_AUTO_ADDR_LIST", "NO");
+    environment.set("EPICS_PVA_ADDR_LIST", "127.0.0.1");
+    environment.set("EPICS_PVA_SERVER_PORT", number(port + 2));
+    environment.set("EPICS_PVA_BROADCAST_PORT", number(port + 3));
+    environment.set("EPICS_PVAS_INTF_ADDR_LIST", "127.0.0.1");
+    for (const auto& setting : isolatedEpicsSettings(port))
+      environment.set(setting.first, setting.second);
+    TestCaRepeater repeater;
+    QVERIFY(repeater.start(EPICS_TEST_BIN, port + 1));
+    QByteArray records;
+    for (auto name : {"alarm", "pvaAlarm"})
+      records += "record(ai,\"" + prefix.toLatin1() + name +
+                 "\") { field(VAL,\"0\") field(HIHI,\"10\") field(HHSV,\"MAJOR\") field(ACKT,\"NO\") }\n";
+    for (auto name : {"sevA", "sevB", "pvaSevA", "pvaSevB", "force"})
+      records += "record(ao,\"" + prefix.toLatin1() + name + "\") { field(VAL,\"-9\") }\n";
+    QFile database(dir.filePath("reload.db")); QVERIFY(database.open(QIODevice::WriteOnly));
+    database.write(records); database.close();
+    struct Ioc {
+      QProcess process;
+      ~Ioc() { process.kill(); process.waitForFinished(3000); }
+    } ioc;
+    ioc.process.setProcessChannelMode(QProcess::MergedChannels);
+    ioc.process.start(QString(EPICS_TEST_BIN) + "/softIocPVA", {"-d", database.fileName()});
+    QVERIFY(ioc.process.waitForStarted());
+    QByteArray startup;
+    QTRY_VERIFY_WITH_TIMEOUT((startup += ioc.process.readAllStandardOutput())
+                                .contains("iocRun: All initialization complete"), 15000);
+    // Version A has its own severity outputs and a Force PV; version B replaces both.
+    auto config = [&](const QString& version) {
+      return parseConfig("GROUP NULL root\n$SEVRPV " + prefix + "sev" + version + "\nCHANNEL root " +
+          prefix + "alarm\n" + (version == "A" ? "$FORCEPV " + prefix + "force -D--- 1 NE\n" : QString()) +
+          "CHANNEL root pva://" + prefix + "pvaAlarm\n$SEVRPV pva://" + prefix + "pvaSev" + version + "\n");
+    };
+    auto o = options(false);
+    o.broadcast = true; o.configDir = dir.path(); o.config = dir.filePath("config");
+    o.engine.global = true; o.engine.caputAckT = true;
+    auto d = config("A"); saveConfig(d, o.config); d.filename = o.config;
+    auto w = std::make_unique<Window>(d, o, true);
+    auto settled = [&] {
+      for (auto n : w->document().channels())
+        if (!w->alarmEngine().state(n).initialized || w->alarmEngine().state(n).severity) return false;
+      return true;
+    };
+    QHash<QString, int> majors;
+    int foreign = 0; // Observations from CA or pvAccess threads instead of the Qt thread.
+    auto count = [&](const AlarmObservation& update) {
+      if (QThread::currentThread() != QCoreApplication::instance()->thread()) ++foreign;
+      if (update.cause == ObservationCause::Processed && update.after.severity == 2) ++majors[update.after.pv];
+    };
+    auto before = w->alarmEngine().observe(count);
+    QTRY_VERIFY_WITH_TIMEOUT(settled(), 10000);
+    QHash<QString, double> values;
+    auto watch = [&](ChannelAccess& driver) {
+      for (QString name : {"sevA", "sevB", "pvaSevA", "pvaSevB", "alarm.ACKT"})
+        driver.number(prefix + name, [&values, name](double v) { values[name] = v; });
+      for (QString name : {"alarm", "pvaAlarm", "force"}) driver.prepare(prefix + name);
+    };
+    auto driver = std::make_unique<ChannelAccess>(); watch(*driver);
+    QTRY_VERIFY_WITH_TIMEOUT(values.value("sevA", -1) == 0 && values.value("pvaSevA", -1) == 0 &&
+                             values.value("sevB", -1) == -9 && values.value("pvaSevB", -1) == -9 &&
+                             values.value("alarm.ACKT", -1) == 1, 10000);
+    auto alarm = w->document().channels()[0];
+    QTRY_VERIFY(driver->put(prefix + "force", 1));
+    QTRY_VERIFY(w->alarmEngine().state(alarm).mask[Disable]);
+    QVERIFY(driver->put(prefix + "force", 0));
+    QTRY_VERIFY(!w->alarmEngine().state(alarm).mask[Disable]);
+    QTRY_VERIFY(driver->put(prefix + "alarm", 0, WriteKind::AckTransient));
+    QTRY_COMPARE(values.value("alarm.ACKT"), 0.0);
+    // Leave the window as the only Channel Access client, so the reload
+    // destroys and recreates the CA context.
+    driver.reset(); values.clear();
+    saveConfig(config("B"), o.config);
+    Logging sender(o, "root"); QVERIFY(sender.sendBroadcast("reload", 0, true));
+    QTRY_COMPARE_WITH_TIMEOUT(w->document().root->option("SEVRPV"), prefix + "sevB", 5000);
+    auto after = w->alarmEngine().observe(count);
+    QTRY_VERIFY_WITH_TIMEOUT(settled(), 10000);
+    alarm = w->document().channels()[0];
+    driver = std::make_unique<ChannelAccess>(); watch(*driver);
+    // The new runtime publishes its own outputs and reapplies -caputackt, as ALH's setupConfig.
+    QTRY_VERIFY_WITH_TIMEOUT(values.value("sevB", -1) == 0 && values.value("pvaSevB", -1) == 0 &&
+                             values.value("alarm.ACKT", -1) == 1 && values.contains("sevA") &&
+                             values.contains("pvaSevA"), 10000);
+    for (auto name : {"sevA", "pvaSevA"}) QVERIFY(driver->put(prefix + name, 7));
+    QTRY_VERIFY(driver->put(prefix + "force", 1));
+    QTRY_VERIFY(values.value("sevA") == 7 && values.value("pvaSevA") == 7);
+    majors.clear();
+    QTRY_VERIFY(driver->put(prefix + "alarm", 20)); QTRY_VERIFY(driver->put(prefix + "pvaAlarm", 20));
+    QTRY_VERIFY(values.value("sevB") == 2 && values.value("pvaSevB") == 2);
+    QTest::qWait(300);
+    // One subscription per channel, and removed outputs and Force inputs stay released.
+    QCOMPARE(majors.value(prefix + "alarm"), 1);
+    QCOMPARE(majors.value("pva://" + prefix + "pvaAlarm"), 1);
+    QCOMPARE(values.value("sevA"), 7.0); QCOMPARE(values.value("pvaSevA"), 7.0);
+    QVERIFY(!w->alarmEngine().state(alarm).mask[Disable]);
+    QCOMPARE(foreign, 0);
+    driver.reset(); w.reset();
+  }
   void initialGeometry_data() {
     QTest::addColumn<int>("mode"); QTest::addColumn<QString>("geometry");
     for (int mode : {0, 1, 2})
