@@ -1,5 +1,6 @@
 #include "help.h"
 #include "about_banner.h"
+#include "core/version.h"
 #include <QDesktopServices>
 #include <QTextBlock>
 #include <QTextDocumentFragment>
@@ -503,7 +504,8 @@ void showAbout(QWidget* parent) {
   setPresentationFont(title, font);
   layout->addWidget(title);
   auto message = new QLabel(
-      "<p>Qt port of ALH 1.2.35<br>EPICS Alarm Handler and Alarm Configuration Tool<br>"
+      "<p>Version " QTALH_VERSION " · Qt port of ALH " ALH_BASE_VERSION "<br>"
+      "EPICS Alarm Handler and Alarm Configuration Tool<br>"
       "Developed at Argonne National Laboratory</p>"
       "<p><b>Qt port development and maintenance</b><br>Robert Soliday "
       "(<a href=\"mailto:soliday@anl.gov\">soliday@anl.gov</a>)</p>"

@@ -206,7 +206,7 @@ INCLUDE paths retain their separate configuration-directory rule.
 | `-platform platform` | Qt platform selection, for example `offscreen` or `xcb`. |
 | `-style name`, `-style=name` | Appearance: `modern` (default), `motif` (classic ALH look), `fusion`, or an installed Qt Widgets style. Names are case-insensitive; the last occurrence wins. |
 | `-help`, `--help`, `-h` | Print help without opening a display. |
-| `-version`, `--version`, `-v` | Print ALH, Qt, and EPICS version information without opening a display. |
+| `-version`, `--version`, `-v` | Print the QtALH version, the ALH version it is based on, and the Qt and EPICS versions without opening a display. |
 | `--validate` | Parse the configuration and includes, report group/channel counts, then exit. |
 | `--to-phoebus out.xml` | Convert the configuration to Phoebus alarm XML, report unconverted settings, then exit. |
 | `--from-phoebus out.alhConfig` | Convert the Phoebus XML file given as the configuration argument to an ALH configuration, then exit. |

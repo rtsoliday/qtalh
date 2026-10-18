@@ -1,5 +1,6 @@
 #include "core/diagnostics.h"
 #include "core/phoebus.h"
+#include "core/version.h"
 #include "services/options.h"
 #include "ui/window.h"
 #include "ui/dialogs.h"
@@ -23,8 +24,8 @@ int main(int argc, char** argv) {
       return 0;
     }
     if (options.version) {
-      QTextStream(stdout) << "QtALH (ALH 1.2.35) Qt " << qVersion() << " " << EPICS_VERSION_STRING
-                          << '\n';
+      QTextStream(stdout) << "QtALH " QTALH_VERSION " (based on ALH " ALH_BASE_VERSION ") Qt "
+                          << qVersion() << " " << EPICS_VERSION_STRING << '\n';
       return 0;
     }
     if (options.validate) {

@@ -34,6 +34,7 @@ they do not require Qt or EPICS. See the
 
 - [QtALH user guide](docs/qtalh-user-guide.md): first run, all command-line
   options, configuration syntax, logging, and troubleshooting.
+- [Release notes](CHANGELOG.md): QtALH versions and their user-visible changes.
 - [Test guide](qtalh/tests/README.md): prerequisites, suite commands, artifacts,
   and the audio fixture.
 - [Compatibility inventory](docs/qtalh-compatibility.md): implementation evidence

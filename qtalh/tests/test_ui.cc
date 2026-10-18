@@ -3475,6 +3475,26 @@ private slots:
                                    "$FORCEPV_CALC A>0.5\n$FORCEPV_CALC_A 0.75\n");
     QVERIFY2(output.contains("root: Force Mask -D---"), output.constData());
   }
+  void versionIdentifiesQtalhRelease() {
+    // Bug reports must be able to tell QtALH releases apart, so --version and
+    // About name the QtALH release, not only the legacy ALH base version.
+    QProcess process;
+    process.start(QDir(QCoreApplication::applicationDirPath()).filePath("qtalh"), {"--version"});
+    QVERIFY(process.waitForFinished()); QCOMPARE(process.exitCode(), 0);
+    const auto output = QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed();
+    const auto match = QRegularExpression("^QtALH (\\d+\\.\\d+\\.\\d+\\S*) \\(based on ALH \\d+\\.\\d+\\.\\d+\\) Qt ")
+                           .match(output);
+    QVERIFY2(match.hasMatch(), qPrintable(output));
+    QString about;
+    QTimer::singleShot(0, [&] {
+      auto dialog = qobject_cast<QDialog*>(qApp->activeModalWidget());
+      if (!dialog) return;
+      for (auto label : dialog->findChildren<QLabel*>()) about += label->text();
+      dialog->reject();
+    });
+    showAbout(nullptr);
+    QVERIFY2(about.contains("Version " + match.captured(1)), qPrintable(about));
+  }
   void propertiesEditRoundTrip() {
     auto d = parseConfig("GROUP NULL root\nCHANNEL root pv -D---\n$ACKPV ack 2\n"
                          "$FORCEPV gate -D--- 1 NE\n$ALARMCOUNTFILTER 2 10\n"

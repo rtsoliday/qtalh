@@ -416,7 +416,7 @@ Other command-line differences from ALH:
 
 - Help and version text go to stdout with exit status 0; ALH writes them to
   stderr and exits with status 1. The version line is
-  `QtALH (ALH 1.2.35) Qt <version> <EPICS version>` rather than
+  `QtALH 1.0.0 (based on ALH 1.2.35) Qt <version> <EPICS version>` rather than
   `ALH Version 1.2.35  (<EPICS version>)`.
 - Option values may begin with `-`, so a missing value takes the next switch
   as its value (for example, `-a -L` uses `-L` as the alarm filename and does
