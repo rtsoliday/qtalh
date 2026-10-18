@@ -5,6 +5,7 @@
 #include <QSocketNotifier>
 #include <QTimer>
 #include <cadef.h>
+#include <mutex>
 namespace alh {
 class ChannelAccess final : public QObject, public PvService {
 public:
@@ -40,6 +41,9 @@ public:
 private:
   struct Channel {
     ChannelAccess* owner = nullptr;
+    // Identifies the channel in queued callbacks; epoch changes when its
+    // subscription is cleared, so queued events from that subscription are dropped.
+    quint64 serial = 0, epoch = 0;
     const void* tag = nullptr;
     QString name, numericError;
     chid id = nullptr;
@@ -56,6 +60,8 @@ private:
   EngineOptions options;
   std::vector<std::unique_ptr<Channel>> channels;
   QHash<QString, QVector<Channel*>> channelsByName;
+  QHash<quint64, Channel*> channelsBySerial;
+  quint64 nextSerial = 0;
   QHash<int, QSocketNotifier*> sockets;
   QHash<QString, bool> initialAckT; // Keyed by record name.
   QSet<QString> initialAckTargets; // Configured CA names, retaining their fields.
@@ -67,6 +73,7 @@ private:
   bool recheckPending = false;
   qint64 nextDeadline = 0;
   void noteDeadline(const Channel*);
+  void forget(Channel*);
   Channel* add(const QString&);
   void subscribe(Channel*);
   void report(int, const QString&);
@@ -89,6 +96,30 @@ private:
   std::vector<std::unique_ptr<Read>> reads;
   quint64 nextRead = 0;
   void finishRead(quint64 id);
+  // Non-preemptive CA runs callbacks on its own threads while poll() waits in
+  // ca_poll(). They only copy their arguments here; dispatch() applies them on
+  // the Qt thread after ca_poll() returns, so Engine and UI code never run on CA threads.
+  struct Callback {
+    enum Kind { Connection, Access, Update, ReadConnection, ReadValue } kind = Connection;
+    quint64 channel = 0, epoch = 0, read = 0;
+    ReadItem* item = nullptr;
+    long op = 0;
+    int status = 0;
+    long type = 0;
+    bool data = false;
+    Event event;
+    double number = 0;
+    QString text;
+  };
+  std::mutex callbackLock;
+  std::vector<Callback> callbacks;
+  void defer(Callback);
+  void dispatch();
+  void connected(Channel*, long op);
+  void rightsChanged(Channel*);
+  void updated(Channel*, const Callback&);
+  void readConnected(ReadItem*, long op);
+  void readCompleted(ReadItem*, const Callback&);
   static void readConnection(connection_handler_args);
   static void readValue(event_handler_args);
   static void connection(connection_handler_args);

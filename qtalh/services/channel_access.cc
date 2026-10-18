@@ -3,6 +3,7 @@
 #include "channel_access.h"
 #include <alarm.h>
 #include <db_access.h>
+#include <QPointer>
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
@@ -65,11 +66,13 @@ ChannelAccess::Channel* ChannelAccess::add(const QString& name) {
   debugLog(options.debug, "CA", "create " + name);
   auto p = std::make_unique<Channel>();
   p->owner = this;
+  p->serial = ++nextSerial;
   p->name = name;
   p->connectionDeadline = monotonicNow() + 1000;
   auto c = p.get();
   channels.push_back(std::move(p));
   channelsByName[name].push_back(c);
+  channelsBySerial.insert(c->serial, c);
   noteDeadline(c);
   report(
       ca_create_channel(name.toLocal8Bit().constData(), connection, c, CA_PRIORITY_DEFAULT, &c->id),
@@ -170,43 +173,130 @@ void ChannelAccess::subscribe(Channel* c) {
   report(ca_create_subscription(type, 1, c->id, events, update, c, &c->subscription),
          "Subscribe " + c->name);
 }
+void ChannelAccess::defer(Callback callback) {
+  std::lock_guard<std::mutex> guard(callbackLock);
+  callbacks.push_back(std::move(callback));
+}
+void ChannelAccess::dispatch() {
+  std::vector<Callback> batch;
+  {
+    std::lock_guard<std::mutex> guard(callbackLock);
+    batch.swap(callbacks);
+  }
+  // A callback can clear channels or destroy this adapter (for example by
+  // replacing the configuration); later entries must then be discarded.
+  QPointer<ChannelAccess> self(this);
+  for (const auto& callback : batch) {
+    if (!self)
+      return;
+    if (callback.kind == Callback::ReadConnection || callback.kind == Callback::ReadValue) {
+      auto read = std::find_if(reads.begin(), reads.end(),
+                               [&](const auto& r) { return r->id == callback.read; });
+      if (read == reads.end() ||
+          std::none_of((*read)->items.begin(), (*read)->items.end(),
+                       [&](const auto& item) { return item.get() == callback.item; }))
+        continue;
+      if (callback.kind == Callback::ReadConnection)
+        readConnected(callback.item, callback.op);
+      else
+        readCompleted(callback.item, callback);
+      continue;
+    }
+    auto c = channelsBySerial.value(callback.channel);
+    if (!c)
+      continue;
+    if (callback.kind == Callback::Connection)
+      connected(c, callback.op);
+    else if (callback.kind == Callback::Access)
+      rightsChanged(c);
+    else if (c->epoch == callback.epoch)
+      updated(c, callback);
+  }
+}
 void ChannelAccess::connection(connection_handler_args a) {
   auto c = static_cast<Channel*>(ca_puser(a.chid));
-  if (!c || c->owner->clearing || c->cancelled)
+  if (!c)
     return;
-  if (c->owner->options.debug)
-    debugLog(true, "CA", c->name + (a.op == CA_OP_CONN_UP ? " connected" : " disconnected"));
-  if (a.op == CA_OP_CONN_UP) {
-    c->connectionDeadline = 0;
-    c->owner->subscribe(c);
-    access_rights_handler_args ar{};
-    ar.chid = a.chid;
-    access(ar);
-  } else if (a.op == CA_OP_CONN_DOWN) {
-    c->haveLast = false; // Recovery must wait for a fresh subscription event.
-    if (c->alarm)
-      c->alarm({ALARM_NSTATUS, 4, 0, -1, "0"});
-    c->owner->numericUnavailable(c, "PV not connected");
-  }
+  Callback callback;
+  callback.kind = Callback::Connection;
+  callback.channel = c->serial;
+  callback.op = a.op;
+  c->owner->defer(std::move(callback));
 }
 void ChannelAccess::access(access_rights_handler_args a) {
   auto c = static_cast<Channel*>(ca_puser(a.chid));
-  if (!c || c->owner->clearing || c->cancelled || ca_state(a.chid) != cs_conn)
+  if (!c)
     return;
+  Callback callback;
+  callback.kind = Callback::Access;
+  callback.channel = c->serial;
+  c->owner->defer(std::move(callback));
+}
+void ChannelAccess::update(event_handler_args a) {
+  auto c = static_cast<Channel*>(a.usr);
+  if (!c)
+    return;
+  Callback callback;
+  callback.kind = Callback::Update;
+  callback.channel = c->serial;
+  callback.epoch = c->epoch;
+  callback.status = a.status;
+  callback.type = a.type;
+  // The DBR buffer belongs to CA and is valid only during this callback.
+  if (a.status == ECA_NORMAL && a.dbr) {
+    callback.data = true;
+    if (a.type == DBR_STRING) {
+      auto value = static_cast<const char*>(a.dbr);
+      callback.text = QString::fromLocal8Bit(value, int(strnlen(value, MAX_STRING_SIZE)));
+    } else if (a.type == DBR_DOUBLE) {
+      callback.number = *static_cast<const double*>(a.dbr);
+    } else if (a.type == DBR_STSACK_STRING) {
+      auto d = static_cast<const dbr_stsack_string*>(a.dbr);
+      callback.event = {qBound(0, int(d->status), ALARM_NSTATUS - 1), qBound(0, int(d->severity), 3),
+                        qBound(0, int(d->acks), 3), int(d->ackt),
+                        QString::fromLocal8Bit(d->value, int(strnlen(d->value, MAX_STRING_SIZE)))};
+    } else {
+      return;
+    }
+  }
+  c->owner->defer(std::move(callback));
+}
+void ChannelAccess::connected(Channel* c, long op) {
+  if (clearing || c->cancelled)
+    return;
+  if (options.debug)
+    debugLog(true, "CA", c->name + (op == CA_OP_CONN_UP ? " connected" : " disconnected"));
+  if (op == CA_OP_CONN_UP) {
+    c->connectionDeadline = 0;
+    subscribe(c);
+    rightsChanged(c);
+  } else if (op == CA_OP_CONN_DOWN) {
+    c->haveLast = false; // Recovery must wait for a fresh subscription event.
+    if (c->alarm)
+      c->alarm({ALARM_NSTATUS, 4, 0, -1, "0"});
+    // The alarm callback may have cancelled or removed this channel.
+    if ((c = channelsBySerial.value(c->serial)))
+      numericUnavailable(c, "PV not connected");
+  }
+}
+void ChannelAccess::rightsChanged(Channel* c) {
+  if (clearing || c->cancelled || !c->id || ca_state(c->id) != cs_conn)
+    return;
+  const auto a = c->id;
   c->recheckAccess = false;
-  if (c->owner->options.debug)
+  if (options.debug)
     debugLog(true, "CA", QString("%1 access read=%2 write=%3").arg(c->name)
-        .arg(ca_read_access(a.chid)).arg(ca_write_access(a.chid)));
-  if (!ca_read_access(a.chid)) {
+        .arg(ca_read_access(a)).arg(ca_write_access(a)));
+  if (!ca_read_access(a)) {
     // A cached alarm predates the access gap. Replaying it on recovery can
     // dispatch false commands/outputs before the IOC's current event arrives.
     c->haveLast = false;
     c->owner->numericUnavailable(c, "No read access for PV");
   }
   if (c->alarm) {
-    if (!ca_read_access(a.chid))
+    if (!ca_read_access(a))
       c->alarm({ALARM_NSTATUS + 1, 4, 0, -1, "0"});
-    else if (c->owner->options.global && !c->owner->options.passive && !ca_write_access(a.chid))
+    else if (c->owner->options.global && !c->owner->options.passive && !ca_write_access(a))
       c->alarm({ALARM_NSTATUS + 2, 4, 0, -1, "0"});
     else if (c->haveLast)
       c->alarm(c->last);
@@ -229,49 +319,46 @@ void ChannelAccess::access(access_rights_handler_args a) {
   // longer pending, so an output IOC restart can leave SEVRPV at its startup
   // value while the monitored alarm stays unchanged. Address republishing the
   // current desired severity on reconnect in a later change; retain behavior now.
-  if (ca_write_access(a.chid) && c->owner->pendingSeverity.contains(c->name))
+  if (ca_write_access(a) && c->owner->pendingSeverity.contains(c->name))
     c->owner->put(c->name, c->owner->pendingSeverity.value(c->name), WriteKind::Severity);
 }
-void ChannelAccess::update(event_handler_args a) {
-  auto c = static_cast<Channel*>(a.usr);
-  if (!c || c->owner->clearing || c->cancelled)
+void ChannelAccess::updated(Channel* c, const Callback& a) {
+  if (clearing || c->cancelled)
     return;
-  if (a.status != ECA_NORMAL || !a.dbr) {
+  if (!a.data) {
     // Possible inherited ALH bug, deferred: alarm monitor failures only report
     // a diagnostic below, leaving the last alarm state and haveLast cache valid.
     // A previously healthy channel can remain available with no ERROR latch.
     // Address invalidation/error state and fresh-sample recovery in a later
     // change; preserve the current alarm behavior here.
     if (c->numeric)
-      c->owner->numericUnavailable(c, "Monitor failed: " +
-                                          QString::fromLocal8Bit(ca_message(a.status)));
+      numericUnavailable(c, "Monitor failed: " + QString::fromLocal8Bit(ca_message(a.status)));
     else
-      c->owner->report(a.status, "Monitor " + c->name);
+      report(a.status, "Monitor " + c->name);
     return;
   }
   if (c->text) {
     // Descriptions require read access only. Preserve the last valid text while
     // disconnected or unreadable instead of replacing it with an alarm value.
-    if (ca_read_access(c->id)) {
-      auto value = static_cast<const char*>(a.dbr);
-      c->text(QString::fromLocal8Bit(value, int(strnlen(value, MAX_STRING_SIZE))));
-    }
+    if (a.type == DBR_STRING && ca_read_access(c->id))
+      c->text(a.text);
     return;
   }
   if (c->numeric) {
+    if (a.type != DBR_DOUBLE)
+      return;
     if (!ca_read_access(c->id)) {
-      c->owner->numericUnavailable(c, "No read access for PV");
+      numericUnavailable(c, "No read access for PV");
       return;
     }
     c->numericError.clear();
-    c->numeric(*static_cast<const double*>(a.dbr));
+    c->numeric(a.number);
     return;
   }
-  auto d = static_cast<const dbr_stsack_string*>(a.dbr);
+  if (a.type != DBR_STSACK_STRING)
+    return;
   c->recheckAccess = false; // This fresh event also checks the current rights below.
-  Event e{qBound(0, int(d->status), ALARM_NSTATUS - 1), qBound(0, int(d->severity), 3),
-          qBound(0, int(d->acks), 3), int(d->ackt),
-          QString::fromLocal8Bit(d->value, int(strnlen(d->value, MAX_STRING_SIZE)))};
+  Event e = a.event;
   if (!ca_read_access(c->id)) {
     // Do not repopulate the cache from events queued before access was lost.
     c->haveLast = false;
@@ -281,7 +368,7 @@ void ChannelAccess::update(event_handler_args a) {
     c->haveLast = true;
     // Write-only access loss still permits fresh read observations; retain
     // that cache so write access recovery works even without a value change.
-    if (c->owner->options.global && !c->owner->options.passive && !ca_write_access(c->id))
+    if (options.global && !options.passive && !ca_write_access(c->id))
       e = {ALARM_NSTATUS + 2, 4, 0, -1, "0"};
   }
   if (c->alarm)
@@ -339,6 +426,7 @@ void ChannelAccess::cancel(const QString& n, const void* tag) {
       if (c->subscription) {
         ca_clear_subscription(c->subscription);
         c->subscription = nullptr;
+        ++c->epoch;
       }
     }
 }
@@ -353,6 +441,7 @@ void ChannelAccess::cancelNumbers(const void* tag) {
     if (c->subscription) {
       ca_clear_subscription(c->subscription);
       c->subscription = nullptr;
+      ++c->epoch;
     }
     c->numeric = {};
     if (c->prepared) {
@@ -365,6 +454,7 @@ void ChannelAccess::cancelNumbers(const void* tag) {
     } else {
       if (c->id)
         ca_clear_channel(c->id);
+      channelsBySerial.remove(c->serial);
       auto names = channelsByName.find(c->name);
       if (names != channelsByName.end()) {
         names->removeAll(c);
@@ -393,6 +483,11 @@ void ChannelAccess::clear() {
   ca_flush_io();
   channels.clear();
   channelsByName.clear();
+  channelsBySerial.clear();
+  {
+    std::lock_guard<std::mutex> guard(callbackLock);
+    callbacks.clear();
+  }
   recheckPending = false;
   nextDeadline = 0;
   pendingSeverity.clear();
@@ -404,6 +499,18 @@ void ChannelAccess::poll() {
     return;
   dispatching = true;
   ca_poll();
+  // Adapters share one CA context, so ca_poll() may have queued work for any of them.
+  QVector<QPointer<ChannelAccess>> adapters;
+  for (auto adapter : contexts)
+    adapters << adapter;
+  QPointer<ChannelAccess> self(this);
+  for (const auto& adapter : adapters)
+    if (adapter)
+      adapter->dispatch();
+  if (!self) {
+    dispatching = false;
+    return;
+  }
   auto now = monotonicNow();
   // Scan the channels only when an access recheck or connection deadline is
   // pending; the periodic poll otherwise costs nothing per channel.
@@ -416,9 +523,7 @@ void ChannelAccess::poll() {
       if (c->id && ca_state(c->id) == cs_conn) {
         // Cancel invalidates haveLast; healthy recovery must use fresh IOC data.
         // Keeping this work on the channel also makes cancel/clear discard it.
-        access_rights_handler_args rights{};
-        rights.chid = c->id;
-        access(rights);
+        rightsChanged(c.get());
       }
     }
   }
@@ -479,14 +584,25 @@ void ChannelAccess::finishRead(quint64 id) {
 }
 void ChannelAccess::readConnection(connection_handler_args a) {
   auto item = static_cast<ReadItem*>(ca_puser(a.chid));
-  if (!item || item->owner->clearing || item->requested || a.op != CA_OP_CONN_UP)
+  if (!item)
     return;
-  if (!ca_read_access(a.chid))
+  Callback callback;
+  callback.kind = Callback::ReadConnection;
+  callback.item = item;
+  callback.read = item->read->id;
+  callback.op = a.op;
+  item->owner->defer(std::move(callback));
+}
+void ChannelAccess::readConnected(ReadItem* item, long op) {
+  if (clearing || item->requested || op != CA_OP_CONN_UP || !item->id ||
+      ca_state(item->id) != cs_conn)
+    return;
+  if (!ca_read_access(item->id))
     return;
   // One get per item: a reconnect must not complete this field twice and
   // consume another field's pending slot.
   item->requested = true;
-  if (ca_array_get_callback(DBR_STRING, 1, a.chid, readValue, item) != ECA_NORMAL) {
+  if (ca_array_get_callback(DBR_STRING, 1, item->id, readValue, item) != ECA_NORMAL) {
     item->requested = false;
     return;
   }
@@ -494,16 +610,29 @@ void ChannelAccess::readConnection(connection_handler_args a) {
 }
 void ChannelAccess::readValue(event_handler_args a) {
   auto item = static_cast<ReadItem*>(a.usr);
-  if (!item || item->owner->clearing)
+  if (!item)
     return;
-  auto read = item->read;
+  Callback callback;
+  callback.kind = Callback::ReadValue;
+  callback.item = item;
+  callback.read = item->read->id;
+  callback.status = a.status;
   if (a.status == ECA_NORMAL && a.dbr) {
     auto value = static_cast<const char*>(a.dbr);
-    read->values[item->name] = QString::fromLocal8Bit(value, int(strnlen(value, MAX_STRING_SIZE))).trimmed();
+    callback.data = true;
+    callback.text = QString::fromLocal8Bit(value, int(strnlen(value, MAX_STRING_SIZE)));
   }
+  item->owner->defer(std::move(callback));
+}
+void ChannelAccess::readCompleted(ReadItem* item, const Callback& a) {
+  if (clearing)
+    return;
+  auto read = item->read;
+  if (a.data)
+    read->values[item->name] = a.text.trimmed();
   // Channels are cleared outside their own callback.
   if (--read->pending == 0)
-    QTimer::singleShot(0, item->owner, [owner = item->owner, id = read->id] { owner->finishRead(id); });
+    QTimer::singleShot(0, this, [this, id = read->id] { finishRead(id); });
 }
 void ChannelAccess::noteDeadline(const Channel* c) {
   // Deadlines cleared by a connection leave this stale; poll() then rescans once.

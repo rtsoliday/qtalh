@@ -4,6 +4,7 @@
 #include "core/analytics.h"
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QThread>
 #include <QtTest>
 #include <cmath>
 using namespace alh;
@@ -90,6 +91,36 @@ private slots:
     // Re-reading RTYP must not decrement the missing record's pending count.
     QVERIFY(!done);
     ca.clear();
+  }
+
+  void caCallbacksRunOnQtThread() {
+    // Non-preemptive CA runs callbacks on its own threads while ca_poll() waits.
+    // Engine, logging and widget code reached from them must still run on the
+    // Qt thread, including disconnect diagnostics and one-shot reads.
+    ChannelAccess ca({true});
+    const auto qtThread = QThread::currentThread();
+    int calls = 0, foreign = 0;
+    auto note = [&] { ++calls; if (QThread::currentThread() != qtThread) ++foreign; };
+    int severity = -1;
+    QString description;
+    double value = 0;
+    bool unavailable = false, read = false;
+    ca.error = [&](const QString&) { note(); };
+    ca.monitor(prefix + "alarm", [&](Event e) { note(); severity = e.severity; });
+    ca.number(prefix + "alarm", [&](double v) { note(); unavailable = std::isnan(v); value = v; });
+    ca.text(prefix + "alarm.DESC", [&](QString s) { note(); description = s; });
+    QTRY_VERIFY(severity >= 0 && severity < 4);
+    ca.readStrings({prefix + "alarm.RTYP"}, [&](QHash<QString, QString>) { note(); read = true; }, 5000);
+    QTRY_VERIFY(read);
+    ioc.kill(); QVERIFY(ioc.waitForFinished());
+    QTRY_COMPARE(severity, 4);
+    QTRY_VERIFY(unavailable);
+    startIoc();
+    QTRY_VERIFY_WITH_TIMEOUT(severity >= 0 && severity < 4 && !unavailable, 15000);
+    QVERIFY(calls > 0);
+    QCOMPARE(foreign, 0);
+    Q_UNUSED(value);
+    Q_UNUSED(description);
   }
 
   void analyticsConfirmedAcknowledgementsAndGaps() {
