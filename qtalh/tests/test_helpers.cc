@@ -2,6 +2,7 @@
 #include "services/logging.h"
 #include "services/log_recovery.h"
 #include "services/sha256.h"
+#include "ca_repeater.h"
 #include <QCryptographicHash>
 #include <QtEndian>
 #include <QLocale>
@@ -231,6 +232,43 @@ struct RpcServer {
 class HelperTests : public QObject {
   Q_OBJECT
 private slots:
+  void repeaterRetriesExitedChild() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    auto stub = dir.filePath("caRepeater");
+#ifdef Q_OS_WIN
+    stub += ".exe";
+#endif
+    // Run this binary's private stub mode without depending on a real IOC or
+    // repeater. The first child exits; the second owns a private UDP socket.
+    QVERIFY(QFile::copy(QCoreApplication::applicationFilePath(), stub));
+    const auto markerPath = dir.filePath("attempts");
+    struct Environment {
+      QByteArray previous = qgetenv("QTALH_TEST_REPEATER_RETRY");
+      ~Environment() {
+        if (previous.isNull()) qunsetenv("QTALH_TEST_REPEATER_RETRY");
+        else qputenv("QTALH_TEST_REPEATER_RETRY", previous);
+      }
+    } environment;
+    qputenv("QTALH_TEST_REPEATER_RETRY", markerPath.toUtf8());
+    QUdpSocket reservation;
+    QVERIFY(reservation.bind(QHostAddress::LocalHost, 0, QUdpSocket::DontShareAddress));
+    const auto port = reservation.localPort(); reservation.close();
+    {
+      TestCaRepeater repeater;
+      QVERIFY(repeater.start(dir.path(), port));
+      QCOMPARE(repeater.process.state(), QProcess::Running);
+      QFile marker(markerPath);
+      QVERIFY(marker.open(QIODevice::ReadOnly));
+      auto attempts = marker.readAll().split('\n'); attempts.removeAll(QByteArray());
+      QVERIFY(attempts.size() >= 2);
+      QCOMPARE(attempts.last().toLongLong(), repeater.process.processId());
+    }
+    // The stub stays in its event loop with the socket open until owned
+    // cleanup terminates it. The port must be free after helper destruction.
+    QUdpSocket released;
+    QVERIFY(released.bind(QHostAddress::LocalHost, port, QUdpSocket::DontShareAddress));
+  }
   void boundedLogIdentityCache() {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -3009,6 +3047,18 @@ private slots:
 };
 int main(int argc, char** argv) {
   QCoreApplication app(argc, argv);
+  const auto retryMarker = qEnvironmentVariable("QTALH_TEST_REPEATER_RETRY");
+  if (!retryMarker.isEmpty() && QFileInfo(app.applicationFilePath()).baseName() == "caRepeater") {
+    QFile marker(retryMarker);
+    const bool first = !marker.exists();
+    if (!marker.open(QIODevice::WriteOnly | QIODevice::Append)) return 2;
+    marker.write(QByteArray::number(QCoreApplication::applicationPid()) + '\n'); marker.close();
+    if (first) return 0;
+    QUdpSocket socket;
+    if (!socket.bind(QHostAddress::LocalHost, qEnvironmentVariableIntValue("EPICS_CA_REPEATER_PORT"),
+                     QUdpSocket::DontShareAddress)) return 3;
+    return app.exec();
+  }
   if (app.arguments().size() == 5 && app.arguments()[1] == "--append-probe") {
     const auto directory = app.arguments()[2], worker = app.arguments()[3];
     const auto time = app.arguments()[4].toLongLong();

@@ -41,6 +41,11 @@ struct TestCaRepeater {
       elapsed.start();
       while (process.state() == QProcess::Running && elapsed.elapsed() < 5000) {
         QThread::msleep(20);
+        // state() is cached. This synchronous loop does not run Qt events,
+        // so collect an exited child before deciding whether to retry it.
+        process.waitForFinished(0);
+        if (process.state() != QProcess::Running)
+          break;
         QUdpSocket probe;
         if (!probe.bind(QHostAddress::AnyIPv4, port, QUdpSocket::DontShareAddress))
           return process.state() == QProcess::Running;
