@@ -129,6 +129,8 @@ and ports, using [ioc.db](ioc.db) and [ioc.acf](ioc.acf). They do not write to
 production records. Each also starts its own `caRepeater` on its private
 repeater port and stops it at exit; otherwise Channel Access would start a
 detached repeater that outlives the test and holds piped output open.
+The UI suite also owns a private repeater for runtime subprocesses and editor
+activation outside the individual IOC cases; it stops that repeater at suite exit.
 The harnesses also override inherited settings that take precedence over
 their loopback address lists (`isolatedEpicsSettings()` in
 [ca_repeater.h](ca_repeater.h)): they clear `EPICS_CA_NAME_SERVERS` and pin

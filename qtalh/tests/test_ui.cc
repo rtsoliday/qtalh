@@ -97,6 +97,21 @@ static void nativeMediaCase(const QString& name) {
 class UiTests : public QObject {
   Q_OBJECT
   QTemporaryDir notificationConfig;
+  struct SuiteEnvironment {
+    QMap<QByteArray, QByteArray> previous;
+    void set(const QByteArray& name, const QByteArray& value) {
+      previous[name] = qgetenv(name.constData());
+      qputenv(name.constData(), value);
+    }
+    ~SuiteEnvironment() {
+      for (auto it = previous.cbegin(); it != previous.cend(); ++it)
+        if (it.value().isNull()) qunsetenv(it.key().constData());
+        else qputenv(it.key().constData(), it.value());
+    }
+  } suiteEnvironment;
+  // Runtime subprocesses and editor activation also create CA contexts. Own
+  // their repeater for the whole suite, beyond the per-IOC test harnesses.
+  TestCaRepeater suiteRepeater;
   Options options(bool editor) {
     Options o;
     o.editor = editor;
@@ -1465,6 +1480,21 @@ private slots:
 
   void initTestCase() {
     qputenv("XDG_CONFIG_HOME", notificationConfig.path().toUtf8());
+    const int port = 45000 + (QCoreApplication::applicationPid() % 3000) * 4;
+    suiteEnvironment.set("EPICS_CA_AUTO_ADDR_LIST", "NO");
+    suiteEnvironment.set("EPICS_CA_ADDR_LIST", "127.0.0.1:" + QByteArray::number(port));
+    suiteEnvironment.set("EPICS_CA_SERVER_PORT", QByteArray::number(port));
+    suiteEnvironment.set("EPICS_CA_REPEATER_PORT", QByteArray::number(port + 1));
+    suiteEnvironment.set("EPICS_CAS_INTF_ADDR_LIST", "127.0.0.1");
+    suiteEnvironment.set("EPICS_CAS_BEACON_ADDR_LIST", "127.0.0.1:" + QByteArray::number(port + 1));
+    suiteEnvironment.set("EPICS_PVA_AUTO_ADDR_LIST", "NO");
+    suiteEnvironment.set("EPICS_PVA_ADDR_LIST", "127.0.0.1");
+    suiteEnvironment.set("EPICS_PVA_SERVER_PORT", QByteArray::number(port + 2));
+    suiteEnvironment.set("EPICS_PVA_BROADCAST_PORT", QByteArray::number(port + 3));
+    suiteEnvironment.set("EPICS_PVAS_INTF_ADDR_LIST", "127.0.0.1");
+    for (const auto& setting : isolatedEpicsSettings(port))
+      suiteEnvironment.set(setting.first, setting.second);
+    QVERIFY(suiteRepeater.start(EPICS_TEST_BIN, port + 1));
     QCoreApplication::setApplicationName("qtalh-ui-tests-" + QString::number(QCoreApplication::applicationPid()));
     initializeAppearance(qEnvironmentVariable("QTALH_TEST_STYLE"));
   }
