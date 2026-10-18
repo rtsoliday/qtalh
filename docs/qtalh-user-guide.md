@@ -511,6 +511,11 @@ installs its handlers. Messages are polled every two seconds, and senders hold d
 for 60 seconds; another send reports busy during that interval. Broadcast actions
 send a message, reload the named configuration, or suppress alarm logging and
 commands for 1–10 minutes. Monitoring continues. Reload preserves Silence Forever.
+Receivers see the text, including a reload reason, in a Broadcast Message
+window that stays open after the reload. A reload closes other tool and viewer
+windows, such as Active Alarms, Find Alarm, Runtime Overrides, Shelved Alarms,
+Current Alarm History and the log viewers; selection dialogs stay open, and an
+open Alarm Summary Panel is rebuilt.
 A reload that arrives while a file chooser, editor or warning opened from another
 dialog is open waits until that window closes.
 

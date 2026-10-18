@@ -655,7 +655,12 @@ void Window::setupEngine() {
   if (!logging) {
     logging = std::make_unique<Logging>(options, doc.root->name);
     logging->error = [this](const QString& s) { error(s); };
-    logging->message = [this](const QString& s) { showText("Broadcast Message", s); };
+    logging->message = [this](const QString& s) {
+      // A Reload Facility broadcast replaces the document right after this
+      // message; the copied text holds no node references, so keep the reason
+      // readable across that reload, as ALH does.
+      showText("Broadcast Message", s)->setProperty("keepOnReplace", true);
+    };
     logging->reload = [this] {
       QTimer::singleShot(0, this, [this] {
         // replace() closes, clears or deletes every dialog of this window, so it
@@ -1650,13 +1655,14 @@ void Window::replace(Document d, bool snapshot) {
   // refreshing/reopening the summary against the new engine.
   for (auto dialog : {activeAlarmsDialog, findDialog, overridesDialog, summaryDialog})
     delete dialog.data();
-  // Detach views before old model objects are released.
+  // Detach views before old model objects are released. Dialogs marked
+  // keepOnReplace hold no document, node or engine state and stay open.
   for (auto dialog : findChildren<QDialog*>(QString(), Qt::FindDirectChildrenOnly)) {
     if (selectionDialogs.contains(dialog->objectName()) &&
         selectionDialogs[dialog->objectName()].window == dialog) {
       clearDialogContent(dialog);
       selectionDialogs[dialog->objectName()].node = nullptr;
-    } else {
+    } else if (!dialog->property("keepOnReplace").toBool()) {
       dialog->setEnabled(false);
       dialog->close();
     }
@@ -2723,7 +2729,7 @@ void Window::related(Node* target) {
   } else
     engine->command(entries.front().trimmed());
 }
-void Window::showText(const QString& title, const QString& content, bool monospace) {
+QDialog* Window::showText(const QString& title, const QString& content, bool monospace) {
   auto dialog = new QDialog(this);
   dialog->setAttribute(Qt::WA_DeleteOnClose);
   dialog->setWindowTitle(title);
@@ -2742,6 +2748,7 @@ void Window::showText(const QString& title, const QString& content, bool monospa
   dialogActions(l, dialog, QDialogButtonBox::Close);
   if (!legacyAppearance()) dialog->resize(monospace ? 720 : 600, monospace ? 520 : 340);
   dialog->show();
+  return dialog;
 }
 void Window::showHistory() {
   if (historyDialog) { historyDialog->show(); historyDialog->raise(); return; }

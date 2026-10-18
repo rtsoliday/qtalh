@@ -4308,6 +4308,31 @@ private slots:
     tiles[0]->click();
     QCOMPARE(w->findChild<QTreeView*>("alarmTree")->currentIndex().siblingAtColumn(2).data().toString(), QString("Replacement"));
   }
+  void reloadBroadcastMessageStaysOpen() {
+    // ALH shows the received reload reason and then reloads in place. The
+    // reload must not close the message it was announced with.
+    QTemporaryDir dir; auto o = options(false); o.broadcast = true;
+    o.configDir = dir.path(); o.config = dir.filePath("config");
+    saveConfig(sample(), o.config);
+    auto w = std::make_unique<Window>(loadConfig(o.config), o, false);
+    w->show();
+    w->findChild<QAction*>("Active Alarms...")->trigger();
+    QPointer<QDialog> active = w->findChild<QDialog*>("activeAlarmsDialog");
+    QVERIFY(active && active->isVisible());
+    saveConfig(parseConfig("GROUP NULL BOOSTER\nCHANNEL BOOSTER new:pv\n"), o.config);
+    Logging sender(o, "BOOSTER");
+    QVERIFY(sender.sendBroadcast("Reload config. Reason: new booster channel", 0, true));
+    QTRY_COMPARE(w->document().channels()[0]->name, QString("new:pv"));
+    QTest::qWait(50);
+    QDialog* shown = nullptr;
+    for (auto d : w->findChildren<QDialog*>(QString(), Qt::FindDirectChildrenOnly))
+      if (d->windowTitle() == "Broadcast Message" && d->isVisible() && d->isEnabled()) shown = d;
+    QVERIFY2(shown, "the received reload broadcast was closed by the reload");
+    QVERIFY(shown->findChild<QPlainTextEdit*>()->toPlainText().contains(
+        "RELOAD_FACILITY: Reload config. Reason: new booster channel"));
+    // Tools holding node pointers still close, as documented.
+    QVERIFY(!active);
+  }
   void forcePvWarningSurvivesDialogTeardown_data() {
     QTest::addColumn<bool>("reload");
     QTest::newRow("reload") << true;

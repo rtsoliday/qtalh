@@ -198,7 +198,7 @@ private:
   void related(Node* target = nullptr);
   void masks(bool forced = false);
   void beepSeverity(bool global);
-  void showText(const QString&, const QString&, bool monospace = false);
+  QDialog* showText(const QString&, const QString&, bool monospace = false);
   void showLiveLog(bool alarm);
   void selectLogFile(bool alarm);
   void showHistory();
