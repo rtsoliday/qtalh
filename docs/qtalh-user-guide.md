@@ -185,7 +185,7 @@ INCLUDE paths retain their separate configuration-directory rule.
 | `-a file` | Alarm filename, relative to the log directory unless absolute or explicitly prefixed with `./` or `../`. Default: `ALH-default.alhAlarm`. |
 | `-o file` | Operation filename, relative to the log directory unless absolute or explicitly prefixed with `./` or `../`. Default: `ALH-default.alhOpmod`. |
 | `-m count` | Alarm retention in records; default 2000, or unlimited with `-L`. An explicit `-m` overrides either default; `0` means unlimited. Does not bound the operation log. Without `-T` or `-L`, startup empties an existing alarm file, as in ALH. |
-| `-T` | Append `.yyyy-MM-dd` to each log filename, using local dates. The alarm record limit still applies. |
+| `-T` | Append `.yyyy-MM-dd` to each log filename, using local dates. The alarm record limit still applies, including to an existing file for the current day: at the first alarm, a file holding more records than the limit keeps only its newest records, while ALH appends to it. Use `-m 0` to keep every record. |
 | `-xml` | Write legacy XML-like entry records; these are not a complete XML document. |
 | `-L` | Coordinate master/slave alarm logging with a lock. Alarm retention defaults to unlimited unless `-m` is supplied. |
 | `-Lfile basename` | Override the lock basename; requires `-L` to enable locking. Default: resolved configuration filename. |
@@ -486,7 +486,12 @@ existing alarm log when it opens it at startup or through **Setup → New Alarm 
 File…**, as ALH does, so earlier alarm records do not survive a restart. A log
 that another window in the same process is already writing is shared, not
 emptied. With `-T` or `-L`, QtALH reopens an existing alarm log without emptying
-it, and new records continue the file. Physical line order after wrapping is not chronological. Operation logs append without a record limit. Their facility prefix uses the
+it, and new records continue the file. If a bounded log (`-T`, or `-L` with an
+explicit `-m`) already holds more records than the limit, the first alarm
+rewrites it with only the newest records and deletes the earlier ones; ALH
+appends to these files instead. To keep every existing record, for example when
+switching from ALH on a day it has already logged, copy the file first or use
+`-m 0`. Physical line order after wrapping is not chronological. Operation logs append without a record limit. Their facility prefix uses the
 root group's alias, or its name if no alias is set, and follows alias changes on
 reload. Database headers retain the underlying facility identifier. Dated logs
 route each alarm by its event's local date, so delayed alarms crossing midnight

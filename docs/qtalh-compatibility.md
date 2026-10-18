@@ -423,6 +423,11 @@ unlocked and locked modes.
 The `-L` command-line option defaults to unlimited alarm retention, matching ALH;
 QtALH permits an explicit `-m` override in either argument order. Without `-L`,
 the default remains 2000 records.
+At startup, ALH opens `-T` and `-L` alarm logs for appending and does not shrink
+an existing file. QtALH bounds these files with `-T`, or with `-L` and an explicit
+`-m`. When an existing log, such as today's `-T` file, holds more records than the
+limit, the first alarm keeps only the newest records and deletes the earlier ones.
+`-m 0` keeps every existing record.
 Bounded alarm logs save their circular write position in a sibling
 `.qtalh-position.<identity>` file, kept open by the shared log writer. The file contains two
 96-byte binary checkpoints. Each contains the format marker, a sequence number,

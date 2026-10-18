@@ -869,6 +869,38 @@ private slots:
     QVERIFY(!previous.contains("after-replacement"));
   }
 #endif
+  // -T reopens today's file without truncation. ALH appends to it; QtALH
+  // applies -m, so an over-limit file keeps only its newest records at the
+  // first alarm. -m 0 keeps every existing record, as the guide advises.
+  void datedLogOverLimitRecovery_data() {
+    QTest::addColumn<int>("maximum");
+    QTest::newRow("bounded") << 4;
+    QTest::newRow("unlimited") << 0;
+  }
+  void datedLogOverLimitRecovery() {
+    QFETCH(int, maximum);
+    QTemporaryDir dir;
+    Options o; o.dated = true; o.maxRecords = maximum;
+    o.alarmFile = dir.filePath("alarm"); o.opmodFile = dir.filePath("opmod");
+    const auto today = QDate::currentDate();
+    QFile file(o.alarmFile + today.toString(".yyyy-MM-dd"));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    for (int i = 0; i < 6; ++i)
+      file.write((QLocale::c().toString(QDateTime(today, QTime(0, 0, i)), "dd-MMM-yyyy HH:mm:ss") +
+                  QString(" : pv seed-%1\n").arg(i)).toLatin1());
+    file.close();
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
+    State state; state.value = "first-alarm";
+    { Logging log(o, "root"); log.alarm(d.channels()[0], state,
+        QDateTime(today, QTime(0, 0, 6)).toMSecsSinceEpoch()); }
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const auto saved = file.readAll();
+    const int kept = maximum ? maximum : 7;
+    QVERIFY(saved.contains("first-alarm"));
+    QCOMPARE(int(saved.count('\n')), kept);
+    for (int i = 0; i < 6; ++i)
+      QCOMPARE(saved.contains(QString("seed-%1\n").arg(i).toLatin1()), i >= 7 - kept);
+  }
   void legacyCtimeRingRecovery_data() {
     QTest::addColumn<bool>("stale"); QTest::addColumn<int>("day");
     for (bool stale : {false, true}) for (int day : {3, 13})
