@@ -4188,6 +4188,57 @@ private slots:
     tiles[0]->click();
     QCOMPARE(w->findChild<QTreeView*>("alarmTree")->currentIndex().siblingAtColumn(2).data().toString(), QString("Replacement"));
   }
+  void forcePvWarningSurvivesDialogTeardown_data() {
+    QTest::addColumn<bool>("reload");
+    QTest::newRow("reload") << true;
+    QTest::newRow("filtered-selection") << false;
+  }
+  void forcePvWarningSurvivesDialogTeardown() {
+    // Timers keep running while the Force PV error is shown. A reload or a
+    // filtered-out selection tears down the dialog's children; the warning must
+    // never be an object on a blocked stack frame when that happens.
+    QFETCH(bool, reload);
+    QTemporaryDir dir; auto o = options(false); o.broadcast = true;
+    o.configDir = dir.path(); o.config = dir.filePath("config");
+    saveConfig(parseConfig("GROUP NULL root\nCHANNEL root pv\n"), o.config);
+    auto w = std::make_unique<Window>(loadConfig(o.config), o, false);
+    auto n = w->document().channels()[0];
+    auto group = w->findChild<QTreeView*>("groupContents");
+    auto trigger = [&](const QString& name) { for (auto a : w->findChildren<QAction*>()) if (a->text() == name) a->trigger(); };
+    if (!reload) { w->alarmEngine().event(n, {3, 2, 2, 1, "alarm"}); trigger("Active Alarms Only"); }
+    group->setCurrentIndex(group->model()->index(0, 2));
+    trigger("Force Process Variable...");
+    QPointer<QDialog> force = w->findChild<QDialog*>("forcePvDialog"); QVERIFY(force);
+    force->findChild<QLineEdit*>("forcePvName")->setText("gate");
+    force->findChild<QLineEdit*>("forceValue")->setText("abc");
+    QPointer<QMessageBox> warning;
+    bool shown = false;
+    QTimer::singleShot(100, w.get(), [&] {
+      for (auto box : force->findChildren<QMessageBox*>())
+        if (box->text().contains("Invalid Force PV value: abc")) {
+          warning = box; shown = box->isVisible() && qApp->activeModalWidget() == box;
+        }
+      if (reload) {
+        saveConfig(parseConfig("GROUP NULL root\n$ALIAS reloaded\nCHANNEL root pv\n"), o.config);
+        Logging sender(o, "root"); sender.sendBroadcast("reload", 0, true);
+      } else {
+        auto& engine = w->alarmEngine(); engine.event(n, {}); engine.acknowledge(n);
+      }
+    });
+    // An unfixed build that survives the teardown must not block the test forever.
+    QTimer::singleShot(10000, w.get(), [&] { if (warning) warning->done(QMessageBox::Ok); });
+    force->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Apply)->click();
+    QTRY_VERIFY(shown);
+    if (reload) {
+      QTRY_COMPARE_WITH_TIMEOUT(w->document().root->label(), QString("reloaded"), 8000);
+      QTRY_VERIFY(force && force->findChild<QLineEdit*>("forcePvName"));
+    } else {
+      QTRY_VERIFY(!group->currentIndex().isValid());
+      QTRY_VERIFY(!force);
+    }
+    QTRY_VERIFY(!warning);
+    QVERIFY(!qApp->activeModalWidget());
+  }
   void summaryIncludesFacilityChannels() {
     auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root direct\nGROUP root branch\nCHANNEL branch nested\n"), options(false), false);
     auto channels = w->document().channels();

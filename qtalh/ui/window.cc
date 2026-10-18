@@ -2608,7 +2608,13 @@ void Window::forceDialog() {
       dialog->setProperty("pendingEdits", false);
       dirty = true;
     } catch (const std::exception& e) {
-      QMessageBox::warning(dialog, "Invalid Force PV", e.what());
+      // Reloads and filtered-out selections can clear or close this dialog
+      // while the error is shown, so never block in a stack-owned child box.
+      auto box = new QMessageBox(QMessageBox::Warning, "Invalid Force PV", e.what(),
+                                 QMessageBox::Ok, dialog);
+      box->setAttribute(Qt::WA_DeleteOnClose);
+      box->setWindowModality(Qt::ApplicationModal);
+      box->show();
     }
   });
   sizeDialog(dialog, legacyAppearance() ? QSize(276, 494) : QSize(520, 480));
