@@ -419,7 +419,10 @@ the legacy unsigned-enum type. This also preserves integer text on string PVs.
 Commands use `/bin/sh -c` on Linux/macOS and `cmd.exe /d /s /c` on Windows.
 Use commands appropriate to the host. A leading `MASTER_ONLY` restricts a
 command to the logging master. Stop-logging broadcasts also temporarily suppress
-commands. The editor does not execute runtime alarm commands.
+commands. The configuration tool connects to no PVs, so severity and status
+commands never run there. As in ALH, clicking **P** in the configuration tool
+runs the related-process command; hover over **P** to review imported or
+untrusted commands without running them.
 
 Open/insert failures leave the current document intact. Save uses an atomic
 file replacement, expands includes, normalizes masks, orders channels before

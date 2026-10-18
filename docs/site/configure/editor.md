@@ -40,6 +40,7 @@ This screenshot uses the synthetic channel from the repository gallery.
 Add operator guidance explaining what to check when the alarm occurs. Inline `$GUIDANCE` text appears inside QtALH; a configured URL or file opens externally. Related `$COMMAND` actions should use commands and paths appropriate to the runtime host.
 
 Operators can hover over **G** to read guidance and **P** to preview related commands in either appearance.
+Clicking **P** runs the related-process command in the configuration tool too, as in ALH; severity and status commands never run there because the editor connects to no PVs.
 
 Undo uses **Alt+Backspace**, and redo uses **Ctrl+Y**. The editor also supports cut/copy/paste and copying between editor windows.
 

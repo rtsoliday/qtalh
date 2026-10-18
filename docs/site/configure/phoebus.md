@@ -9,6 +9,8 @@ server and NALMS, so a facility can move between systems or run both.
   masks, not runtime changes).
 - **File → Import Phoebus XML…** converts a Phoebus file and opens it in the
   configuration tool. Review it, then **Save As** an `.alhConfig` file.
+  Imported commands become related processes: clicking **P** during review
+  runs them, so hover over **P** to preview them instead.
 
 When some settings have no equivalent, a message lists each kind with example
 paths. Nothing else is changed.

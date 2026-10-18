@@ -5,6 +5,7 @@
 #include "ui/help.h"
 #include "ui/about_banner.h"
 #include "ui/alarm_view.h"
+#include "core/phoebus.h"
 #include "services/log_browser.h"
 #include "services/log_identity.h"
 #include "services/ipc.h"
@@ -4191,6 +4192,50 @@ private slots:
     QCOMPARE(actualLabels, labels);
     QCOMPARE(launched, commands);
   }
+#ifndef Q_OS_WIN
+  void editorRelatedProcessRuns_data() {
+    QTest::addColumn<bool>("phoebus");
+    QTest::newRow("configuration-tool") << false;
+    QTest::newRow("phoebus-import-review") << true;
+  }
+  void editorRelatedProcessRuns() {
+    // The documentation promises ALH configuration-tool behavior: P runs the
+    // related process, but no PV connects, so severity/status commands never run.
+    QFETCH(bool, phoebus);
+    QTemporaryDir dir;
+    const auto related = dir.filePath("related"), severity = dir.filePath("severity");
+    auto o = options(true); o.noLog = false;
+    o.config = dir.filePath("config"); o.alarmFile = dir.filePath("alarm"); o.opmodFile = dir.filePath("ops");
+    Document d;
+    if (phoebus) {
+      QFile xml(dir.filePath("import.xml")); QVERIFY(xml.open(QIODevice::WriteOnly));
+      xml.write(("<config name=\"root\"><pv name=\"pv\"><command><title>Run</title><details>touch '" +
+                 related + "'</details></command></pv></config>").toUtf8());
+      xml.close();
+      d = loadPhoebusXml(xml.fileName());
+      o.config.clear();
+    } else
+      d = parseConfig("GROUP NULL root\nCHANNEL root pv\n$COMMAND touch '" + related +
+                      "'\n$SEVRCOMMAND UP_ANY touch '" + severity + "'\n");
+    auto w = std::make_unique<Window>(std::move(d), o, true);
+    w->show();
+    QCoreApplication::processEvents();
+    auto view = w->findChild<QTreeView*>("groupContents");
+    const auto index = view->model()->index(0, 5);
+    QVERIFY(!view->visualRect(index).isEmpty());
+    const auto position = view->visualRect(index).center();
+    QHelpEvent hover(QEvent::ToolTip, position, view->viewport()->mapToGlobal(position));
+    QApplication::sendEvent(view->viewport(), &hover);
+    QVERIFY(QToolTip::text().contains("touch"));
+    QToolTip::hideText();
+    QTest::qWait(200);
+    QVERIFY(!QFileInfo::exists(related)); // The documented safe review is the P preview.
+    QTest::mouseClick(view->viewport(), Qt::LeftButton, Qt::NoModifier, position);
+    QTRY_VERIFY(QFileInfo::exists(related));
+    QTest::qWait(300);
+    QVERIFY(!QFileInfo::exists(severity));
+  }
+#endif
   void idleRefreshKeepsLiveIndicators() {
     auto o = options(false);
     o.filter = 1;
