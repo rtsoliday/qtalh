@@ -117,13 +117,15 @@ unshelved channels and retains existing shelves' deadlines and reasons. The
 dialog keeps its displayed target even if you select another row in the main
 window.
 
-Shelving affects **only this runtime's display and sound**, including when
-running in global or passive mode. Shelved channels do not contribute to active
-or unacknowledged alarm counts and are excluded from those display filters.
-Unfiltered views mark them **[Shelved]**. Monitoring, count filtering, alarm
-logging, command hooks, and severity-output PVs continue normally. Other ALH or
-QtALH runtimes are unaffected. Shelving never acknowledges an alarm or changes
-its mask, ACKS, or ACKT.
+Shelving affects **only this runtime's display, sound, and personal
+notifications**, including when running in global or passive mode. Shelved
+channels do not contribute to active or unacknowledged alarm counts and are
+excluded from those display filters. Unfiltered views mark them **[Shelved]**.
+Shelving cancels the channels' pending notification stages and retries without
+resolution messages; unshelving or expiry starts a fresh initial delay.
+Monitoring, count filtering, alarm logging, command hooks, and severity-output
+PVs continue normally. Other ALH or QtALH runtimes are unaffected. Shelving
+never acknowledges an alarm or changes its mask, ACKS, or ACKT.
 
 Click **Shelved: N**, or choose **View → Shelved Alarms…**, to see full channel
 paths, underlying severity and outstanding acknowledgements, expiration in local

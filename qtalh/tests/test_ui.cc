@@ -1845,6 +1845,17 @@ private slots:
     QVERIFY(editor->findChild<QTreeView*>("alarmTree")->contextMenuPolicy() != Qt::CustomContextMenu);
   }
 
+  void shelvingDialogExplainsNotifications() {
+    // Shelving suppresses and cancels personal notifications, not just display and sound.
+    auto w = std::make_unique<Window>(sample(), options(false), false);
+    for (auto action : w->findChildren<QAction*>())
+      if (action->text() == "Shelve Alarms...") action->trigger();
+    auto dialog = w->findChild<QDialog*>("shelveDialog"); QVERIFY(dialog);
+    QString text;
+    for (auto label : dialog->findChildren<QLabel*>()) text += label->text() + '\n';
+    QVERIFY2(text.contains("personal notifications"), qPrintable(text));
+    QVERIFY2(!text.contains("display and sound only"), qPrintable(text));
+  }
   void shelvingCustomUnits_data() {
     QTest::addColumn<QString>("choice");
     QTest::addColumn<int>("amount");

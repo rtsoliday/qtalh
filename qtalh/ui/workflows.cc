@@ -262,8 +262,9 @@ void Window::shelveDialog(Node* target, bool change) {
   auto scope = new QLabel;
   scope->setObjectName("shelfScope");
   layout->addWidget(scope);
-  auto explanation = new QLabel("Shelving affects this runtime's display and sound only. Monitoring, logging, "
-      "commands and output PVs continue. Shelves survive reloads, but end when this runtime closes.");
+  auto explanation = new QLabel("Shelving affects this runtime's display, sound and personal notifications; "
+      "pending notifications are cancelled. Monitoring, logging, commands and output PVs continue. "
+      "Shelves survive reloads, but end when this runtime closes.");
   explanation->setWordWrap(true);
   layout->addWidget(explanation);
   if (!legacyAppearance()) {

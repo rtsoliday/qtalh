@@ -1,8 +1,8 @@
 # Shelve alarms temporarily
 
 Shelving temporarily removes selected channels from **this runtime's active
-alarm presentation and sound**. Monitoring and logging continue, and alarms
-return automatically when their shelves expire.
+alarm presentation, sound, and personal notifications**. Monitoring and logging
+continue, and alarms return automatically when their shelves expire.
 
 ## Start a shelf
 
@@ -51,11 +51,15 @@ bulk acknowledgement skips shelved channels.
 
 ## What shelving changes
 
-| Operation | Alarm counts and active lists | Acknowledgement state | Sound |
-| --- | --- | --- | --- |
-| Shelving | Temporarily excludes selected channels | Preserved under normal alarm/mask rules | Suppressed for selected channels |
-| Timed NoAck | Uses the existing NoAck mask behavior | Changes acknowledgement requirements | Follows NoAck behavior |
-| Silence | Unchanged | Unchanged | Suppressed according to the selected silence option |
+| Operation | Alarm counts and active lists | Acknowledgement state | Sound | Personal notifications |
+| --- | --- | --- | --- | --- |
+| Shelving | Temporarily excludes selected channels | Preserved under normal alarm/mask rules | Suppressed for selected channels | Suppressed; pending stages and retries are cancelled |
+| Timed NoAck | Uses the existing NoAck mask behavior | Changes acknowledgement requirements | Follows NoAck behavior | Suppressed while NoAck applies |
+| Silence | Unchanged | Unchanged | Suppressed according to the selected silence option | Unchanged |
+
+Shelving suppresses [personal notifications](/operate/notifications) for the
+selected channels and cancels their pending stages and retries without resolution
+messages; unshelving or expiry starts a fresh initial delay.
 
 Shelving does not change masks or write ACKS/ACKT. Command hooks and severity
 output PVs continue to reflect the underlying alarm state. Monitoring, count
