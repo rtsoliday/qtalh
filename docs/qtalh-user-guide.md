@@ -440,6 +440,8 @@ each alarm change, also report "PV not connected or not writable" once per
 outage, until the PV becomes writable or a write to it succeeds.
 A failed Channel Access alarm read displays `READ / ERROR` and marks the
 observation unavailable until a fresh valid alarm sample arrives.
+If connection or access loss is already known, its more specific ERROR status
+is retained.
 In global mode, communication failures have a separate local ERROR acknowledgement.
 They remain audible and visible in the unacknowledged filter. Acknowledging that
 error does not write to the IOC or ACKPV; any outstanding IOC alarm remains pending.

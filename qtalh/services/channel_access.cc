@@ -397,8 +397,16 @@ void ChannelAccess::updated(Channel* c, const Callback& a) {
       if (!self || !(c = channelsBySerial.value(serial)) || c->epoch != epoch ||
           c->cancelled || clearing)
         return;
-      if (const auto callback = c->alarm)
-        callback({READ_ALARM, 4, 0, -1, "0"});
+      if (const auto callback = c->alarm) {
+        // Keep a known connection/access diagnosis more specific than the
+        // failed subscription. In particular, a denied initial subscription
+        // after Add must continue to report NO_READ_ACCESS.
+        const int status = ca_state(c->id) != cs_conn ? ALARM_NSTATUS
+            : !ca_read_access(c->id) ? ALARM_NSTATUS + 1
+            : options.global && !options.passive && !ca_write_access(c->id) ? ALARM_NSTATUS + 2
+            : READ_ALARM;
+        callback({status, 4, 0, -1, "0"});
+      }
     } else
       report(a.status, "Monitor " + c->name);
     return;
