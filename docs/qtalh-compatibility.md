@@ -125,8 +125,10 @@ for a disconnected severity PV and logged every write refused for lack of
 access.
 
 Masks accept legacy short or reordered uppercase letters (for example `D`, `DA`,
-and `LATDC`) and save in canonical `CDATL` positions. Unknown mask characters
-remain errors. Group names must not duplicate an ancestor or use the reserved
+and `LATDC`) and save in canonical `CDATL` positions. As in legacy `alSetMask`,
+other characters, including lowercase letters, are ignored rather than rejected,
+and `--validate` does not report them: `DISABLED` loads as `-DA-L`, and `cd` sets
+no bits. Group names must not duplicate an ancestor or use the reserved
 name `NULL`; these ambiguous names are rejected transactionally during parsing
 and editing. Repeated names on separate branches remain supported.
 

@@ -2111,7 +2111,8 @@ $GUIDANCE https://example.invalid/guide
   void legacyMasks() {
     const QHash<QString, QString> masks = {{"D", "-D---"},     {"DA", "-DA--"}, {"---D-", "-D---"},
                                            {"LATDC", "CDATL"}, {"DD", "-D---"}, {"-", "-----"},
-                                           {"0", "-----"}, {"DX", "-D---"}, {"cdatl", "-----"}};
+                                           {"0", "-----"}, {"DX", "-D---"}, {"cdatl", "-----"},
+                                           {"DISABLED", "-DA-L"}, {"cd", "-----"}};
     for (auto i = masks.cbegin(); i != masks.cend(); ++i) {
       auto d = parseConfig("GROUP NULL root\nCHANNEL root pv " + i.key() + "\n$FORCEPV gate " +
                            i.key() + " 1 0\n");

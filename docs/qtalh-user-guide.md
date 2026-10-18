@@ -316,7 +316,9 @@ to 50 levels.
 
 `CHANNEL parent pv [mask]` defaults to `-----`. Masks are sets of uppercase
 letters and save in canonical `CDATL` positions; short/reordered forms such as
-`D` and `DA` are accepted.
+`D` and `DA` are accepted. As in ALH, other characters, including lowercase
+letters, are ignored and `--validate` does not report them: `DISABLED` sets `D`,
+`A`, and `L`, and `cd` sets nothing.
 
 | Letter | Setting |
 | --- | --- |
