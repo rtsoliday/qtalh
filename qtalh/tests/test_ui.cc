@@ -2774,6 +2774,18 @@ private slots:
     QVERIFY(!ops.contains("Setup---Exit"));
     QVERIFY(ops.contains("A broadcast is still being delivered"));
   }
+  void editorCloseDoesNotAskToExit() {
+    // Closing a configuration tool window (title bar, Close All) closes it as
+    // in ALH ACT. Closing its hidden compact runtime widget must not open the
+    // "Exit Alarm Configuration Tool?" confirmation, whose answer would be ignored.
+    QPointer<Window> w = new Window(sample(), options(true), false);
+    w->show();
+    QVERIFY(w->close());
+    QCoreApplication::processEvents();
+    for (auto widget : QApplication::topLevelWidgets())
+      QVERIFY2(widget->objectName() != "exitConfirmation", "unexpected exit confirmation");
+    QTRY_VERIFY(!w);
+  }
   void interruptDuringStackModalExitsAfterIt() {
     // -B SIGINT closes the window without confirmation. A stack modal dialog,
     // such as File > Open's chooser, may be inside exec(): it must be rejected

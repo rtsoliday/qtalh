@@ -3049,10 +3049,14 @@ void Window::closeEvent(QCloseEvent* event) {
       }
     }
   }
-  if (runtime)
+  if (runtime) {
     // Close the visible compact window so Qt can emit lastWindowClosed even
     // when the main display was never shown. Hiding it leaves app.exec running.
+    // This window is already closing, so this is not an exit request: an
+    // editor closed from its title bar must not ask "Exit ...?" afterwards.
+    QScopedValueRollback<bool> closing(quitting, true);
     runtime->close();
+  }
   // Hiding the main display, cancelling, or deferring exit is not an exit.
   logging->operation(nullptr, "Setup---Exit");
   event->accept();
