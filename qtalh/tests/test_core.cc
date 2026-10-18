@@ -1682,6 +1682,27 @@ private slots:
     const int logs = operations.size(); e.tick(); QCOMPARE(operations.size(), logs);
     e.acknowledge(n); QCOMPARE(e.state(n).unack, 0);
   }
+  void localAcknowledgementOfShelvedAlarmsIsNotLogged() {
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\nCHANNEL root other\n");
+    Engine e(d); auto n = d.channels()[0], other = d.channels()[1], root = d.root.get();
+    QStringList sequence;
+    e.operation = [&](Node*, const QString& text, OperationKind kind) {
+      if (kind == OperationKind::AckGroup || kind == OperationKind::AckChannel) sequence << text.trimmed();
+    };
+    e.acknowledgement = [&](Node* c) { sequence << "ack " + c->name; };
+    for (auto c : d.channels()) e.event(c, {});
+    e.event(n, {3, 2, 0, 1, "2"});
+    e.shelve(n, 10, "maintenance", "tester");
+    // Shelved alarms are skipped, so no acknowledgement may be recorded.
+    e.acknowledge(n); e.acknowledge(root);
+    QCOMPARE(sequence.join(" | "), QString()); QCOMPARE(e.state(n).unack, 2);
+    // An acknowledgement that clears an unshelved alarm still logs the summary first.
+    e.event(other, {3, 1, 0, 1, "1"});
+    e.acknowledge(root);
+    QCOMPARE(sequence.size(), 2); QVERIFY(sequence[0].startsWith("Local Ack Group ("));
+    QCOMPARE(sequence[1], QString("ack other"));
+    QCOMPARE(e.state(n).unack, 2); QCOMPARE(e.state(other).unack, 0);
+  }
   void shelvingUsernameAttribution() {
     auto doc = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
     Engine engine(doc); qint64 now = 1000; engine.now = engine.monotonicNow = [&] { return now; };

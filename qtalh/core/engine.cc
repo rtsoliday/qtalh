@@ -592,7 +592,6 @@ void Engine::acknowledge(Node* n) {
       logOperation(n, summary, n->group ? OperationKind::AckGroup : OperationKind::AckChannel);
     summaryLogged = true;
   };
-  if (!options.global) recordAccepted();
   std::function<void(Node*)> ack = [&](Node* c) {
     if (c->group) {
       // ALH visits direct channels before subgroups, and only descends into
@@ -637,6 +636,8 @@ void Engine::acknowledge(Node* n) {
       if (a.size() == 2)
         pv->put(a[0], a[1].toDouble(), WriteKind::AckValue);
     } else {
+      // Shelved channels are skipped above; log only when something is acknowledged.
+      recordAccepted();
       if (acknowledgement) acknowledgement(c);
       State old = s;
       s.unack = 0;
