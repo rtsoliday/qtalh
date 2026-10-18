@@ -650,7 +650,8 @@ including the looser forms legacy ALH receivers also act on (for example
 `+5`, a number followed by other characters, or `LOG!!!`).
 Change the opening text, or use **Reload Facility** or **Stop Alarm Logging**
 for those actions. Explicit controls and broadcasts from legacy ALH retain
-their existing wire format.
+their existing wire format. A broadcast is one line: pasted line breaks and
+other control characters are sent as spaces.
 As in ALH, on Linux/macOS a `-B` runtime handles SIGINT (Ctrl-C) as an Exit
 without confirmation. A sender refuses, with a warning, until its message has
 been delivered; send SIGINT again afterwards. Without `-B`, and for other

@@ -1741,6 +1741,34 @@ private slots:
     QCOMPARE(receiver.commandsAllowed(), mode != 2);
     QTest::qWait(2200); QCOMPARE(messages, 1); QCOMPARE(reloads, mode == 1 ? 1 : 0);
   }
+  void broadcastLineBreak_data() {
+    // The broadcast dialogs use a QLineEdit, which keeps pasted line breaks.
+    QTest::addColumn<int>("mode"); QTest::addColumn<QString>("text");
+    const QStringList texts = {"IOC rebooted\n", "IOC reboot\nsee e-log 1234", "IOC rebooted\r\n"};
+    const QStringList names = {"trailing-lf", "embedded-lf", "trailing-crlf"};
+    const QStringList modes = {"message", "reload", "stop-logging"};
+    for (int mode : {0, 1, 2}) for (int i = 0; i < texts.size(); ++i)
+      QTest::newRow(qPrintable(modes[mode] + "-" + names[i])) << mode << texts[i];
+  }
+  void broadcastLineBreak() {
+    // A send that reports success must reach qtalh peers and the sender
+    // itself, as it reaches legacy ALH peers (they read the first body line).
+    QFETCH(int, mode); QFETCH(QString, text);
+    QTemporaryDir dir; Options o; o.noLog = true; o.broadcast = true;
+    o.config = dir.filePath("config");
+    Logging receiver(o, "root"); int messages = 0, reloads = 0;
+    receiver.message = [&](const QString&) { ++messages; };
+    receiver.reload = [&] { ++reloads; };
+    Logging sender(o, "root"); int selfMessages = 0, selfReloads = 0;
+    sender.message = [&](const QString&) { ++selfMessages; };
+    sender.reload = [&] { ++selfReloads; };
+    QVERIFY(sender.sendBroadcast(text, mode == 2 ? 1 : 0, mode == 1));
+    QTRY_COMPARE_WITH_TIMEOUT(messages, 1, 5000);
+    QCOMPARE(reloads, mode == 1 ? 1 : 0);
+    QCOMPARE(receiver.commandsAllowed(), mode != 2);
+    QCOMPARE(selfMessages, 1);
+    QCOMPARE(selfReloads, mode == 1 ? 1 : 0);
+  }
   void incompleteBroadcast_data() {
     QTest::addColumn<int>("mode"); QTest::addColumn<bool>("missingFrom");
     for (int mode : {0, 1, 2}) for (bool missingFrom : {false, true})

@@ -4986,6 +4986,32 @@ private slots:
     // Tools holding node pointers still close, as documented.
     QVERIFY(!active);
   }
+  void reloadFacilityPastedLineBreak() {
+    // The Reload Facility reason is a QLineEdit, which keeps a pasted line
+    // ending. A reload the dialog reports as sent must reach the sender and
+    // its peers, as it reaches legacy ALH peers.
+    QTemporaryDir dir; auto o = options(false); o.broadcast = true;
+    o.configDir = dir.path(); o.config = dir.filePath("config");
+    saveConfig(sample(), o.config);
+    auto w = std::make_unique<Window>(loadConfig(o.config), o, false);
+    w->show();
+    Logging peer(o, "BOOSTER"); int peerMessages = 0, peerReloads = 0;
+    peer.message = [&](const QString&) { ++peerMessages; };
+    peer.reload = [&] { ++peerReloads; };
+    saveConfig(parseConfig("GROUP NULL BOOSTER\nCHANNEL BOOSTER new:pv\n"), o.config);
+    w->findChild<QAction*>("Reload Facility...")->trigger();
+    QPointer<QDialog> dialog = w->findChild<QDialog*>("broadcastDialog"); QVERIFY(dialog);
+    auto edit = dialog->findChild<QLineEdit*>("broadcastMessage"); QVERIFY(edit);
+    QApplication::clipboard()->setText("IOC rebooted\n");
+    edit->end(false); edit->paste();
+    QCOMPARE(edit->text(), QString("Reload config. Reason: IOC rebooted\n"));
+    auto buttons = dialog->findChild<QDialogButtonBox*>(); QVERIFY(buttons);
+    QTest::mouseClick(buttons->button(QDialogButtonBox::Ok), Qt::LeftButton);
+    QTRY_VERIFY(!dialog || !dialog->isVisible()); // Reported as sent.
+    QTRY_COMPARE_WITH_TIMEOUT(peerMessages, 1, 5000);
+    QCOMPARE(peerReloads, 1);
+    QTRY_COMPARE(w->document().channels()[0]->name, QString("new:pv"));
+  }
   void forcePvWarningSurvivesDialogTeardown_data() {
     QTest::addColumn<bool>("reload");
     QTest::newRow("reload") << true;

@@ -72,6 +72,15 @@ String singleLine(String text, bool xml) {
   if (text.contains(QLatin1Char('\n'))) text.replace("\n", xml ? "&#10;" : "\\n");
   return text;
 }
+// The .MESS body is one line between the ID and the Date/FROM lines. A
+// QLineEdit keeps pasted line breaks; one in the body would shift those lines,
+// so every QtALH reader would discard the message while legacy ALH acts on part
+// of it. Broadcast each control character as a space.
+QString broadcastLine(QString text) {
+  for (auto& c : text)
+    if (c.unicode() < 0x20 || c.unicode() == 0x7f) c = QLatin1Char(' ');
+  return text;
+}
 // Same result as out += s.leftJustified(width, ' '), without the temporary.
 void appendPadded(QString& out, const QString& s, int width) {
   out += s;
@@ -1177,8 +1186,9 @@ void Logging::finishBroadcast() {
   if (broadcastFd >= 0)
     setLock(broadcastFd, false);
 }
-QString Logging::plainBroadcastError(const QString& text) {
+QString Logging::plainBroadcastError(const QString& entered) {
   // Check the bytes receivers decode, as sendBroadcast() writes them.
+  const auto text = broadcastLine(entered);
   const auto bytes = text.toLocal8Bit();
   if (text.startsWith("RELOAD_FACILITY:") || bytes.startsWith("RELOAD_FACILITY:"))
     return "This message would be read as a Reload Facility command. "
@@ -1186,7 +1196,7 @@ QString Logging::plainBroadcastError(const QString& text) {
   static const QRegularExpression stop("^\\d+ MIN  ALH  WILL  NOT  SAVE ALARM LOG!!!!");
   // ALH 1.2.35 receivers (alh/file.c broadcastMessTesting) take the text after
   // the first space, compare only strlen(rebootString)-1 bytes, and atoi() the
-  // token before it, so "+5", "5x", "\t5", "5\n" and "LOG!!!" also stop logging.
+  // token before it, so "+5", "5x" and "LOG!!!" also stop logging.
   static const QByteArray legacyStop("MIN  ALH  WILL  NOT  SAVE ALARM LOG!!!");
   const int blank = bytes.indexOf(' ');
   if (stop.match(text).hasMatch() || (blank >= 0 && bytes.mid(blank + 1).startsWith(legacyStop)))
@@ -1194,11 +1204,12 @@ QString Logging::plainBroadcastError(const QString& text) {
            "Change its opening text, or use Stop Alarm Logging.";
   return {};
 }
-bool Logging::sendBroadcast(const QString& text, int minutes, bool reloadFacility) {
+bool Logging::sendBroadcast(const QString& entered, int minutes, bool reloadFacility) {
   debugLog(options.debug, "broadcast", QString("send reload=%1 suppressMinutes=%2")
       .arg(reloadFacility).arg(minutes));
   if (!options.broadcast || minutes < 0 || minutes > 10)
     return false;
+  const auto text = broadcastLine(entered);
   if (!minutes && !reloadFacility) {
     const auto reason = plainBroadcastError(text);
     if (!reason.isEmpty()) {
