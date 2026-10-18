@@ -227,6 +227,26 @@ private slots:
                           "acknowledgement requirement from every channel"));
     help->close();
   }
+  void helpSurvivesConfigurationReplacement() {
+    // Help holds no configuration state, so an edit or reload must leave it usable.
+    auto w = std::make_unique<Window>(sample(), options(true), false);
+    w->show();
+    w->findChild<QAction*>("Help Topics")->trigger();
+    QPointer<QDialog> help = w->findChild<QDialog*>("helpWindow");
+    QVERIFY(help); QVERIFY(help->isVisible()); QVERIFY(help->isEnabled());
+    w->addNode(true, "Added");
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QVERIFY(help);
+    QVERIFY(help->isEnabled());
+    QVERIFY(help->isVisible());
+    help->close();
+    w->findChild<QAction*>("Help Topics")->trigger();
+    QCOMPARE(w->findChild<QDialog*>("helpWindow"), help.data());
+    QVERIFY(help->isVisible());
+    QVERIFY(help->isEnabled());
+    QVERIFY(help->findChild<QListWidget*>("helpTopics")->isEnabled());
+    QVERIFY(help->findChild<QLineEdit*>("helpFind")->isEnabled());
+  }
   void helpSearchAndKeyboard() {
     QWidget owner;
     owner.show();

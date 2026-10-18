@@ -1658,6 +1658,8 @@ void Window::replace(Document d, bool snapshot) {
   // Detach views before old model objects are released. Dialogs marked
   // keepOnReplace hold no document, node or engine state and stay open.
   for (auto dialog : findChildren<QDialog*>(QString(), Qt::FindDirectChildrenOnly)) {
+    // The reused Help window holds no configuration state.
+    if (dialog->objectName() == "helpWindow") continue;
     if (selectionDialogs.contains(dialog->objectName()) &&
         selectionDialogs[dialog->objectName()].window == dialog) {
       clearDialogContent(dialog);
