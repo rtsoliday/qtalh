@@ -54,6 +54,8 @@ Imported Phoebus displays that are web or file URLs become guidance URLs; other
 displays (for example `.bob` files) are kept as guidance text. A disable-until
 date imports as Disable; use [timed shelving](/operate/shelving) instead.
 XInclude files are expanded, including shorthand ID selectors in `xpointer`.
+Include targets must be regular files; symbolic links to regular files are
+accepted. Devices, FIFOs, and directories are rejected before opening them.
 Unresolved or unsupported selectors fail the import. Commands containing ALH
 menu delimiters (`!`) or line breaks are retained as guidance text with a
 conversion note. Guidance lines whose first non-blank character is `$` are

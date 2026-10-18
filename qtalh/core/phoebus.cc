@@ -189,6 +189,10 @@ Element readElement(QXmlStreamReader& xml, const QString& base, QSet<QString>& s
       if (href.isEmpty() || canonical.isEmpty())
         throw ParseError("Cannot open Phoebus include: " + href);
       if (stack.contains(canonical)) throw ParseError("Phoebus include cycle: " + href);
+      // As for ALH INCLUDE, do not open FIFOs or read unbounded devices.
+      // QFileInfo follows symbolic links, so links to regular files still work.
+      if (!file.isFile())
+        throw ParseError("Phoebus include is not a regular file: " + href);
       QFile f(canonical);
       if (!f.open(QIODevice::ReadOnly)) throw ParseError("Cannot open Phoebus include: " + href);
       stack.insert(canonical);

@@ -3938,6 +3938,52 @@ $GUIDANCE https://example.invalid/guide
     QVERIFY_THROWS_EXCEPTION(ParseError, parsePhoebusXml(QByteArray(xml).replace("xpointer=\"area\"", "xpointer=\"missing\""), dir.path()));
     QVERIFY_THROWS_EXCEPTION(ParseError, parsePhoebusXml(QByteArray(xml).replace("xpointer=\"area\"", "parse=\"text\""), dir.path()));
   }
+  void phoebusIncludeTargetTypes_data() {
+    QTest::addColumn<QString>("target");
+    QTest::addColumn<bool>("accepted");
+    QTest::newRow("regular file") << "child.xml" << true;
+    QTest::newRow("link to regular file") << "link.xml" << true;
+    QTest::newRow("directory") << "directory" << false;
+    QTest::newRow("fifo") << "fifo" << false;
+    // /dev/null is a character device like /dev/zero but has bounded reads,
+    // keeping the regression safe even if the pre-open check is removed.
+    QTest::newRow("character device") << "/dev/null" << false;
+  }
+  void phoebusIncludeTargetTypes() {
+#ifdef Q_OS_WIN
+    QSKIP("Uses POSIX FIFOs and /dev/null");
+#else
+    QFETCH(QString, target); QFETCH(bool, accepted);
+    QTemporaryDir dir;
+    QFile child(dir.filePath("child.xml"));
+    QVERIFY(child.open(QIODevice::WriteOnly));
+    child.write("<component name=\"child\"><pv name=\"included\"/></component>");
+    child.close();
+    QVERIFY(QFile::link(child.fileName(), dir.filePath("link.xml")));
+    QVERIFY(QDir(dir.path()).mkdir("directory"));
+    const auto fifo = QFile::encodeName(dir.filePath("fifo"));
+    QCOMPARE(::mkfifo(fifo.constData(), 0600), 0);
+    const auto xml = QString("<config name=\"root\" xmlns:xi=\"http://www.w3.org/2001/XInclude\">"
+                             "<xi:include href=\"%1\"/><pv name=\"after\"/></config>").arg(target).toUtf8();
+    auto result = std::async(std::launch::async, [&] {
+      try {
+        return QString("accepted %1 channels").arg(parsePhoebusXml(xml, dir.path()).channels().size());
+      } catch (const ParseError& e) {
+        return QString::fromStdString(e.what());
+      }
+    });
+    const bool finished = result.wait_for(std::chrono::seconds(10)) == std::future_status::ready;
+    if (!finished) {
+      // Unblock a regressed FIFO open without leaving a worker behind.
+      const int writer = ::open(fifo.constData(), O_WRONLY | O_NONBLOCK);
+      if (writer >= 0) ::close(writer);
+    }
+    const auto outcome = result.get();
+    QVERIFY2(finished, "Phoebus XInclude blocked");
+    QCOMPARE(outcome, accepted ? QString("accepted 2 channels")
+                               : "Phoebus include is not a regular file: " + target);
+#endif
+  }
   void phoebusCommandTextStaysInDirective() {
     QStringList notes;
     auto doc = parsePhoebusXml(
