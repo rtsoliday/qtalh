@@ -10,7 +10,7 @@ An alarm's **current severity** describes the condition now. Its **unacknowledge
 4. With the default transient mask, the outstanding MAJOR acknowledgement remains.
 5. The operator acknowledges it. The outstanding indication clears.
 
-An acknowledgement can also occur while the alarm is still active. It does not change the alarmed PV or correct the equipment condition. In global active mode it does write: QtALH writes the IOC ACKS field (Channel Access channels) and, when the channel sets `$ACKPV`, the configured value to that acknowledgement PV, which can drive IOC logic. The automatic acknowledgement of a latched transient when a channel is re-enabled or its NoAck mask is removed makes the same writes. Local and passive modes write neither. NoAck and NoAckT masks change acknowledgement requirements and transient retention.
+An acknowledgement can also occur while the alarm is still active. It does not change the alarmed PV or correct the equipment condition. In global active mode it does write: QtALH writes the IOC ACKS field (Channel Access channels) and, when the channel sets `$ACKPV`, the configured value to that acknowledgement PV, which can drive IOC logic. The automatic acknowledgement of a latched transient when a channel is re-enabled or its NoAck mask is removed makes the same writes. Runtime Overrides **Retry ACKPV** can also write a previously refused `$ACKPV` value later, independent of the channel's current alarm. Local and passive modes write neither. NoAck and NoAckT masks change acknowledgement requirements and transient retention.
 
 ## Choose who owns acknowledgement
 

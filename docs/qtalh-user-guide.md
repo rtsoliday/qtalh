@@ -391,7 +391,7 @@ rather than applying them to the INCLUDE's parent group.
 | `$BEEPSEVERITY` | Facility beep threshold (default MINOR); may occur before the root. |
 | `$BEEPSEVR` | Threshold for the current node; ancestor thresholds also apply. The last directive on a node wins. |
 | `$HEARTBEATPV` | `pv [interval_seconds [short_integer_value]]`; defaults 1 second and value 1. The first heartbeat in the facility, including includes, wins. Writes require global active mode. |
-| `$ACKPV` | `pv short_integer_value`; channel only. Written in global active mode whenever QtALH acknowledges the channel's alarm: on operator acknowledgement, and on the automatic acknowledgement of a cleared transient when Disable or NoAck is removed (see the mask notes above), including NoAck expiry and Force PV resets. |
+| `$ACKPV` | `pv short_integer_value`; channel only. Written in global active mode whenever QtALH acknowledges the channel's alarm: on operator acknowledgement, and on the automatic acknowledgement of a cleared transient when Disable or NoAck is removed (see the mask notes above), including NoAck expiry and Force PV resets. An operator can also resubmit a previously refused value with Runtime Overrides **Retry ACKPV**; that retry is not an acknowledgement and does not check the channel's current alarm state. |
 | `$SEVRPV` | Output PV for the node's severity (0–4); disabled channels publish -1. Writes require global active mode. `-` leaves the output unset; the first real PV replaces earlier `-` placeholders and takes precedence over later directives. |
 | `$FORCEPV` | `pv mask [force_value [reset_value]]`; default force 1, reset 0. At force, apply the mask; at reset, restore configured channel masks. `NE` or a reset equal to force resets on leaving the force value. Applies to descendant channels for a group. The first value counts as a change, so a Force PV already at its reset value restores the configured masks at startup. In global active mode, a force or reset writes the resulting `T` bit to the IOC's ACKT, even without `-caputackt`: when it differs from the current ACKT, and always before that ACKT has been read. Removing Disable or NoAck can also acknowledge cleared transients (ACKS and `$ACKPV`). |
 | `$FORCEPV_CALC` | EPICS CALC expression required when the FORCEPV name is `CALC`. |
@@ -463,6 +463,9 @@ If ACKS is submitted but the separate `$ACKPV` submission fails, QtALH reports
 partial submission and lists the failed action in **View → Runtime Overrides…**.
 After correcting the connection or write-access problem, select its row and
 click **Retry ACKPV**. This submits only the captured ACKPV value, never ACKS.
+The retry is not tied to the channel's current alarm: it writes the captured
+value even if the alarm has since cleared, a new alarm is unacknowledged, or the
+channel is Disabled or NoAck.
 Repeated failures for the same channel share a row with a pending count; each
 click retries one action. Recovery alone never retries an ACKPV. This applies
 to operator and automatic acknowledgements. Pending actions are runtime only:
@@ -693,7 +696,7 @@ preventing file logging. Windows does not build these helpers and rejects
 | Qt modules or build tools missing | Install matching Widgets, Network, PrintSupport, and Multimedia development files; tests also need Qt Test. Use `QT_VERSION=5` or `6` consistently and matching `moc`/`rcc`. |
 | Cannot open a display | Use the native GUI session or a working X11 display. Use `--validate` for a headless syntax check; test targets supply offscreen mode where appropriate. |
 | Channel remains ERROR | Verify the PV name, IOC availability, CA address environment (PVA environment for `pva://` names), and read access. `-debug -noerrorpopup` exposes connection/access diagnostics on stderr. |
-| Acknowledgement or output PV does not change | Check local/global/passive mode and IOC write access. Failed acknowledgements remain visible; manual ACKT changes require an explicit retry. |
+| Acknowledgement or output PV does not change | Check local/global/passive mode and IOC write access. Failed acknowledgements remain visible; manual ACKT changes require an explicit retry. A refused `$ACKPV` stays pending in **View → Runtime Overrides…** until **Retry ACKPV** is clicked. |
 | "Channel Access Exception" messages | Asynchronous CA errors, such as an IOC rejecting a write or a lost virtual circuit, are reported in the message area and operation log (and as a popup unless `-noerrorpopup`), as in ALH. After 25 reports one "Too many exceptions" notice is shown; later exceptions are printed only. |
 | Cannot open logs or lock files | Create the parent directory and check permissions on the selected files and checkpoint sidecar. A failed log destination change preserves the current destination. `Cannot lock logging lock file` means the lock file opened but its filesystem rejected POSIX locks (for example, NFS without a lock service); the instance stays Slave, so place the `-Lfile` lock on a filesystem with lock support. |
 | Sound fails | Check the audio path, Qt Multimedia plugins/backend, output device, Silence Forever, and beep threshold. Muted fixture playback verifies decoding, not speaker output. |

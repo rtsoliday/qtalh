@@ -4,7 +4,8 @@ These runtime tools add views for finding and understanding alarms. They work
 with every appearance, including `-style motif`, and do not change how the alarm
 tree, acknowledgement or logging behave. Their **Acknowledge** and **Restore
 Selected** buttons act like the matching main-window commands, including the
-IOC writes those commands make in global active mode; see
+IOC writes those commands make in global active mode, and **Retry ACKPV**
+writes a previously refused `$ACKPV` value; see
 [Runtime Overrides](#runtime-overrides).
 
 ## Active Alarms
@@ -97,6 +98,8 @@ but the separate ACKPV action was not. Correct the connection or write-access
 problem, select the row and click **Retry ACKPV**. Each click submits one
 pending ACKPV action per selected row; it never repeats ACKS. Restore Selected
 does not act on pending ACKPV rows. Recovery alone never retries them.
+A retry does not check the channel's current alarm: it writes the captured
+value even if a newer alarm is unacknowledged or the channel is Disabled.
 Only a rejected submission is retryable; accepted asynchronous writes with an
 uncertain IOC outcome are not replayed. Pending actions are runtime only and
 are discarded by channel Cancel or configuration reload. Retry requires global
