@@ -126,6 +126,17 @@ private slots:
     QVERIFY(links.contains("#masks"));
     QVERIFY(links.contains("#logging-and-shared-operation"));
     QVERIFY(links.contains("https://ops.aps.anl.gov/manuals/QtALH/downloads/examples/minimal.alhConfig"));
+    // The manual is built with cleanUrls: false; static servers publish pages only as .html.
+    QStringList extensionless;
+    for (const auto& href : links) {
+      const QUrl url(href);
+      if (url.host() == "ops.aps.anl.gov" && !url.path().endsWith('/') &&
+          QFileInfo(url.path()).suffix().isEmpty())
+        extensionless << href;
+    }
+    QVERIFY2(extensionless.isEmpty(), qPrintable(extensionless.join(' ')));
+    QVERIFY(links.contains("https://ops.aps.anl.gov/manuals/QtALH/understand/compatibility.html"));
+    QVERIFY(links.contains("https://ops.aps.anl.gov/manuals/QtALH/history/logging.html#implemented-changes"));
     for (const auto& href : links) {
       const QUrl url(href);
       if (url.isRelative()) QVERIFY2(url.path().isEmpty() && anchors.contains(url.fragment()), qPrintable(href));

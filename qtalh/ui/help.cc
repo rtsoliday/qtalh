@@ -150,6 +150,10 @@ QString guideLink(const QString& href, const QVector<Topic>& topics) {
   else if (path == "qtalh-logging-analysis") path = "history/logging";
   else if (path == "qtalh-performance") path = "history/performance";
   else if (path.startsWith("../examples/")) path = "downloads/" + path.mid(3);
+  // The manual is built without clean URLs, so its pages are published as .html files.
+  if (!path.isEmpty() && !path.endsWith('/') && QFileInfo(path).suffix().isEmpty() &&
+      !path.startsWith("downloads/") && !path.startsWith("legacy/"))
+    path += ".html";
   url.setPath(path);
   return manualUrl.resolved(url).toString();
 }
