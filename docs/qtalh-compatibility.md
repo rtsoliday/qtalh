@@ -516,6 +516,14 @@ its reported path. Plain and dated log switching are covered by regression tests
 Related-process menus retain the legacy handling of leading, trailing and
 repeated `!` delimiters, and reject incomplete label/command pairs.
 
+Unlike ALH, which passes command text unchanged to the shell, QtALH replaces a
+leading executable whose basename is `medm` or `medm.exe` (bare, quoted, or an
+absolute path such as a site wrapper) with `qtedm` resolved from `PATH`,
+preserving the arguments. This applies to `$COMMAND`, `$SEVRCOMMAND`, and
+`$STATCOMMAND`; the configuration text is unchanged, and the P tooltip shows
+the effective command. A command whose first word is not `medm`, such as
+`exec /opt/site/bin/medm ...`, is passed unchanged.
+
 Broadcast senders retain exclusive ownership for the delivery interval, including
 between windows in the same process. Attempts to overwrite a pending broadcast
 return a busy error. Message IDs include a monotonic millisecond value and process
