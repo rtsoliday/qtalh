@@ -343,6 +343,9 @@ letters, are ignored and `--validate` does not report them: `DISABLED` sets `D`,
 
 Disable alone does not suppress alarm-file records; use NoLog for that. Timed
 NoAck is an operator setting and displays `H` in the mask summary.
+In local mode, enabling NoAckT does not clear a transient already latched for
+acknowledgement. Acknowledge that event explicitly; the new NoAckT setting
+applies to subsequent alarm transitions.
 
 In global active mode, when Disable or NoAck is removed and the channel is left
 neither disabled nor cancelled, an alarm that has already cleared but is still

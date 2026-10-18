@@ -18,6 +18,10 @@ In global active mode (`-global` without `-S`), mask changes also write to the I
 
 In global mode, Disable and NoAck do not protect a channel's IOC acknowledgement. A group acknowledgement still writes ACKS, and any `$ACKPV`, for such channels in the groups it enters; see [Acknowledge a channel or group](/operate/alarms#acknowledge-a-channel-or-group).
 
+In local mode, enabling NoAckT leaves a cleared transient that was already
+latched awaiting explicit acknowledgement. The new setting applies to
+subsequent alarm transitions; it does not clear the earlier event.
+
 Canonical configuration order is `CDATL`. For example, `-D--L` enables Disable and NoLog; `-----` clears all five bits.
 
 **Modify Mask Settings** changes one field immediately and preserves the other

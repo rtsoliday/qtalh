@@ -824,12 +824,9 @@ bool Engine::applyMask(Node* n, Mask requested, bool automatic, Node* forceSourc
         ackTFailed = true;
       }
     }
-    // Possible inherited ALH bug, deferred: enabling local NoAckT changes the
-    // bit without reconciling an already latched transient. A MAJOR -> normal
-    // transition followed by NoAckT can remain unacknowledged and audible,
-    // even through normal value-only updates. Revisit clearing/reducing that
-    // local latch and its aggregates when the setting changes; retain behavior
-    // for now, as in alh/alLib.c's alChangeChanMask.
+    // Intentional ALH compatibility: enabling local NoAckT does not erase an
+    // already latched transient. It still needs explicit acknowledgement;
+    // future alarm transitions use the new setting.
     s.mask[AckT] = mask[AckT];
     if (mask[Cancel] && !old.mask[Cancel] && pv)
       pv->cancel(c->name, c);

@@ -770,6 +770,18 @@ private slots:
     e.setMask(b, Mask::parse("-")); QCOMPARE(pv.writes.size(), 3);
     QCOMPARE(pv.writes.last().value, 1.0); // Explicit retry still reverses the accepted request.
   }
+  void enablingLocalNoAckTPreservesExistingLatch() {
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
+    Engine e(d); auto n = d.channels()[0];
+    e.event(n, {}); e.event(n, {3, 2, 0, 1, "alarm"}); e.event(n, {});
+    QCOMPARE(e.state(n).unack, 2); QVERIFY(e.audible());
+    e.setMask(n, Mask::parse("T")); e.event(n, {});
+    QCOMPARE(e.state(n).unack, 2); QCOMPARE(e.state(d.root.get()).unack, 2);
+    QVERIFY(e.audible());
+    e.acknowledge(n); QCOMPARE(e.state(n).unack, 0); QVERIFY(!e.audible());
+    e.event(n, {3, 2, 0, 1, "new alarm"}); e.event(n, {});
+    QCOMPARE(e.state(n).unack, 0); // Subsequent alarm transitions use NoAckT.
+  }
   void topLevelNullParentsMatchIncludes() {
     const QString body = "GROUP NULL branch\n$BEEPSEVR MAJOR\n$FORCEPV gate D 1 0\n"
         "CHANNEL branch direct\nGROUP NULL leaf\nCHANNEL leaf nested\n";

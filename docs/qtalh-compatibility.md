@@ -884,6 +884,11 @@ mask, so the latest accepted request wins. Other rows retain their displayed
 feedback until their monitors confirm the setting; failed manual submissions
 still need an explicit retry.
 
+For QtALH 1.0.0, local NoAckT preserves ALH's existing latch behavior: enabling
+it after a transient has already cleared does not erase that unacknowledged
+event. The operator must acknowledge it explicitly. Later alarm transitions
+use the new NoAckT setting.
+
 Force CALC retains received input values separately from its mutable calculation
 variables. Assignments to A through F can no longer make an unchanged callback
 advance the expression or make a genuine input change look unchanged. Only the
