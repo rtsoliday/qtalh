@@ -4,6 +4,8 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QProcess>
+#include <QProcessEnvironment>
+#include <QRegularExpression>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
@@ -596,6 +598,51 @@ private slots:
     auto body = QByteArray::fromBase64(mail.mid(mail.indexOf("\r\n\r\n") + 4));
     QVERIFY(body.contains("QTALH:TEST"));
     QVERIFY(!service.activity.join('\n').contains("mailer-secret"));
+  }
+  void mailDateHeaderIsRfc5322() {
+    // RFC 5322 day and month names are English whatever the host locale; Qt 5
+    // localizes "ddd"/"MMM" with QLocale::system(), so also run under German.
+    if (qEnvironmentVariableIsEmpty("QTALH_TEST_MAIL_LOCALE_CHILD")) {
+      QProcess child;
+      auto environment = QProcessEnvironment::systemEnvironment();
+      environment.insert("QTALH_TEST_MAIL_LOCALE_CHILD", "1");
+      for (const char* name : {"LC_ALL", "LC_TIME", "LANG"})
+        environment.insert(name, "de_DE.UTF-8");
+      child.setProcessEnvironment(environment);
+      child.start(QCoreApplication::applicationFilePath(), {"mailDateHeaderIsRfc5322"});
+      QVERIFY(child.waitForStarted());
+      if (!child.waitForFinished(30000)) {
+        child.kill();
+        child.waitForFinished();
+        QFAIL("Localized mail Date header test timed out");
+      }
+      const auto output = child.readAllStandardOutput() + child.readAllStandardError();
+      QVERIFY2(child.exitStatus() == QProcess::NormalExit && child.exitCode() == 0,
+               output.constData());
+    }
+    QTemporaryDir dir;
+    NotificationService service(nullptr, dir.filePath("settings.json"));
+    auto s = settings();
+    auto& d = s.destinations[0];
+    d.kind = "email";
+    d.program = QCoreApplication::applicationFilePath();
+    d.arguments = QStringList{"--fake-mail", dir.filePath("message.eml"), "0"};
+    d.sender = "qtalh@example.invalid";
+    d.recipients = QStringList{"ops@example.invalid"};
+    service.apply(s);
+    service.sendTest("ops");
+    QTRY_VERIFY(service.activity.join('\n').contains("Accepted/submitted"));
+    QFile f(dir.filePath("message.eml"));
+    QVERIFY(f.open(QIODevice::ReadOnly));
+    auto mail = f.readAll();
+    int start = mail.indexOf("\r\nDate: ");
+    QVERIFY(start >= 0);
+    start += 2;
+    auto date = QString::fromLatin1(mail.mid(start, mail.indexOf("\r\n", start) - start));
+    QRegularExpression rfc5322("^Date: (Mon|Tue|Wed|Thu|Fri|Sat|Sun), \\d\\d "
+                               "(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) "
+                               "\\d{4} \\d\\d:\\d\\d:\\d\\d \\+0000$");
+    QVERIFY2(rfc5322.match(date).hasMatch(), qPrintable(date));
   }
   void mailTemporaryFailureRetries() {
     QTemporaryDir dir;

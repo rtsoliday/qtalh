@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
+#include <QLocale>
 #include <QLockFile>
 #include <QNetworkReply>
 #include <QProcess>
@@ -240,7 +241,9 @@ QByteArray NotificationService::mailMessage(const NotificationDestination& d,
       "From: " + d.sender.toUtf8() + "\r\nTo: " + d.recipients.join(", ").toUtf8() +
       "\r\nSubject: " + encoded("QtALH " + e.kind + ": " + e.subscriptionName.left(80)) +
       "\r\nDate: " +
-      QDateTime::currentDateTimeUtc().toString("ddd, dd MMM yyyy HH:mm:ss +0000").toLatin1() +
+      QLocale::c()
+          .toString(QDateTime::currentDateTimeUtc(), "ddd, dd MMM yyyy HH:mm:ss +0000")
+          .toLatin1() +
       "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; "
       "charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n";
   auto body = notificationText(e).toUtf8().toBase64();
