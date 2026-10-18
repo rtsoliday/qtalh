@@ -279,12 +279,14 @@ void addTitleDetails(const Element& e, Node& n, Notes& notes) {
     n.directives.push_back({"COMMAND", '!' + commands.join('!') + '!'});
   if (!guidance.isEmpty()) {
     auto text = guidance.join("\n\n");
-    // A guidance line beginning with $END would end the ALH block early.
-    static const QRegularExpression terminator("^(\\s*)\\$(END)", QRegularExpression::MultilineOption |
-                                                                  QRegularExpression::CaseInsensitiveOption);
-    if (text.contains(terminator)) {
-      text.replace(terminator, "\\1$ \\2");
-      notes.add("Guidance lines starting with $END written as $ END", path(&n));
+    // ALH ends a guidance block at any line whose first non-blank character is $
+    // and reads the following lines as configuration; QtALH also skips Unicode
+    // whitespace before $END. Prefix such lines so they stay guidance in both.
+    static const QRegularExpression dollar("^(\\s*)\\$", QRegularExpression::MultilineOption |
+                                                          QRegularExpression::UseUnicodePropertiesOption);
+    if (text.contains(dollar)) {
+      text.replace(dollar, "\\1\\$");
+      notes.add("Guidance lines starting with $ written as \\$", path(&n));
     }
     n.directives.push_back({"GUIDANCE_TEXT", text});
   }

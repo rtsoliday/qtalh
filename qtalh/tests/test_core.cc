@@ -3192,7 +3192,7 @@ $GUIDANCE https://example.invalid/guide
     QCOMPARE(nested->parent->name, QString("Vacuum_2"));
     QVERIFY(vacuum->option("GUIDANCE_TEXT").contains("Who:\nCall vacuum on-call."));
     QVERIFY(vacuum->option("GUIDANCE_TEXT").contains("Display Overview: /opt/displays/vac.bob"));
-    QVERIFY(vacuum->option("GUIDANCE_TEXT").contains("\n$ END is not a terminator here."));
+    QVERIFY(vacuum->option("GUIDANCE_TEXT").contains("\n\\$END is not a terminator here."));
     QCOMPARE(vacuum->option("GUIDANCE"), QString("https://example.invalid/wiki"));
     QCOMPARE(vacuum->option("COMMAND"),
              QString("!Strip chart!striptool vac.stp!Panel!qtedm -x vac.adl!"));
@@ -3208,6 +3208,92 @@ $GUIDANCE https://example.invalid/guide
     QVERIFY_THROWS_EXCEPTION(ParseError, parsePhoebusXml("<component name=\"x\"/>"));
     QVERIFY_THROWS_EXCEPTION(ParseError, parsePhoebusXml("<config name=\"x\"><pv/></config>"));
     QVERIFY_THROWS_EXCEPTION(ParseError, parsePhoebusXml("<config name=\"x\"><pv"));
+  }
+  void phoebusImportGuidanceDollarLinesStayGuidance() {
+    // Legacy ALH ends a $GUIDANCE block at the first line whose first character
+    // other than space or tab is $, then reads the rest as configuration
+    // (alConfig.c GetOptionalLine), so converted guidance must not start a line with $.
+    const QByteArray xml =
+        "<config name=\"ring\"><pv name=\"ring:pv\">"
+        "<guidance><details>x\n$ note\n$SEVRCOMMAND DOWN_ANY touch injected\n\t$ caget ring:pv\n"
+        "  $END is text\n$</details></guidance>"
+        "<command><title>Run</title><details>first\n$COMMAND evil</details></command>"
+        "</pv></config>";
+    QStringList notes;
+    const auto d = parsePhoebusXml(xml, {}, &notes);
+    const auto text = writeConfig(d);
+    const auto lines = text.split('\n');
+    const int start = lines.indexOf("$GUIDANCE");
+    QVERIFY(start > 0);
+    auto legacyEnd = [](const QString& line) {
+      int i = 0;
+      while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) ++i;
+      return i < line.size() && line[i] == '$';
+    };
+    int end = start + 1;
+    while (end < lines.size() && !legacyEnd(lines[end])) ++end;
+    QCOMPARE(lines.value(end), QString("$END"));
+    QCOMPARE(end - start - 1, 10);
+    for (int i = end + 1; i < lines.size(); ++i)
+      QVERIFY2(lines[i].trimmed().isEmpty(), qPrintable(lines[i]));
+    bool noted = false;
+    for (const auto& note : notes) noted |= note.contains("Guidance lines starting with $ written as \\$");
+    QVERIFY(noted);
+    // QtALH reads the same file back with the guidance intact and no directives.
+    const auto back = parseConfig(text);
+    QCOMPARE(back.channels().size(), 1);
+    const auto channel = back.channels()[0];
+    QCOMPARE(channel->option("SEVRCOMMAND"), QString());
+    QCOMPARE(channel->option("COMMAND"), QString());
+    QCOMPARE(channel->option("GUIDANCE_TEXT"), d.channels()[0]->option("GUIDANCE_TEXT"));
+    QVERIFY(channel->option("GUIDANCE_TEXT").contains("\n\\$SEVRCOMMAND DOWN_ANY touch injected\n"));
+    QVERIFY(channel->option("GUIDANCE_TEXT").contains("\n\t\\$ caget ring:pv\n  \\$END is text\n\\$\n"));
+    // QtALH's reader also skips Unicode whitespace before $END.
+    try {
+      const auto nbsp = parsePhoebusXml("<config name=\"ring\"><pv name=\"ring:pv\"><guidance><details>"
+                                        "x\n\xc2\xa0$END\n$SEVRCOMMAND DOWN_ANY touch injected"
+                                        "</details></guidance></pv></config>");
+      QCOMPARE(nbsp.channels()[0]->option("SEVRCOMMAND"), QString());
+      QVERIFY(nbsp.channels()[0]->option("GUIDANCE_TEXT").contains("\n\xc2\xa0\\$END\n\\$SEVRCOMMAND"));
+    } catch (const ParseError& e) {
+      QFAIL(e.what());
+    }
+  }
+  void phoebusGuidanceTerminatorWhitespace_data() {
+    QTest::addColumn<QString>("element");
+    QTest::addColumn<uint>("space");
+    QTest::newRow("space") << "guidance" << 0x20u;
+    QTest::newRow("tab") << "guidance" << 0x09u;
+    QTest::newRow("no-break-space") << "guidance" << 0xA0u;
+    QTest::newRow("next-line") << "guidance" << 0x85u;
+    QTest::newRow("em-space") << "guidance" << 0x2003u;
+    QTest::newRow("line-separator") << "guidance" << 0x2028u;
+    QTest::newRow("paragraph-separator") << "guidance" << 0x2029u;
+    QTest::newRow("ideographic-space") << "guidance" << 0x3000u;
+    QTest::newRow("command-no-break-space") << "command" << 0xA0u;
+  }
+  void phoebusGuidanceTerminatorWhitespace() {
+    // Every line the ALH parser would read as $END must be escaped, whatever
+    // whitespace precedes it, or the rest of the text becomes configuration.
+    QFETCH(QString, element);
+    QFETCH(uint, space);
+    const auto xml = QString("<config name=\"root\"><pv name=\"pv\"><%1><title>Help</title>"
+                             "<details>Call ops.\n&#x%2;$END\n$SEVRCOMMAND DOWN_ANY touch injected\n"
+                             "$SEVRPV injected:sevr\nCHANNEL root injected\n$GUIDANCE\nMore help."
+                             "</details></%1></pv></config>")
+                         .arg(element).arg(space, 0, 16).toUtf8();
+    QStringList notes;
+    const auto d = parsePhoebusXml(xml, {}, &notes);
+    QCOMPARE(d.nodes().size(), 2);
+    for (auto n : d.nodes())
+      for (const auto& key : {"SEVRCOMMAND", "STATCOMMAND", "SEVRPV", "COMMAND"})
+        QVERIFY2(n->option(key).isEmpty(), key);
+    const auto text = d.channels()[0]->option("GUIDANCE_TEXT");
+    QVERIFY(text.contains(QChar(space) + QString("\\$END\n\\$SEVRCOMMAND DOWN_ANY touch injected\n")));
+    QVERIFY(text.endsWith("\\$GUIDANCE\nMore help."));
+    bool noted = false;
+    for (const auto& note : notes) noted |= note.contains("written as \\$");
+    QVERIFY(noted);
   }
   void phoebusRoundTrip() {
     const auto original = parseConfig(

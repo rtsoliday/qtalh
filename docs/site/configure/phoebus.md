@@ -46,7 +46,9 @@ date imports as Disable; use [timed shelving](/operate/shelving) instead.
 XInclude files are expanded, including shorthand ID selectors in `xpointer`.
 Unresolved or unsupported selectors fail the import. Commands containing ALH
 menu delimiters (`!`) or line breaks are retained as guidance text with a
-conversion note. Delay and count must be nonnegative integers; counts are limited
+conversion note. Guidance lines whose first non-blank character is `$` are
+written as `\$`, because ALH ends a guidance block at any such line and reads the
+rest as configuration. Delay and count must be nonnegative integers; counts are limited
 to ALH's maximum of 1,000,000.
 
 Count filters with a positive count use the same delay and count parameters,
