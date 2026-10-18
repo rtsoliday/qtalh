@@ -13,7 +13,15 @@ server and NALMS, so a facility can move between systems or run both.
   runs them, so hover over **P** to preview them instead.
 
 When some settings have no equivalent, a message lists each kind with example
-paths. Nothing else is changed.
+paths. A few changes are not reported:
+
+- Cancel exports as `<enabled>false</enabled>`, which imports as Disable, so a
+  Cancel mask returns as Disable after a round trip.
+- Elements QtALH does not recognize, including misspelled ones, are ignored on
+  import together with their contents.
+- Characters that XML 1.0 cannot hold, such as form feeds and other control
+  characters, are left out on export.
+- Leading and trailing white space in each imported element's text is removed.
 
 ## From the command line
 

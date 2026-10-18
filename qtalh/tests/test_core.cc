@@ -3686,6 +3686,22 @@ $GUIDANCE https://example.invalid/guide
     };
     QCOMPARE(normalized(back), normalized(original));
   }
+  void phoebusUnreportedChanges() {
+    // Documented in docs/site/configure/phoebus.md: these changes have no note.
+    QStringList notes;
+    const auto cancelled = parsePhoebusXml(
+        writePhoebusXml(parseConfig("GROUP NULL r\nCHANNEL r pv C----\n"), &notes), {}, &notes);
+    QCOMPARE(cancelled.channels()[0]->mask.text(), QString("-D---"));
+    const auto typo = parsePhoebusXml("<config name=\"r\"><comonent name=\"a\"><pv name=\"p\"/>"
+                                      "</comonent><pv name=\"q\"><enabeld>false</enabeld></pv></config>",
+                                      {}, &notes);
+    QCOMPARE(typo.channels().size(), 1);
+    QCOMPARE(typo.channels()[0]->name, QString("q"));
+    QVERIFY(!typo.channels()[0]->mask[Disable]);
+    const auto xml = writePhoebusXml(parseConfig("GROUP NULL r\nCHANNEL r pv\n$ALIAS a\fb\vc\n"), &notes);
+    QVERIFY(xml.contains("<description>abc</description>"));
+    QVERIFY(notes.isEmpty());
+  }
   void alarmChangeTimeIgnoresUninitializedOverrides() {
     auto doc = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
     Engine engine(doc); auto n = doc.channels()[0];
