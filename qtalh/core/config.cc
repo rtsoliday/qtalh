@@ -23,7 +23,14 @@ QStringList words(const QString& s) {
 // ALH copies configuration bytes verbatim. Bytes that the locale codec cannot
 // decode (for example ISO-8859-1 text under a UTF-8 locale) would become
 // U+FFFD and be saved that way, so read such files losslessly as ISO-8859-1.
-QString decode(const QByteArray& bytes, bool& latin1) {
+QString decode(QByteArray bytes, bool& latin1) {
+  // ALH reads each line with fgets() and C string functions, so a NUL byte
+  // ends that line's text and later lines still load. Do the same; Qt 5's
+  // QByteArray conversions would instead drop everything after the first NUL.
+  for (int nul = bytes.indexOf('\0'); nul >= 0; nul = bytes.indexOf('\0', nul)) {
+    const int end = bytes.indexOf('\n', nul);
+    bytes.remove(nul, (end < 0 ? bytes.size() : end) - nul);
+  }
   const QString text = QString::fromLocal8Bit(bytes);
   // Only replacements added by the decoder count, not U+FFFD stored as UTF-8.
   if (text.count(QChar::ReplacementCharacter) <= bytes.count("\xEF\xBF\xBD"))

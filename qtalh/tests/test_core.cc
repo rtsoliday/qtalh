@@ -2683,6 +2683,27 @@ $GUIDANCE https://example.invalid/guide
     QCOMPARE(d.channels().size(), 2);
 #endif
   }
+  void nulByteEndsOnlyItsLine() {
+    // As ALH's fgets()/C-string reading: a NUL ends its own line, not the file.
+    QTemporaryDir dir;
+    QFile include(dir.filePath("more.alh"));
+    QVERIFY(include.open(QIODevice::WriteOnly));
+    include.write(QByteArray("GROUP NULL more\nCHANNEL more inc1:pv") + '\0' +
+                  QByteArray(" ignored\nCHANNEL more inc2:pv\n"));
+    include.close();
+    QFile top(dir.filePath("top.alh"));
+    QVERIFY(top.open(QIODevice::WriteOnly));
+    const QByteArray text = QByteArray("GROUP NULL root\nCHANNEL root a:pv -----\n# NUL ") + '\0' +
+        QByteArray(" in a comment\nCHANNEL root b:pv") + '\0' +
+        QByteArray("tail -D---\nCHANNEL root c:pv -----\nINCLUDE root more.alh\n");
+    QCOMPARE(top.write(text), qint64(text.size()));
+    top.close();
+    const auto d = loadConfig(top.fileName());
+    QStringList names;
+    for (auto n : d.channels()) names << n->name;
+    QCOMPARE(names, QStringList({"a:pv", "b:pv", "c:pv", "inc1:pv", "inc2:pv"}));
+    QCOMPARE(d.channels()[1]->mask.text(), QString("-----"));
+  }
   void readErrorsRejectConfiguration() {
 #ifndef Q_OS_LINUX
     QSKIP("Needs a file that opens but fails to read");

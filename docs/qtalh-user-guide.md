@@ -376,6 +376,7 @@ is saved in ISO-8859-1 again, byte for byte when unchanged; if edits add
 characters that ISO-8859-1 cannot represent, it is saved in the locale encoding.
 Saving expands INCLUDEs into one file, so if any included file was ISO-8859-1
 the whole saved file uses ISO-8859-1 when it can represent every character.
+As in ALH, a NUL byte ends the text of its line; the following lines still load.
 
 Directives normally apply to the preceding group/channel. A file, including an
 included file, must declare a GROUP, CHANNEL or INCLUDE before any other
