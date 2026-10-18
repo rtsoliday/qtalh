@@ -2,16 +2,21 @@
 
 This lab runs a four-channel EPICS IOC, QtALH, and a webhook receiver on this
 computer. Everything uses loopback. No email account or external webhook service
-is needed. Python 3, QtALH, and EPICS Base are already available on this Linux host.
+is needed. It requires Linux, Python 3, QtALH built in this checkout
+(`bin/Linux-x86_64/qtalh`), and EPICS Base.
 
 ## Start
 
-From a terminal in your desktop session:
+From a terminal in your desktop session, at the repository root:
 
 ```sh
-cd /home/SOLIDAY/github/qtalh
 python3 examples/feature-lab/run.py
 ```
+
+The launcher looks for `softIoc`, `caput`, `caget`, and `caRepeater` in
+`../epics-base/bin/linux-x86_64` next to the checkout. If EPICS Base is
+installed elsewhere, add `--epics-bin /path/to/epics/base/bin/linux-x86_64`
+to every `run.py` command below.
 
 Keep that terminal open. QtALH opens in Fusion appearance. Enter the commands
 below at the terminal's `lab>` prompt. Use the QtALH window for acknowledgement,
@@ -89,7 +94,7 @@ per line. It is a capture receiver, not a simulation of email or Slack/Teams del
 1. Enter `maintenance`; select the maintenance channel under **Diagnostics**.
 2. Choose **Action → Shelve Alarms…**, choose **Custom minutes**, enter **1**, and
    enter your username and a reason such as `Lab maintenance`. Apply it.
-3. Inspect **Action → Shelved Alarms…** and watch the countdown.
+3. Inspect **View → Shelved Alarms…** and watch the countdown.
 4. Leave the PV in alarm. After one minute, the shelf expires automatically.
    Shelving does not clear the PV or acknowledge it. Notification eligibility
    resumes with a fresh delay after unshelving.
