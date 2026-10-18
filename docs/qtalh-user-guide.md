@@ -105,12 +105,17 @@ These tooltips work with both the modern and Motif appearances.
 
 ## Timed shelving
 
-Select a channel or group and choose **Action → Shelve Alarms…**. Choose 15 or
-30 minutes, 1, 4, or 8 hours, or custom whole minutes from 1 to 1,440. The default
-is one hour. Enter a single-line reason (1–240 characters); the timer starts
-when you click **Shelve**. A group operation shelves its currently unshelved
-channels and retains existing shelves' deadlines and reasons. The dialog keeps
-its displayed target even if you select another row in the main window.
+Select a channel or group and choose **Action → Shelve Alarms…**, or right-click
+it and choose **Shelve this channel…** or **Shelve this group…**. Choose 15 or
+30 minutes, 1, 4, or 8 hours, or **Custom minutes**, **Custom hours**, or
+**Custom days** and enter a whole number in that unit, up to 365 days (525,600
+minutes). The default is one hour. Enter your **Username** (1–120 characters,
+without spaces or control characters) and a single-line **Reason** (1–240
+characters). Both are required; QtALH does not authenticate the username. The
+timer starts when you click **Shelve**. A group operation shelves its currently
+unshelved channels and retains existing shelves' deadlines and reasons. The
+dialog keeps its displayed target even if you select another row in the main
+window.
 
 Shelving affects **only this runtime's display and sound**, including when
 running in global or passive mode. Shelved channels do not contribute to active
@@ -122,11 +127,12 @@ its mask, ACKS, or ACKT.
 
 Click **Shelved: N**, or choose **View → Shelved Alarms…**, to see full channel
 paths, underlying severity and outstanding acknowledgements, expiration in local
-time, remaining duration, and reasons. **Unshelve Selected** restores selected
-channels immediately. **Change Shelf…** replaces one channel's deadline and
-reason. **Action → Unshelve Alarms** clears all shelves beneath the selected
-group, including shelves originally applied individually. Unshelve a channel
-before acknowledging it; bulk acknowledgement skips shelved channels.
+time, remaining duration, reasons, and usernames. **Unshelve Selected** restores
+selected channels immediately. **Change Shelf…** replaces one channel's deadline
+and reason; enter your username again, because the previous operator's name is
+not prefilled. **Action → Unshelve Alarms** clears all shelves beneath the
+selected group, including shelves originally applied individually. Unshelve a
+channel before acknowledging it; bulk acknowledgement skips shelved channels.
 
 At expiry, current alarm presentation returns automatically. Outstanding
 unacknowledged alarms can sound again, subject to existing thresholds and silence

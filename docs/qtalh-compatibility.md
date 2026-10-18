@@ -285,7 +285,8 @@ new browser and dialog/runtime lifetimes report zero errors and no lost blocks.
 
 ## Qt-specific timed shelving
 
-Runtime channels can be shelved for 1–1,440 minutes with a required reason.
+Runtime channels can be shelved for 1 minute to 365 days with a required
+operator-entered username and reason.
 Group actions skip already shelved channels; group unshelving clears all
 remaining descendant shelves. Shelving is an independent presentation state,
 not a legacy mask bit. Separate incremental aggregates exclude shelved channels

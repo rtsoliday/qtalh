@@ -1885,6 +1885,24 @@ private slots:
     auto table = shelfList->findChild<QTableWidget*>("shelvedAlarmsTable");
     QCOMPARE(table->rowCount(), w->document().channels().size());
   }
+  void shelvingHelpMatchesDialog() {
+    // The embedded Timed shelving topic must state the limits and fields the dialog enforces.
+    auto w = std::make_unique<Window>(sample(), options(false), false);
+    for (auto action : w->findChildren<QAction*>())
+      if (action->text() == "Shelve Alarms...") action->trigger();
+    auto dialog = w->findChild<QDialog*>("shelveDialog"); QVERIFY(dialog);
+    dialog->findChild<QComboBox*>("shelfDuration")->setCurrentText("Custom days");
+    const int days = dialog->findChild<QSpinBox*>("shelfCustomMinutes")->maximum();
+    QCOMPARE(days, Engine::MaximumShelfMinutes / 1440);
+    dialog->findChild<QLineEdit*>("shelfReason")->setText("Reason only");
+    QVERIFY(!dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->isEnabled());
+    auto help = showHelp(w.get(), "timed-shelving");
+    const auto text = help->findChild<QTextBrowser*>("helpBrowser")->toPlainText().simplified();
+    QVERIFY(text.contains(QString("up to %1 days").arg(days)));
+    QVERIFY(text.contains("Enter your Username"));
+    QVERIFY(!text.contains("1 to 1,440"));
+    help->close();
+  }
 
   void shelvingWorkflow() {
     auto w = std::make_unique<Window>(sample(), options(false), false);
