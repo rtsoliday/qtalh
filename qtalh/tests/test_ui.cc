@@ -348,7 +348,8 @@ private slots:
     QTest::keyClick(find, Qt::Key_Escape); QVERIFY(!help->isVisible());
   }
   void dialogHelpOpensRelevantTopic() {
-    auto o = options(false); o.broadcast = true;
+    QTemporaryDir dir; // Broadcast lock files belong in scratch, not the source tree.
+    auto o = options(false); o.broadcast = true; o.configDir = dir.path(); o.config = dir.filePath("config");
     auto w = std::make_unique<Window>(sample(), o, false);
     w->show();
     const QVector<QStringList> cases = {
