@@ -251,7 +251,14 @@ Group mask actions process direct channels before subgroups, matching ALH even
 when declarations are interleaved. Saving and reloading therefore preserves the
 sequence of severity commands during Apply, Reset, and Modify Mask actions.
 Fixed-argument directives accept whitespace-separated trailing `#` comments;
-command, alias, and guidance text remains intact. CALC accepts trailing comments
+command, alias, and guidance text otherwise remains intact, except that
+leading and trailing white space is removed from single-line directive values
+(`$ALIAS`, `$COMMAND`, `$SEVRCOMMAND`, `$STATCOMMAND` and a `$GUIDANCE` URL),
+which ALH keeps up to the end of the line; block guidance keeps its spacing.
+Configurations with CRLF line endings load: QtALH ignores the carriage returns
+except in block guidance text, where they are kept, so a saved file mixes line
+endings. ALH misreads a CRLF `$GUIDANCE` block and keeps CR in aliases and
+commands, so convert such files to LF before sharing them with ALH. CALC accepts trailing comments
 after a valid expression while preferring a valid full expression, so spaced
 expressions and the `#` not-equal operator are both accepted. Spaced expressions
 are an intentional QtALH extension: legacy ALH reads only the first
