@@ -47,6 +47,8 @@ def verify(base="/"):
         pages[path.resolve()] = parser
     issues = []
     links = 0
+    # Authored website pages copied as downloads mean a link was not routed.
+    pages_source = OUTPUT.resolve() / 'downloads/docs/site'
     for path, page in pages.items():
         if not page.title:
             issues.append(f'{path.name}: missing page title')
@@ -77,6 +79,9 @@ def verify(base="/"):
             if (tag == 'a' and dest.is_file() and dest.suffix == '.html' and dest not in pages
                     and 'target' not in attrs and 'download' not in attrs):
                 issues.append(f'{path.relative_to(OUTPUT)}: standalone HTML link needs a target to bypass the VitePress router: {url}')
+            if (dest.is_relative_to(pages_source) and not dest.is_relative_to(pages_source / 'public')
+                    and dest.suffix == '.md'):
+                issues.append(f'{path.relative_to(OUTPUT)}: site page link downloads raw Markdown instead of routing to the page: {url}')
     options = set(re.findall(r'a == "(-[^\"]+)"', (ROOT / 'qtalh/services/options.cc').read_text()))
     reference = (SITE / 'reference/command-line.md').read_text()
     for option in options:

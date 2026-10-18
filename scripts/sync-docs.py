@@ -86,6 +86,10 @@ def rewrite(text, origin, page_route):
             route, anchor = SECTIONS[anchor], ''
         else:
             route = ROUTES.get(key)
+            if (route is None and key.startswith('docs/site/') and not key.startswith('docs/site/public/')
+                    and key.endswith('.md') and source.is_file()):
+                # Authored website pages are routed like any other page, not offered as raw downloads.
+                route = '/' + key[len('docs/site/'):-len('.md')]
             if route is None:
                 if not source.is_file():
                     raise FileNotFoundError(f'{origin}: {target}')

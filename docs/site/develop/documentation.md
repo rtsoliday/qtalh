@@ -119,7 +119,7 @@ Open the local URL printed by VitePress. Changes to authored pages refresh autom
 
 ## Validate a change
 
-The production build checks Markdown links. `scripts/build-docs.py` additionally checks generated page titles, local page/asset links, anchors, command-line spellings, and configuration directive coverage against the parser. Links to standalone HTML archives must use `target="_self"` so VitePress leaves navigation to the browser; the checker verifies this on generated pages. Raw HTML download and archive links use page-relative paths, and the runtime screenshot uses VitePress `withBase`; keep those links portable when editing. The checker rejects URLs that escape the selected hosting prefix. It preserves the legacy manual itself as an archive rather than rewriting its old links.
+The production build checks Markdown links. `scripts/build-docs.py` additionally checks generated page titles, local page/asset links, anchors, command-line spellings, and configuration directive coverage against the parser. Links to standalone HTML archives must use `target="_self"` so VitePress leaves navigation to the browser; the checker verifies this on generated pages. It also rejects a link to an authored website page that was published as a raw Markdown download instead of a page route. Raw HTML download and archive links use page-relative paths, and the runtime screenshot uses VitePress `withBase`; keep those links portable when editing. The checker rejects URLs that escape the selected hosting prefix. It preserves the legacy manual itself as an archive rather than rewriting its old links.
 
 For an existing build:
 
