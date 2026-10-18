@@ -5326,6 +5326,12 @@ private slots:
     QTRY_VERIFY(driver.canWrite(prefix + "permit"));
     QTRY_COMPARE(actionValue, -1.0); QVERIFY(!driver.canWrite(prefix + "action"));
     QTRY_COMPARE(engine.state(n).severity, 0);
+    // Under a loaded suite the IOC can connect after the initial connection
+    // deadline. Explicitly clear that startup latch before testing MAJOR ACKS.
+    QCOMPARE(engine.state(n).iocUnack, 0);
+    if (engine.state(n).unack) engine.acknowledge(n);
+    QCOMPARE(engine.state(n).unack, 0);
+    QVERIFY(engine.pendingAckValues().isEmpty());
     QVERIFY(driver.put(prefix + "alarm", 20)); QTRY_COMPARE(engine.state(n).unack, 2);
     engine.acknowledge(n); QTRY_COMPARE(engine.state(n).unack, 0);
     QCOMPARE(engine.pendingAckValues().size(), 1);
