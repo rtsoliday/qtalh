@@ -6,12 +6,33 @@
 #include <QTimer>
 #include <cstdio>
 #include <ctime>
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 using namespace alh;
 
-static double cpuSeconds() {
+static bool cpuSeconds(double& seconds) {
+#ifdef Q_OS_WIN
+  FILETIME created{}, exited{}, kernel{}, user{};
+  if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) {
+    std::fprintf(stderr, "GetProcessTimes failed: %lu\n", static_cast<unsigned long>(GetLastError()));
+    return false;
+  }
+  ULARGE_INTEGER kernelTicks{}, userTicks{};
+  kernelTicks.LowPart = kernel.dwLowDateTime;
+  kernelTicks.HighPart = kernel.dwHighDateTime;
+  userTicks.LowPart = user.dwLowDateTime;
+  userTicks.HighPart = user.dwHighDateTime;
+  seconds = static_cast<double>(kernelTicks.QuadPart + userTicks.QuadPart) / 1e7;
+#else
   timespec value{};
-  clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &value);
-  return value.tv_sec + value.tv_nsec / 1e9;
+  if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &value) != 0) {
+    std::perror("clock_gettime");
+    return false;
+  }
+  seconds = value.tv_sec + value.tv_nsec / 1e9;
+#endif
+  return true;
 }
 
 int main(int argc, char** argv) {
@@ -67,10 +88,13 @@ int main(int argc, char** argv) {
   QObject::connect(&finish, &QTimer::timeout, &measurement, &QEventLoop::quit);
   QElapsedTimer wall;
   wall.start();
-  const double startCpu = cpuSeconds();
+  double startCpu = 0;
+  if (!cpuSeconds(startCpu)) return 5;
   finish.start(seconds * 1000);
   measurement.exec();
-  const double cpu = cpuSeconds() - startCpu;
+  double endCpu = 0;
+  if (!cpuSeconds(endCpu)) return 5;
+  const double cpu = endCpu - startCpu;
   const double elapsed = wall.nsecsElapsed() / 1e9;
   updates.stop();
   std::array<int, 5> counts{};

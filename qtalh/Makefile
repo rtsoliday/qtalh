@@ -54,6 +54,9 @@ $(OBJ_DIR)/benchmark_cpu.exe: $(OBJECTS) $(OBJ_DIR)/tests/benchmark_cpu.obj
 	$(LINKEXE) $(LDFLAGS) /OUT:$@ $^ $(LIBS)
 benchmark-cpu: $(OBJ_DIR)/benchmark_cpu.exe
 	QT_QPA_PLATFORM=offscreen $< 10000 idle 10
+	QT_QPA_PLATFORM=offscreen $< 10000 updates 10
+	QT_QPA_PLATFORM=offscreen $< 10000 filtered 10
+	QT_QPA_PLATFORM=offscreen $< 10000 runtime 10
 $(OBJ_DIR)/tests/test_visual.obj: $(OBJ_DIR)/test_visual.moc
 $(OBJ_DIR)/tests/test_visual.obj: CPPFLAGS += -DTEST_OUTPUT='"$(abspath $(OBJ_DIR)/test-artifacts)"'
 $(OBJ_DIR)/test_visual.exe: $(OBJECTS) $(OBJ_DIR)/tests/test_visual.obj
