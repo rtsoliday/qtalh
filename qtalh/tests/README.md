@@ -107,12 +107,40 @@ These checks cover test-owned `caRepeater` startup
 retries and cleanup, shared build rules, bounded log recovery, and pvAccess
 callback queues.
 
-Qt 5 was not installed on this Windows host. The current candidate's Linux
-and macOS builds, Motif/X11 visual comparison, Unix helper interoperability,
-and clean-machine distribution installation remain **NOT VERIFIED** by
-this audit. Native print panels and physical audio/printer output were not
-tested. No continuous integration job builds or tests the application;
-the repository workflow builds only the documentation.
+Qt 5 was not installed on this Windows host. That run did not cover Linux or
+macOS builds, the Motif/X11 visual comparison, Unix helper interoperability,
+or clean-machine distribution installation. Native print panels and physical
+audio/printer output were not tested. No continuous integration job builds or
+tests the application; the repository workflow builds only the documentation.
+The later audit corrections F-901 to F-933 have not been built or tested on
+Windows or macOS.
+
+### Linux verification (2026-10-18)
+
+The 1.0.0 re-audit verified the code at 3664e13 (branch
+release-audit-2026-10-18, including F-901 to F-932) on RHEL 9.8 x86-64 with
+GCC 11.3.0, Qt 5.15.9 and EPICS Base 7.0.8. A clean build had no compiler
+warnings, including the test programs. Inside a loopback-only network
+namespace, `make -C qtalh test` and `test-ui-fusion` passed:
+
+| Suite | Passed | Skipped |
+| --- | ---: | ---: |
+| Core | 464 | 0 |
+| Modern UI | 293 | 0 |
+| Classic UI | 292 | 1 |
+| Fusion UI | 293 | 0 |
+| Loopback IOC | 165 | 0 |
+| pvAccess | 81 | 0 |
+| Unix helpers, queues, TCP and RPC | 224 | 0 |
+| Notifications | 57 | 0 |
+| Analytics | 29 | 0 |
+
+The three RPC helper cases need the host's `rpcbind`, so they ran outside the
+namespace. `test-build` passed 5 checks, `test-visual` passed under Xvfb and
+`test-gallery` passed in both appearances. AddressSanitizer/UBSan and
+ThreadSanitizer runs of the suites reported no errors in QtALH code; the only
+sanitizer-run failures were the known fixed time bounds in
+`analyticsLargeDashboard` and `batchingAndTenThousandChannels`.
 
 ## macOS verification (2026-10-15)
 
@@ -197,6 +225,15 @@ reference case. Use the full X11 `test-visual` target for the Motif comparison.
 Replace the object-directory suffix to match the selected platform and Qt major.
 For optional Valgrind runs, prefix a focused command with
 `valgrind --error-exitcode=99 --leak-check=full` (after any environment assignment).
+The callback-lifetime regressions detect a use of freed memory only under
+Valgrind or AddressSanitizer; a normal build passes them even without the fix:
+
+```sh
+valgrind --error-exitcode=99 O.Linux-x86_64-qt5/test_ioc numericDiagnosticCanDestroyService \
+  creationDiagnosticCanRemoveOwner alarmCallbackCanDestroyService \
+  freshAlarmCallbackCanDestroyService freshNumericCallbackCanCancelItself
+valgrind --error-exitcode=99 O.Linux-x86_64-qt5/test_pva callbackCanDestroyService
+```
 
 Performance tools are described in [CPU benchmarks](../../docs/qtalh-performance.md#reproduction).
 `benchmark-cpu` exercises the in-process engine/UI. `benchmark_ioc.py` compares

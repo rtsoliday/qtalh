@@ -93,9 +93,11 @@ POSIX lock interoperability with legacy ALH.
 
 Verified on 2026-10-18 with MSVC 2022, Qt 6.11.2
 (including its installed Multimedia module) and EPICS Base 7.0.10.1-DEV on
-Windows x64: a clean application build and 1,390 checks passed, with 17 skips.
-The current candidate has not been verified with Qt 5 or on Linux/macOS;
-see the [test guide](qtalh/tests/README.md) for results and limitations.
+Windows x64, at the content of commit 0b047bf: a clean application build and
+1,390 checks passed, with 17 skips. The 1.0.0 audit corrections F-901 to F-933
+that followed were verified only on Linux x86-64 with Qt 5.15.9 (code at
+3664e13); Windows, macOS and Qt 6 builds of the release candidate are not yet
+verified. See the [test guide](qtalh/tests/README.md) for results and limitations.
 The Windows flags explicitly enable
 `/Zc:lambda` so older MSVC 2022 versions can compile Qt 6.11's generated moc
 code in C++17 mode. Keep `/permissive-` for Qt; only the pvAccess implementation
