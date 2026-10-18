@@ -1323,6 +1323,28 @@ private slots:
     QTRY_VERIFY(events > 0);
     QVERIFY(!ca.put(prefix + "alarm", 99));
   }
+  void asynchronousWriteRejectionsAreReported() {
+    // The IOC accepts the request and rejects the put afterwards. ALH reports
+    // such CA exceptions (alCaException); CA's default handler only prints them
+    // and aborts the process for error-severity replies.
+    ChannelAccess ca;
+    QStringList errors;
+    ca.error = [&](const QString& message) { errors << message; };
+    const auto name = prefix + "locked";
+    ca.prepare(name);
+    QTRY_VERIFY(ca.canWrite(name));
+    QVERIFY(ca.put(name, 1, WriteKind::Heartbeat));
+    QTRY_COMPARE(errors.size(), 1);
+    QVERIFY2(errors[0].contains(ca_message(ECA_PUTFAIL)) && errors[0].contains(name),
+             qPrintable(errors[0]));
+    // As in ALH, a burst ends with one notice instead of flooding diagnostics.
+    for (int value = 0; value < 40; ++value)
+      QVERIFY(ca.put(name, value));
+    QTRY_COMPARE(errors.size(), 26);
+    QTest::qWait(300);
+    QCOMPARE(errors.size(), 26);
+    QVERIFY2(errors.last().contains("Too many exceptions"), qPrintable(errors.last()));
+  }
   void pvaMonitorAndWrites() {
     PvAccess pva;
     QStringList errors;

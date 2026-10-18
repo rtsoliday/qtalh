@@ -629,6 +629,14 @@ transient acknowledgement is enabled and clears on recovery with NoAckT. Cancel,
 Disable, NoAck, shelving, and passive acknowledgement restrictions still apply.
 Notification escalation remains paused during the communication gap.
 
+Asynchronous Channel Access exceptions (for example an IOC rejecting a put with
+`DISP=1`, or a lost virtual circuit) go to the message area and operation log, as
+ALH's `alCaException` does, limited to 25 reports and one "Too many exceptions"
+notice per CA context. Unlike ALH, which then restores the CA default handler,
+QtALH keeps its handler and only prints later exceptions, so an error-severity
+exception (for example `ECA_BADCHID` from a CA gateway during an IOC outage) never
+aborts the process.
+
 ACKS writes that cannot be sent (disconnected, not writable, or refused by the CA
 client library) emit a failure operation rather than acknowledgement-success records
 or ACKPV writes. Group acknowledgement continues with other channels. A sent write is

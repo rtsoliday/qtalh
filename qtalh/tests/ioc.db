@@ -12,6 +12,11 @@ record(ao, "$(P)ack") { field(VAL, "0") }
 record(ao, "$(P)severity") { field(VAL, "0") }
 record(ao, "$(P)heartbeat") { field(VAL, "0") }
 record(ao, "$(P)force") { field(VAL, "0") }
+# Writable over CA, but the IOC rejects every put asynchronously (ECA_PUTFAIL).
+record(ao, "$(P)locked") {
+  field(DISP, "1")
+  field(VAL, "0")
+}
 record(ai, "$(P)readonly") {
   field(DESC, "Read-only alarm description")
   field(ASG, "readonly")

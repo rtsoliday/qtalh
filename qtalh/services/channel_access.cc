@@ -3,6 +3,7 @@
 #include "channel_access.h"
 #include <alarm.h>
 #include <db_access.h>
+#include <QCoreApplication>
 #include <QPointer>
 #include <algorithm>
 #include <limits>
@@ -12,6 +13,43 @@ namespace {
 QVector<ChannelAccess*> contexts;
 QSet<int> caDescriptors;
 bool dispatching = false;
+// ALH's alCaException reports at most this many exceptions per CA context.
+constexpr int maxExceptions = 25;
+quintptr contextGeneration = 0;
+int exceptions = 0;
+// CA calls this on its own threads for asynchronous errors, such as an IOC
+// rejecting a put. Without a handler CA prints them and aborts the process on
+// error severities. Report them on the Qt thread instead, as ALH does.
+void caException(exception_handler_args args) {
+  const char* message = ca_message(args.stat);
+  auto text = QString("Channel Access Exception: %1  Context: %2")
+                  .arg(message ? message : "Unavailable",
+                       args.ctx ? QString::fromLocal8Bit(args.ctx) : QString("Unavailable"));
+  if (args.chid)
+    text += "  PV: " + QString::fromLocal8Bit(ca_name(args.chid));
+  const auto generation = reinterpret_cast<quintptr>(args.usr);
+  auto app = QCoreApplication::instance();
+  if (!app) {
+    qWarning("QtALH: %s", qPrintable(text));
+    return;
+  }
+  QMetaObject::invokeMethod(app, [text, generation] {
+    // Exceptions of a destroyed context, or beyond the limit, are only printed.
+    bool delivered = false;
+    if (generation == contextGeneration && exceptions <= maxExceptions) {
+      const auto report = ++exceptions > maxExceptions
+          ? QString("Channel Access Exception: Too many exceptions [%1]").arg(maxExceptions)
+          : text;
+      for (auto self : QVector<ChannelAccess*>(contexts))
+        if (contexts.contains(self) && self->error) {
+          self->error(report);
+          delivered = report == text;
+        }
+    }
+    if (!delivered)
+      qWarning("QtALH: %s", qPrintable(text));
+  }, Qt::QueuedConnection);
+}
 } // namespace
 
 ChannelAccess::ChannelAccess(EngineOptions o, QObject* parent) : QObject(parent), options(o) {
@@ -19,6 +57,8 @@ ChannelAccess::ChannelAccess(EngineOptions o, QObject* parent) : QObject(parent)
     int status = ca_context_create(ca_disable_preemptive_callback);
     if (status != ECA_NORMAL)
       throw std::runtime_error(ca_message(status));
+    exceptions = 0;
+    ca_add_exception_event(caException, reinterpret_cast<void*>(++contextGeneration));
   }
   contexts.push_back(this);
   active = true;
