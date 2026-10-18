@@ -701,14 +701,15 @@ bool Engine::retryAckValue(quint64 id) {
   logOperation(n, "Explicit ACKPV retry submitted (ACKS was not repeated)");
   return true;
 }
-void Engine::setMask(Node* n, Mask requested, bool automatic) {
-  const bool failed = applyMask(n, requested, automatic, automatic ? n : nullptr);
+void Engine::setMask(Node* n, Mask requested, bool automatic, bool ackTRequested) {
+  const bool failed = applyMask(n, requested, automatic, automatic ? n : nullptr, ackTRequested);
   logOperation(n, QString(automatic ? "Force Mask " : "Change Mask ") + requested.text() +
       (failed ? " (ACKT write failed; previous setting retained)" : ""),
       automatic ? (n->group ? OperationKind::ForceGroupMask : OperationKind::ForceMask)
                 : (n->group ? OperationKind::ChangeGroupMask : OperationKind::ChangeMask));
 }
-bool Engine::applyMask(Node* n, Mask requested, bool automatic, Node* forceSource) {
+bool Engine::applyMask(Node* n, Mask requested, bool automatic, Node* forceSource,
+                       bool ackTRequested) {
   bool ackTFailed = false;
   eachChannel(n, [&](Node* c) {
     auto& s = states[c];
@@ -720,7 +721,7 @@ bool Engine::applyMask(Node* n, Mask requested, bool automatic, Node* forceSourc
       // the remaining mask changes. Propagate both states to balance aggregates.
       auto added = s.mask;
       added[Cancel] = false;
-      applyMask(c, added, false, nullptr);
+      applyMask(c, added, false, nullptr, false);
     }
     State old = s;
     Mask mask = requested;
@@ -814,9 +815,13 @@ bool Engine::applyMask(Node* n, Mask requested, bool automatic, Node* forceSourc
     // One row's confirmation must not discard accepted intent: another row
     // may still deliver an older observation. Conversely, retaining intent
     // must not hide a later external change. Suppress only when both agree.
-    if (options.global && !options.passive &&
-        (mask[AckT] != accepted || mask[AckT] != observed ||
-         (automatic && old.observedAckT < 0))) {
+    // Only a request that names NoAckT, or a Force PV, consults the record.
+    // Other requests (Add, Disable, NoAck, Reset) carry the row's own T bit,
+    // which may be stale; as in ALH alChangeChanMask, write only if it changes.
+    const bool ackTChange = automatic || ackTRequested
+        ? mask[AckT] != accepted || mask[AckT] != observed || (automatic && old.observedAckT < 0)
+        : mask[AckT] != old.mask[AckT];
+    if (options.global && !options.passive && ackTChange) {
       if (pv && pv->put(c->name, !mask[AckT], WriteKind::AckTransient)) {
         acceptedAckT.insert(record, mask[AckT]);
         observedRecordAckT.remove(record); // Wait for feedback after this submission.
@@ -881,7 +886,9 @@ void Engine::retryForceWrites() {
 }
 void Engine::resetMask(Node* n, bool automatic) {
   bool failed = false;
-  eachChannel(n, [&](Node* c) { failed |= applyMask(c, c->mask, automatic, automatic ? n : nullptr); });
+  eachChannel(n, [&](Node* c) {
+    failed |= applyMask(c, c->mask, automatic, automatic ? n : nullptr, false);
+  });
   logOperation(n, QString(automatic ? "Force PV Reset Mask" : "Reset Mask") +
       (failed ? " (ACKT write failed; previous setting retained)" : ""),
       n->group ? OperationKind::ChangeGroupMask : OperationKind::ChangeMask);
@@ -893,7 +900,7 @@ void Engine::modifyMask(Node* n, int bit, int choice) {
   eachChannel(n, [&](Node* c) {
     auto mask = states[c].mask;
     mask[bit] = choice == 2 ? c->mask[bit] : choice == 1;
-    failed |= applyMask(c, mask, false, nullptr);
+    failed |= applyMask(c, mask, false, nullptr, bit == AckT);
     logOperation(c, "Group Mask ID --- " + c->name, OperationKind::MaskChannel);
   });
   // The legacy Modify Mask menu uses code 7 even for group actions.
@@ -924,7 +931,7 @@ void Engine::noAck(Node* n, bool enabled) {
     } else {
       auto m = states[c].mask;
       m[Ack] = enabled ? true : c->mask[Ack];
-      applyMask(c, m, false, nullptr);
+      applyMask(c, m, false, nullptr, false);
       logOperation(c, "Group Mask ID --- " + c->name, OperationKind::MaskChannel);
     }
   };

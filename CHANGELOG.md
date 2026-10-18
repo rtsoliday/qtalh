@@ -49,7 +49,10 @@ Additional 1.0.0 audit decisions and corrections:
   submission. Runtime Overrides offers explicit **Retry ACKPV**, without
   repeating ACKS or retrying automatically when the connection recovers.
 - Rapid opposite NoAckT requests through duplicate rows use the latest accepted
-  record setting, so a stale row cannot discard the newer request.
+  record setting, so a stale row cannot discard the newer request. Only a
+  request that changes NoAckT (Modify Mask NoAckT, the T box in Force Mask, or a
+  Force PV) does this; Add, Disable, NoAck, NoLog, the NoAck timer and Reset
+  never write a stale row's NoAckT to ACKT.
 - FORCEPV rejects NaN, infinity and numeric overflow in force/reset values.
   Finite values, legacy parsing defaults and `NE` remain supported.
 - Enabling local NoAckT leaves an existing cleared transient awaiting explicit

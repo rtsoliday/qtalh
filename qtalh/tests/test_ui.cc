@@ -5354,6 +5354,53 @@ private slots:
     QTRY_COMPARE(table->rowCount(), 0); QVERIFY(engine.pendingAckValues().isEmpty());
     QCOMPARE(engine.state(n).unack, 0);
   }
+  void forceMaskApplyKeepsStaleDuplicateAckT() {
+    // SuiteEnvironment and TestCaRepeater isolate this IOC on loopback. The
+    // cancelled duplicate row never receives the record's ACKT, so Force Mask
+    // shows a stale T. Adding it back without touching T must not write ACKT.
+    QTemporaryDir dir;
+    const auto prefix = "qtalh_ui_ackt_" + QString::number(QCoreApplication::applicationPid()) + ":";
+    QFile database(dir.filePath("ackt.db")); QVERIFY(database.open(QIODevice::WriteOnly));
+    database.write(("record(ai,\"" + prefix + "alarm\") { field(VAL,\"0\") }\n").toLatin1());
+    database.close();
+    struct Ioc {
+      QProcess process;
+      ~Ioc() { process.kill(); process.waitForFinished(3000); }
+    } ioc;
+    ioc.process.start(QString(EPICS_TEST_BIN) + "/softIoc", {"-d", database.fileName()});
+    QVERIFY(ioc.process.waitForStarted());
+    auto o = options(false); o.engine.global = true;
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root " + prefix + "alarm\nCHANNEL root " +
+                         prefix + "alarm.VAL C----\n");
+    auto w = std::make_unique<Window>(d, o, true); w->show();
+    auto& engine = w->alarmEngine();
+    auto active = w->document().channels()[0], stale = w->document().channels()[1];
+    ChannelAccess driver;
+    double ackt = -1;
+    driver.number(prefix + "alarm.ACKT", [&](double value) { ackt = value; });
+    QTRY_COMPARE_WITH_TIMEOUT(ackt, 1.0, 10000);
+    QTRY_VERIFY_WITH_TIMEOUT(engine.state(active).observedAckT >= 0, 10000);
+    engine.modifyMask(active, AckT, 1);
+    QTRY_COMPARE(ackt, 0.0); QTRY_VERIFY(engine.state(active).mask[AckT]);
+    QVERIFY(!engine.state(stale).mask[AckT]);
+    auto view = w->findChild<QTreeView*>("groupContents"); QVERIFY(view);
+    view->setCurrentIndex(view->model()->index(1, 2));
+    w->findChild<QAction*>("Force Mask...")->trigger();
+    auto forced = w->findChild<QDialog*>("forceMaskDialog"); QVERIFY(forced);
+    QVERIFY(!forced->findChild<QCheckBox*>("maskBit3")->isChecked());
+    forced->findChild<QCheckBox*>("maskBit0")->setChecked(false);
+    forced->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Apply)->click();
+    QVERIFY(!engine.state(stale).mask[Cancel]);
+    QTest::qWait(500);
+    QCOMPARE(ackt, 0.0);
+    QVERIFY(engine.state(active).mask[AckT]);
+    // Changing T in the same dialog is an explicit request through that row.
+    forced->findChild<QCheckBox*>("maskBit3")->setChecked(true);
+    forced->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Apply)->click();
+    forced->findChild<QCheckBox*>("maskBit3")->setChecked(false);
+    forced->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Apply)->click();
+    QTRY_COMPARE(ackt, 1.0);
+  }
   void toolDialogsIgnoreEnter() {
     // Enter in a filter or list never presses an operator action as an implicit default button.
     auto w = std::make_unique<Window>(sample(), options(false), false);

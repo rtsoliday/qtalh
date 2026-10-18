@@ -153,7 +153,9 @@ public:
   void unshelve(Node*);
   QVector<ShelfSnapshot> shelves() const;
   void restoreShelves(const QVector<ShelfSnapshot>&);
-  void setMask(Node*, Mask, bool automatic = false);
+  // A manual request names NoAckT unless ackTRequested is false. Then the T
+  // bit is the row's own, and ACKT is written only if it changes for that row.
+  void setMask(Node*, Mask, bool automatic = false, bool ackTRequested = true);
   void resetMask(Node*, bool automatic = false);
   void modifyMask(Node*, int bit, int choice);
   void noAck(Node*, bool enabled);
@@ -227,7 +229,7 @@ private:
   struct ForceRuntime;
   // Editable directives do not own live CALC variables or subscription lifetimes.
   QHash<Node*, std::shared_ptr<ForceRuntime>> forces;
-  bool applyMask(Node*, Mask, bool automatic, Node* forceSource);
+  bool applyMask(Node*, Mask, bool automatic, Node* forceSource, bool ackTRequested);
   int forceDisabledCount = 0;
   void markForceDisabled(Node*, bool);
   void discardForceWrites(Node*);

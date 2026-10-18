@@ -2458,10 +2458,16 @@ void Window::masks(bool forced) {
     auto buttons = dialogActions(layout, dialog,
         QDialogButtonBox::Apply | QDialogButtonBox::Reset | QDialogButtonBox::Close,
         "masks");
+    // The operator names NoAckT only by changing T from the mask shown. An
+    // untouched T box carries the row's bit, which a duplicate row may not
+    // have refreshed; it must not write the record's ACKT.
+    auto shownAckT = std::make_shared<bool>(summary()[AckT] != '-');
     connect(buttons->button(QDialogButtonBox::Apply), &QPushButton::clicked, dialog, [=] {
       engine->cancelNoAckTimer(n);
-      engine->setMask(n, Mask::parse(selectedMask(choices)));
+      engine->setMask(n, Mask::parse(selectedMask(choices)), false,
+                      choices[AckT]->isChecked() != *shownAckT);
       engine->setSilenceCurrent(false);
+      *shownAckT = summary()[AckT] != '-';
       current->setText("Current Mask Summary: " + summary());
       dialog->setProperty("pendingEdits", false);
       refresh();
@@ -2472,6 +2478,7 @@ void Window::masks(bool forced) {
       engine->setSilenceCurrent(false);
       auto mask = summary();
       for (int i = 0; i < choices.size(); ++i) choices[i]->setChecked(mask[i] != '-');
+      *shownAckT = mask[AckT] != '-';
       current->setText("Current Mask Summary: " + mask);
       dialog->setProperty("pendingEdits", false);
       refresh();

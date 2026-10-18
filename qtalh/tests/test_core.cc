@@ -793,6 +793,62 @@ private slots:
     QCOMPARE(pv.writes.last().value, 0.0);
     QCOMPARE(pv.writes.last().kind, WriteKind::AckTransient);
   }
+  void unrelatedMaskChangeKeepsStaleDuplicateAckT_data() {
+    QTest::addColumn<QString>("action");
+    for (auto action : {"modify-disable-group", "noack-hour-group", "noack-expiry", "add-cancelled-row",
+                        "nolog-cancelled-row", "reset-cancelled-row", "force-dialog-unchanged-t"})
+      QTest::newRow(action) << QString(action);
+  }
+  void unrelatedMaskChangeKeepsStaleDuplicateAckT() {
+    // A cancelled duplicate row ignores IOC events, so its T bit is stale after
+    // NoAckT is set through the other row. Requests that do not name NoAckT
+    // carry that bit; as in ALH alChangeChanMask they must not write ACKT.
+    QFETCH(QString, action);
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root shared\nCHANNEL root shared.VAL\n");
+    FakePv pv; Engine e(d, {true}, &pv); auto a = d.channels()[0], b = d.channels()[1];
+    qint64 elapsed = 1000; e.monotonicNow = [&] { return elapsed; };
+    QStringList operations;
+    e.operation = [&](Node*, const QString& text, OperationKind) { operations << text; };
+    e.event(a, {}); e.event(b, {});
+    e.modifyMask(b, Cancel, 1);
+    e.modifyMask(a, AckT, 1); e.event(a, {0, 0, 0, 0, "normal"});
+    QCOMPARE(pv.writes.size(), 1); QCOMPARE(pv.writes[0].value, 0.0);
+    QVERIFY(e.state(a).mask[AckT]); QVERIFY(!e.state(b).mask[AckT]);
+    pv.writes.clear(); operations.clear();
+    if (action == "modify-disable-group") e.modifyMask(d.root.get(), Disable, 1);
+    else if (action == "noack-hour-group") e.noAck(d.root.get(), true);
+    else if (action == "noack-expiry") {
+      e.noAck(d.root.get(), true); elapsed += 3600001; e.tick();
+    } else if (action == "add-cancelled-row") e.modifyMask(b, Cancel, 0);
+    else if (action == "nolog-cancelled-row") e.modifyMask(b, Log, 1);
+    else if (action == "reset-cancelled-row") e.resetMask(b);
+    else e.setMask(b, Mask::parse("-----"), false, false); // Force Mask Apply, T untouched.
+    for (const auto& write : pv.writes)
+      QVERIFY2(write.kind != WriteKind::AckTransient,
+               qPrintable(QString("unrequested ACKT write %1=%2").arg(write.name).arg(write.value)));
+    QVERIFY(!operations.join('\n').contains("ACKT write failed"));
+    QVERIFY(e.state(a).mask[AckT]);
+    // An explicit NoAckT request through the stale row still reverses the record.
+    e.modifyMask(b, AckT, 0);
+    QCOMPARE(pv.writes.last().kind, WriteKind::AckTransient);
+    QCOMPARE(pv.writes.last().value, 1.0);
+  }
+  void confirmedAckTIntentYieldsToLaterIocChange() {
+    // After its own confirmation, a different value from the same monitor is a
+    // newer setting (another client or an IOC reboot). An old accepted request
+    // must not make unrelated changes submit ACKT or report a failed write.
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
+    FakePv pv; Engine e(d, {true}, &pv); auto n = d.channels()[0];
+    QStringList operations;
+    e.operation = [&](Node*, const QString& text, OperationKind) { operations << text; };
+    e.event(n, {}); e.modifyMask(n, AckT, 1); e.event(n, {0, 0, 0, 0, "normal"});
+    e.event(n, {}); // ACKT returns to YES elsewhere.
+    QVERIFY(!e.state(n).mask[AckT]);
+    pv.writes.clear(); pv.unwritable.insert("pv");
+    e.modifyMask(n, Disable, 1);
+    QVERIFY(pv.writes.isEmpty());
+    QVERIFY(!operations.join('\n').contains("ACKT write failed"));
+  }
   void enablingLocalNoAckTPreservesExistingLatch() {
     auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
     Engine e(d); auto n = d.channels()[0];

@@ -882,7 +882,12 @@ retained while duplicate rows catch up. A rapid opposite request through a
 duplicate row is compared with that record state, rather than the row's stale
 mask, so the latest accepted request wins. Other rows retain their displayed
 feedback until their monitors confirm the setting; failed manual submissions
-still need an explicit retry.
+still need an explicit retry. Only a request that names NoAckT is compared
+this way: Modify Mask NoAckT, a changed T box in Force Mask, or a Force PV.
+Requests for other bits (Add, Disable, NoAck, NoLog, the NoAck timer, Reset
+and Restore Selected) keep each row's own T bit and write ACKT only when that
+row's bit changes, as ALH's alChangeChanMask does, so a cancelled or not yet
+updated duplicate row cannot write its stale NoAckT.
 
 For QtALH 1.0.0, local NoAckT preserves ALH's existing latch behavior: enabling
 it after a transient has already cleared does not erase that unacknowledged
