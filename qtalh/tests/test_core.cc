@@ -2128,6 +2128,47 @@ $GUIDANCE https://example.invalid/guide
     QFETCH(QString, text);
     QVERIFY_THROWS_EXCEPTION(ParseError, parseConfig(text));
   }
+  void parseErrorsReportLocation() {
+    auto message = [](const std::function<void()>& parse) {
+      try {
+        parse();
+      } catch (const ParseError& e) {
+        return QString::fromStdString(e.what());
+      }
+      return QString("no error");
+    };
+    // Unterminated guidance names its $GUIDANCE line, not one past the end.
+    for (const QString end : {"", "\n"})
+      QCOMPARE(message([&] { parseConfig("GROUP NULL a\n$GUIDANCE\nunclosed" + end); }),
+               QString("Line 2: Unterminated guidance [$GUIDANCE]"));
+    // Severity errors carry the line like every other directive error.
+    QCOMPARE(message([] { parseConfig("$BEEPSEVERITY MAJR\nGROUP NULL r\n"); }),
+             QString("Line 1: Unknown severity: MAJR [$BEEPSEVERITY MAJR]"));
+    QCOMPARE(message([] { parseConfig("GROUP NULL r\n$BEEPSEVR MAJR\n"); }),
+             QString("Line 2: Unknown severity: MAJR [$BEEPSEVR MAJR]"));
+    QCOMPARE(message([] { parseConfig("GROUP NULL r\nCHANNEL r pv\n$SEVRCOMMAND UP_MAJR echo\n"); }),
+             QString("Line 3: Unknown severity: MAJR [$SEVRCOMMAND UP_MAJR echo]"));
+    // Errors inside an include name that file, so its line is unambiguous.
+    QTemporaryDir dir;
+    auto write = [&](const QString& name, const QByteArray& text) {
+      QFile file(dir.filePath(name));
+      return file.open(QIODevice::WriteOnly) && file.write(text) == text.size();
+    };
+    QVERIFY(write("child", "GROUP NULL c\n$FOO x\n"));
+    QVERIFY(write("main", "GROUP NULL r\nINCLUDE r child\n"));
+    QVERIFY(write("bad", "GROUP NULL r\nCHANNEL r pv\nINVALID\n"));
+    const QString child = QFileInfo(dir.filePath("child")).absoluteFilePath();
+    const QString included = child + ": Line 2: Unsupported directive $FOO [$FOO x]";
+    QCOMPARE(message([&] { parseConfig("GROUP NULL r\nINCLUDE r child\n", dir.path()); }), included);
+    QCOMPARE(message([&] { loadConfig(dir.filePath("main")); }), included);
+    // Top-level messages keep their existing form.
+    QCOMPARE(message([&] { loadConfig(dir.filePath("bad")); }),
+             QString("Line 3: Unknown statement [INVALID]"));
+    // After an include returns, errors refer to the including text again.
+    QVERIFY(write("child", "GROUP NULL c\n"));
+    QCOMPARE(message([&] { parseConfig("GROUP NULL r\nINCLUDE r child\n$FOO x\n", dir.path()); }),
+             QString("Line 3: Unsupported directive $FOO [$FOO x]"));
+  }
   void calcRequiresExpression() {
     QTemporaryDir dir;
     const QString invalid = "GROUP NULL root\nCHANNEL root pv\n$FORCEPV CALC -D--- 1 NE\n";

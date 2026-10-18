@@ -45,7 +45,10 @@ public:
           n->option("FORCEPV_CALC").trimmed().isEmpty())
         throw ParseError("FORCEPV CALC requires a FORCEPV_CALC expression for " + n->name);
   }
-  void read(const QString& text, const QString& base, Node* attach = nullptr, int depth = 0) {
+  // `file` names an included file in diagnostics; it is empty for the
+  // top-level text, whose messages keep the plain "Line N" form.
+  void read(const QString& text, const QString& base, Node* attach = nullptr, int depth = 0,
+            const QString& file = QString()) {
     if (depth > 50)
       throw ParseError("Configuration exceeds 50 nested includes");
     Node* current = attach;
@@ -65,7 +68,17 @@ public:
             break;
           }
       auto fail = [&](const QString& msg) {
-        throw ParseError(QString("Line %1: %2 [%3]").arg(i + 1).arg(msg, line));
+        // Name the include so its line is not read as the including file's.
+        throw ParseError((file.isEmpty() ? QString() : file + ": ") +
+                         QString("Line %1: %2 [%3]").arg(i + 1).arg(msg, line));
+      };
+      auto severity = [&](const QString& s) {
+        try {
+          return severityValue(s);
+        } catch (const ParseError& e) {
+          fail(QString::fromStdString(e.what()));
+        }
+        return 0;
       };
       auto findParent = [&](const QString& name) -> Node* {
         Node* p = current;
@@ -131,7 +144,7 @@ public:
         QByteArray text;
         if (!readFile(f, text))
           fail("Cannot read include: " + path + ": " + f.errorString());
-        read(QString::fromLocal8Bit(text), base, parent, depth + 1);
+        read(QString::fromLocal8Bit(text), base, parent, depth + 1, path);
         stack.remove(canonical);
         current = parent;
       } else if (key.startsWith('$')) {
@@ -154,7 +167,7 @@ public:
             }
         }
         if (name == "BEEPSEVERITY") {
-          doc.beepSeverity = severityValue(value);
+          doc.beepSeverity = severity(value);
           continue;
         }
         if (name == "HEARTBEATPV") {
@@ -189,6 +202,7 @@ public:
         if (name == "GUIDANCE" && value.isEmpty()) {
           QStringList body;
           bool ended = false;
+          const int start = i;
           while (++i < lines.size()) {
             // ALH recognizes the terminator by prefix, including trailing comments.
             // An exact match can swallow subsequent channel declarations.
@@ -204,8 +218,10 @@ public:
               fail("Guidance must end with $END, not " + lines[i].trimmed());
             body.push_back(lines[i]);
           }
-          if (!ended)
+          if (!ended) {
+            i = start; // Report the $GUIDANCE line, not one past the end.
             fail("Unterminated guidance");
+          }
           // ALH appends every inline block to the node's guidance list.
           if (body.isEmpty())
             continue;
@@ -241,7 +257,7 @@ public:
             fail("ACKPV requires a PV and short integer");
         }
         if (name == "BEEPSEVR")
-          severityValue(value);
+          severity(value);
         if (name == "FORCEPV") {
           // alConfig.c reads the numeric tail with sscanf: a failed force
           // conversion leaves force=1/reset=0 and stops reading; an invalid
@@ -319,7 +335,7 @@ public:
             // UP_ALARM. Reject it with guidance to use DOWN_NO_ALARM or
             // DOWN_ANY in a later validation change; retain acceptance now.
             if (trigger != "ANY" && trigger != "ALARM") {
-              const auto canonical = severityName(severityValue(trigger));
+              const auto canonical = severityName(severity(trigger));
               value = (args[0].startsWith("DOWN_") ? "DOWN_" : "UP_") + canonical +
                       value.mid(args[0].size());
             }
