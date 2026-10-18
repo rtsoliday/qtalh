@@ -222,12 +222,17 @@ QString explain(const State& s, const QHash<QString, QString>& limits) {
   const auto status = statusName(s.status), severity = severityName(s.severity);
   QString text;
   // ERROR inputs are synthetic connection/access events; their value is not a reading.
-  if (s.filterUntil && s.pending.severity != s.severity)
+  const bool reading = s.pending.severity != ErrorSeverity;
+  if (s.filterUntil && s.pending.severity != s.severity && !s.severity)
+    text = QString("A count filter is holding a new %1 input (%2%3); the channel is not yet "
+                   "reported in alarm.")
+               .arg(severityName(s.pending.severity), statusName(s.pending.status),
+                    reading ? ", value " + s.pending.value : QString());
+  else if (s.filterUntil && s.pending.severity != s.severity)
     text = QString("A count filter is holding the previous %1 alarm (%2). The latest input is "
                    "%3 (%4)%5.")
                .arg(severity, status, severityName(s.pending.severity), statusName(s.pending.status),
-                    s.pending.severity == ErrorSeverity ? QString()
-                                                        : " with value " + s.pending.value);
+                    reading ? " with value " + s.pending.value : QString());
   else if (!s.severity) text = "Not in alarm (value " + s.value + ").";
   else if (status == "HIHI" || status == "HIGH" || status == "LOW" || status == "LOLO") {
     static const QHash<QString, QString> severityField = {{"HIHI", "HHSV"}, {"HIGH", "HSV"},
@@ -254,11 +259,13 @@ QString explain(const State& s, const QHash<QString, QString>& limits) {
   else if (status == "NO_READ_ACCESS") text = "QtALH has no read access to this PV.";
   else if (status == "NO_WRITE_ACCESS") text = "QtALH has no write access to this PV for global acknowledgement.";
   else text = "The record reports status " + status + " with severity " + severity + ".";
-  if (s.unack && s.unack != s.severity)
+  // NoAck hides the unacknowledged severity, as in the main window and Active Alarms.
+  if (!s.mask[Ack] && s.unack && s.unack != s.severity)
     text += " An earlier " + severityName(s.unack) + " alarm is still unacknowledged.";
   if (s.filterUntil && s.pending.severity == s.severity)
     text += " A count filter is holding the latest change.";
   if (s.noAckUntil) text += " Acknowledgement is suspended for one hour (NoAck timer).";
+  else if (s.mask[Ack]) text += " The NoAck mask is set, so acknowledgement is not required.";
   return text;
 }
 } // namespace
@@ -548,7 +555,14 @@ void Window::alarmDetails() {
     const auto& s = engine->state(n);
     const auto shown = engine->presentation(n);
     severity->setText(severityName(n->group ? shown.severity : s.severity));
-    unack->setText(severityName(n->group ? shown.unack : s.unack));
+    // A channel mask can hide an underlying unacknowledged severity (in global
+    // mode, the IOC ACKS); show the main window's value and note the other.
+    const int underlying = n->group ? shown.unack : s.unack;
+    const int presented = n->group || s.shelf.until ? underlying : shown.unack;
+    unack->setText(severityName(presented) +
+                   (presented == underlying
+                        ? QString()
+                        : "  (underlying " + severityName(underlying) + ", ignored by the mask)"));
     if (status) status->setText(statusName(s.status));
     if (value) value->setText(s.value);
     if (changed) changed->setText(localTime(s.changedAt));

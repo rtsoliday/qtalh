@@ -47,6 +47,9 @@ Select a group or channel and choose **View → Alarm Details…** (**Ctrl+D**).
 The window follows the selection, like Properties, and updates every second:
 
 - severity, status, value, unacknowledged severity and time of the last change;
+  the unacknowledged severity is the one the main window shows, and one hidden
+  by the channel's mask (such as the IOC's in global mode with NoAck) is noted
+  as underlying;
 - mask, beep severity and count filter, marked where they differ from the
   configuration, and the Force PV state;
 - **Why**: a plain explanation, for example *The value 2.1e-6 is at or above

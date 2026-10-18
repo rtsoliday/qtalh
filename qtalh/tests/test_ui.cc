@@ -4953,16 +4953,60 @@ private slots:
     auto dialog = w->findChild<QDialog*>("alarmDetailsDialog");
     QVERIFY(dialog);
     auto explanation = dialog->findChild<QLabel*>("alarmExplanation")->text();
-    QVERIFY2(explanation.contains("The latest input is ERROR (NOT_CONNECTED)."), qPrintable(explanation));
-    QVERIFY2(!explanation.contains("with value 0"), qPrintable(explanation));
+    QVERIFY2(explanation.contains("holding a new ERROR input (NOT_CONNECTED); the channel is not "
+                                  "yet reported in alarm."),
+             qPrintable(explanation));
+    QVERIFY2(!explanation.contains("value 0"), qPrintable(explanation));
     // A held real reading keeps its value and names its condition.
     engine.event(n, {0, 0, 0, 1, "5.5"});
     time += 20000; engine.tick();
     engine.event(n, {3, 2, 2, 1, "12"});
     QCOMPARE(engine.state(n).severity, 0);
     QTRY_VERIFY2(dialog->findChild<QLabel*>("alarmExplanation")->text().contains(
-                     "The latest input is MAJOR (HIHI) with value 12."),
+                     "holding a new MAJOR input (HIHI, value 12)"),
                  qPrintable(dialog->findChild<QLabel*>("alarmExplanation")->text()));
+    QVERIFY(!dialog->findChild<QLabel*>("alarmExplanation")->text().contains("NO_ALARM alarm"));
+  }
+  void alarmDetailsDescribeHeldChange() {
+    // A held change of an active alarm names both the held alarm and the input.
+    auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root pv\n$ALARMCOUNTFILTER 0 10\n"), options(false), false);
+    auto& engine = w->alarmEngine(); auto n = w->document().channels()[0];
+    qint64 time = 1000; engine.now = engine.monotonicNow = [&] { return time; };
+    engine.event(n, {});
+    engine.event(n, {3, 2, 2, 1, "12"});
+    time += 10001; engine.tick();
+    QCOMPARE(engine.state(n).severity, 2);
+    engine.event(n, {0, 0, 2, 1, "0"});
+    QCOMPARE(engine.state(n).severity, 2);
+    w->findChild<QTreeView*>("groupContents")->setCurrentIndex(w->findChild<QTreeView*>("groupContents")->model()->index(0, 2));
+    w->findChild<QAction*>("Alarm Details...")->trigger();
+    const auto explanation = w->findChild<QDialog*>("alarmDetailsDialog")->findChild<QLabel*>("alarmExplanation")->text();
+    QVERIFY2(explanation.contains("A count filter is holding the previous MAJOR alarm (HIHI). The "
+                                  "latest input is NO_ALARM (NO_ALARM) with value 0."),
+             qPrintable(explanation));
+  }
+  void alarmDetailsFollowNoAckInGlobalMode() {
+    // In global mode the IOC ACKS stays raised under NoAck; Details shows the
+    // main window's value and notes the hidden one.
+    auto o = options(false); o.engine.global = true;
+    auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root pv\n"), o, false);
+    auto& engine = w->alarmEngine(); auto n = w->document().channels()[0];
+    engine.event(n, {3, 2, 2, 1, "12"});
+    engine.setMask(n, Mask::parse("--A--"));
+    engine.event(n, {4, 1, 2, 1, "8"});
+    QCoreApplication::processEvents();
+    QCOMPARE(engine.state(n).unack, 2);
+    auto group = w->findChild<QTreeView*>("groupContents");
+    QCOMPARE(group->model()->index(0, 0).data().toString(), QString(" "));
+    group->setCurrentIndex(group->model()->index(0, 2));
+    w->findChild<QAction*>("Alarm Details...")->trigger();
+    auto dialog = w->findChild<QDialog*>("alarmDetailsDialog");
+    QVERIFY(dialog);
+    QCOMPARE(dialog->findChild<QLabel*>("detailsUnacknowledged")->text(),
+             QString("NO_ALARM  (underlying MAJOR, ignored by the mask)"));
+    const auto explanation = dialog->findChild<QLabel*>("alarmExplanation")->text();
+    QVERIFY2(!explanation.contains("still unacknowledged"), qPrintable(explanation));
+    QVERIFY2(explanation.contains("NoAck mask is set"), qPrintable(explanation));
   }
   void alarmDetailsFollowSelection() {
     auto w = std::make_unique<Window>(sample(), options(false), false);
