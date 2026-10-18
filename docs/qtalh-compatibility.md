@@ -540,7 +540,8 @@ editor, clipboard, dialog and repeated-window UI lifecycles. It identified an
 unowned group-properties field during development; that leak is fixed and the
 full leak check passes without suppressions. The AddressSanitizer build
 could not link because the system libasan.so.5.0.0 runtime is absent.
-Qt 6.11.2 builds on macOS arm64; the core, UI, IOC, and helper suites pass,
+On 2026-10-15, before pvAccess support was added, Qt 6.11.2 built on macOS arm64
+and the core, UI, IOC, and helper suites passed,
 including muted Ogg/Vorbis alarm playback through the native Cocoa event loop.
 A Qt-only root build with MOTIF_INC=/nonexistent passes and reports the omitted
 legacy variant. Qt binaries have no direct Motif/Xt dependency. A separate

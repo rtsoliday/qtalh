@@ -84,8 +84,10 @@ only; `-P` and `-O` report an explicit unsupported-option error on Windows.
 Windows file locks coordinate native QtALH processes; they do not provide
 POSIX lock interoperability with legacy ALH.
 
-Verified with MSVC 2022, Qt 6.11.2 (including its installed Multimedia module)
-and EPICS Base 7.0.10.1-DEV on Windows x64. The Windows flags explicitly enable
+Last verified on 2026-10-15 at commit 93ac87b with MSVC 2022, Qt 6.11.2
+(including its installed Multimedia module) and EPICS Base 7.0.10.1-DEV on
+Windows x64. Later revisions have not been verified on Windows or macOS;
+see the [test guide](qtalh/tests/README.md). The Windows flags explicitly enable
 `/Zc:lambda` so older MSVC 2022 versions can compile Qt 6.11's generated moc
 code in C++17 mode. Keep `/permissive-` for Qt; only the pvAccess implementation
 and its test use `/Zc:twoPhase-` for EPICS header compatibility. The build defines
@@ -280,8 +282,10 @@ QT_QPA_PLATFORM=offscreen valgrind --error-exitcode=99 --leak-check=full \
 
 Verified build environments include Qt 5.15.3 with EPICS Base 7.0.8 on Linux
 x86_64, and Qt 5.15.19 and Qt 6.11.2 with Apple Clang on macOS arm64.
-The Qt 6 core, UI, IOC, and helper suites pass on macOS, including Ogg alarm
-playback. Qt 5 core and UI regression tests also pass with the same sources.
+On 2026-10-15, before pvAccess support was added, the Qt 6 core, UI, IOC, and
+helper suites passed on macOS, including Ogg alarm playback, and the Qt 5 core
+and UI regression tests also passed. No macOS pvAccess build or test results are
+recorded; see the [test guide](qtalh/tests/README.md) for dated platform results.
 See [the compatibility inventory](docs/qtalh-compatibility.md) for implemented
 features, evidence, protocol details, and outstanding parity validation.
 

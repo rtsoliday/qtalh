@@ -67,8 +67,9 @@ excluded at compilation. `test-visual` reports unsupported on Windows.
 The optional `test-gallery` target captures Qt dialogs in both appearances;
 Windows' native print dialog is outside the offscreen widget tree and is omitted.
 
-On 2026-10-15, native MSVC with Qt 6.11.2 and EPICS Base 7.0.10.1-DEV passed
-a clean application build and test compilation without compiler warnings.
+On 2026-10-15, at commit 93ac87b, native MSVC with Qt 6.11.2 and EPICS Base
+7.0.10.1-DEV passed a clean application build and test compilation without
+compiler warnings.
 `build-windows.bat test 4` passed 1,085 checks with no failures and three
 expected skips (Linux `/dev/full` in both UI runs and the modern-only styling
 contract in the classic run). The optional Fusion suite passed 226 checks
@@ -77,7 +78,19 @@ The PVA-enabled run includes 13 deterministic pvAccess checks and six live
 pvAccess IOC cases, including reconnection, writes, local acknowledgements,
 descriptions, force inputs, passive mode, and duplicate observers.
 
+No revision after 93ac87b has been verified on Windows. Unverified changes
+include the test-owned `caRepeater` (3407d78), the shared `Makefile.rules`
+and `Makefile.build` (9a35e8d, b61454b), the bounded-memory changes to
+pvAccess, analytics, notifications, log identity and editor undo (a7dabfb),
+and their new test cases. No continuous integration job builds or tests the
+application; the repository workflow builds only the documentation.
+
 ## macOS verification (2026-10-15)
+
+These results are for commit 3aa5d58, which predates pvAccess support
+(8d0f3f2). The table has no pvAccess suite, the IOC count has no live pvAccess
+cases, and no recorded macOS build includes the pvAccess client. No later
+revision has been verified on macOS.
 
 Apple Silicon macOS 26.6.2 with EPICS Base 7.0.9.1-DEV passed application and
 test builds with Qt 5.15.19 and Qt 6.11.2 without compiler warnings. Both Qt
