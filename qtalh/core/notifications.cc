@@ -549,10 +549,11 @@ bool NotificationPolicy::revalidate(NotificationEnvelope& e) {
     } else {
       // A resolution belongs to the ended episode, even if the PV has since
       // entered another alarm episode or been reloaded.
-      auto updated = it->state;
       // Keep the queued value snapshot; state and acknowledgement are revalidated.
-      updated.value = e.alarms[i].state.value;
-      e.alarms[i].state = updated;
+      auto& state = e.alarms[i].state;
+      auto value = std::move(state.value);
+      state = it->state;
+      state.value = std::move(value);
     }
   }
   return !e.alarms.isEmpty();
@@ -565,13 +566,24 @@ bool NotificationPolicy::take(NotificationEnvelope& e, qint64 now) {
       queue.removeAt(i);
       continue;
     }
+    // The pump retries every 250 ms; skip per-alarm checks (and copies) for
+    // envelopes that are not yet due or whose destination is still paced.
+    if (queue[i].ready > now || destinationNext.value(queue[i].destination, 0) > now) {
+      ++i;
+      continue;
+    }
+    const bool resolution = queue[i].kind == "resolution";
     bool waiting = false;
-    for (const auto& a : queue[i].alarms)
-      if (!channels.value(a.state.identity).initialized ||
-          (queue[i].kind != "resolution" && episodes.value(a.episode).waiting))
+    for (const auto& a : queue[i].alarms) {
+      const auto channel = channels.constFind(a.state.identity);
+      const auto episode = resolution ? episodes.cend() : episodes.constFind(a.episode);
+      if (channel == channels.cend() || !channel->initialized ||
+          (episode != episodes.cend() && episode->waiting)) {
         waiting = true;
-    if (!waiting && queue[i].ready <= now &&
-        destinationNext.value(queue[i].destination, 0) <= now) {
+        break;
+      }
+    }
+    if (!waiting) {
       e = queue.takeAt(i);
       return true;
     }

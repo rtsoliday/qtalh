@@ -9,6 +9,7 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
+#include <limits>
 #ifdef Q_OS_WIN
 #include <fcntl.h>
 #include <io.h>
@@ -605,6 +606,55 @@ private slots:
             << count / 1000000;
     QVERIFY2(apply < 2 * compileEach, "apply compiles a wildcard per channel and subscription");
     QVERIFY2(4 * count < compileEach, "matchCount compiles a wildcard per channel");
+  }
+  void pacedBacklogTakeOnlyRevalidates() {
+    // The 250 ms pump calls take() while a storm backlog waits for a paced
+    // destination. Revalidating the backlog is required; per-alarm channel
+    // and episode copies for envelopes that cannot be taken are not.
+    NotificationPolicy p;
+    auto s = settings();
+    s.subscriptions[0].stages.resize(1);
+    configure(p, s);
+    const int n = 20000;
+    for (int i = 0; i < n; ++i)
+      p.observe(alarm(QString("pv%1").arg(i)), 0);
+    p.tick(60000);
+    p.tick(70000);
+    QVector<NotificationEnvelope> backlog;
+    NotificationEnvelope e;
+    while (p.take(e, 70000))
+      backlog << e;
+    QCOMPARE(backlog.size(), n / 100);
+    for (const auto& queued : backlog)
+      p.retry(queued);
+    p.attempted(backlog[0], 70000); // The destination is paced until 80000.
+    auto copy = backlog;
+    bool taken = false, cancelled = false;
+    qint64 take = std::numeric_limits<qint64>::max(), revalidate = take;
+    for (int k = 0; k < 11; ++k) { // Interleave and keep the fastest of each.
+      QElapsedTimer timer;
+      timer.start();
+      taken = p.take(e, 70001) || taken;
+      take = qMin(take, timer.nsecsElapsed());
+      timer.restart();
+      for (auto& queued : copy)
+        cancelled = !p.revalidate(queued) || cancelled;
+      revalidate = qMin(revalidate, timer.nsecsElapsed());
+    }
+    QVERIFY(!taken);
+    QVERIFY(!cancelled);
+    QCOMPARE(p.pending(), backlog.size());
+    for (const auto& a : backlog.last().alarms) { // Paced envelopes still cancel promptly.
+      auto cleared = a.state;
+      cleared.unack = 0;
+      p.observe(cleared, 70002);
+    }
+    QVERIFY(!p.take(e, 70002));
+    QCOMPARE(p.pending(), backlog.size() - 1);
+    const double ratio = double(take) / revalidate;
+    qInfo() << n << "paced alarms; take ms:" << take / 1e6 << "revalidate ms:" << revalidate / 1e6
+            << "ratio:" << ratio;
+    QVERIFY2(ratio < 1.4, qPrintable(QString("take/revalidate %1").arg(ratio)));
   }
   void queuePressureRetainsDueWork() {
     NotificationPolicy p;
