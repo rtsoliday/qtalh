@@ -67,6 +67,9 @@ PV/mask/force/reset order and numeric parsing defaults (force 1, reset 0).
 An invalid force value stops numeric parsing; an invalid reset value becomes 0.
 Reset numbers use the complete token, extending ALH's nine-character reset field
 so decimal and scientific-notation values survive saving, reloading, and editor actions.
+Force and reset values are saved in their shortest exact form (`0.3`, `1e-05`), so
+reset values of up to nine characters remain readable by legacy ALH; ALH truncates
+longer reset values, such as `1.2345e-06` or `1234567890`.
 Lowercase `ne` is accepted. Loaded directives are normalized to their effective
 values for runtime, editing, and saving. For example, `gate 0 1 -D---` becomes
 `gate ----- 1 0`; the misplaced mask is not moved to another field.

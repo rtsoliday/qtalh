@@ -11,6 +11,7 @@
 #include <QTemporaryDir>
 #include <QXmlStreamReader>
 #include <alarm.h>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #ifndef Q_OS_WIN
@@ -1394,6 +1395,35 @@ private slots:
       saveConfig(d, dir.filePath("saved"));
       d = loadConfig(dir.filePath("saved"));
     }
+  }
+  void forceValuesFitLegacyResetField_data() {
+    QTest::addColumn<QString>("value");
+    QTest::addColumn<QString>("saved");
+    QTest::newRow("0.3") << "0.3" << "0.3";
+    QTest::newRow("0.7") << "0.7" << "0.7";
+    QTest::newRow("2.3") << "2.3" << "2.3";
+    QTest::newRow("1e-5") << "1e-5" << "1e-05";
+    QTest::newRow("-12.25") << "-12.25" << "-12.25";
+  }
+  void forceValuesFitLegacyResetField() {
+    // Legacy ALH reads the reset token with "%9s" (alConfig.c) and resets the
+    // mask only on exact equality (force.c); saved values must stay readable.
+    QFETCH(QString, value); QFETCH(QString, saved);
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n$FORCEPV gate D " + value + " " + value + "\n");
+    const auto line = writeConfig(d).split('\n').filter("$FORCEPV").value(0);
+    QCOMPARE(line, "$FORCEPV gate -D--- " + saved + " " + saved);
+    const auto bytes = line.toLatin1();
+    char command[21], name[65], mask[7], token[10];
+    double force = 0, reset = 0;
+    QCOMPARE(std::sscanf(bytes.constData(), "%20s%64s%6s%lf%9s", command, name, mask, &force, token), 5);
+    QCOMPARE(std::sscanf(token, "%lf", &reset), 1);
+    QVERIFY(force == value.toDouble());
+    QVERIFY(reset == value.toDouble());
+    // QtALH reads the saved text back to the same doubles.
+    const auto reloaded = parseConfig(writeConfig(d)).channels()[0]->option("FORCEPV");
+    QCOMPARE(reloaded, "gate -D--- " + saved + " " + saved);
+    QVERIFY(reloaded.section(' ', 2, 2).toDouble() == value.toDouble());
+    QVERIFY(reloaded.section(' ', 3, 3).toDouble() == value.toDouble());
   }
   void firstSuppressedMonitorUsesFilter_data() {
     QTest::addColumn<QString>("mask"); QTest::addColumn<bool>("global");

@@ -61,7 +61,7 @@ QString forceDirective(QString name, QString mask, QString force, QString reset)
     bool ok = false;
     const double value = text.toDouble(&ok);
     if (!ok || !std::isfinite(value)) throw ParseError("Invalid Force PV value: " + text);
-    return QString::number(value, 'g', 17);
+    return QString::number(value, 'g', QLocale::FloatingPointShortest);
   };
   return name + ' ' + Mask::parse(mask).text() + ' ' + number(force, 1) + ' ' +
       (reset.compare("NE", Qt::CaseInsensitive) == 0 ? QString("NE") : number(reset, 0));

@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QLocale>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSet>
@@ -270,8 +271,10 @@ public:
           const int count = std::sscanf(tail.constData(), "%lf%n", &parsed, &consumed);
           // Intentionally fix ALH's pre-existing nine-character reset-token
           // truncation bug: read the complete value and retain full precision
-          // when saving. Legacy ALH may misread these saved values by truncating
-          // their exponents; reproducing that bug is not a compatibility goal.
+          // when saving. Save the shortest exact form so common values (0.3,
+          // 1e-05) still fit that field; legacy ALH may misread longer values,
+          // for example by truncating exponents. Reproducing that bug is not a
+          // compatibility goal.
           const auto resetText = count == 1 ? tail.mid(consumed).trimmed().split(' ').value(0)
                                            : QByteArray();
           if (count >= 1)
@@ -285,8 +288,8 @@ public:
           // value cannot match Qt's finite samples. Add load-time validation later;
           // preserve the currently accepted configuration values for now.
           value = args[0] + " " + Mask::parse(args.value(1)).text() + " " +
-                  QString::number(forced, 'g', 17) + " " +
-                  (ne ? QString("NE") : QString::number(reset, 'g', 17));
+                  QString::number(forced, 'g', QLocale::FloatingPointShortest) + " " +
+                  (ne ? QString("NE") : QString::number(reset, 'g', QLocale::FloatingPointShortest));
         }
         if (name == "FORCEPV_CALC") {
           auto valid = [](const QString& expression) {

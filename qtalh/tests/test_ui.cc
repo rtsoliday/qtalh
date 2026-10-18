@@ -665,6 +665,22 @@ private slots:
       QCOMPARE(loadConfig(dir.filePath("saved")).channels()[0]->option("FORCEPV").section(' ', 3, 3).toDouble(), 0.000001);
     }
   }
+  void forceDialogSavesShortestValues() {
+    // Legacy ALH reads the reset token with "%9s"; 0.3 must not be saved as
+    // 0.29999999999999999, which ALH truncates to 0.2999999 and never matches.
+    for (bool editor : {false, true}) {
+      auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root pv\n"), options(editor), false);
+      auto view = w->findChild<QTreeView*>("groupContents"); view->setCurrentIndex(view->model()->index(0, 2));
+      for (auto a : w->findChildren<QAction*>())
+        if (a->text() == (editor ? "Properties Window" : "Force Process Variable...")) a->trigger();
+      auto dialog = w->findChild<QDialog*>(editor ? "propertiesDialog" : "forcePvDialog"); QVERIFY(dialog);
+      dialog->findChild<QLineEdit*>(editor ? "propertyFORCE_NAME" : "forcePvName")->setText("gate");
+      dialog->findChild<QLineEdit*>(editor ? "propertyFORCE_2" : "forceValue")->setText("0.7");
+      dialog->findChild<QLineEdit*>(editor ? "propertyFORCE_3" : "forceReset")->setText("0.3");
+      dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Apply)->click();
+      QCOMPARE(w->document().channels()[0]->option("FORCEPV").section(' ', 2), QString("0.7 0.3"));
+    }
+  }
   void forceDialogIndependentDefaults() {
     auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\n$FORCEPV gate D 1 0\nCHANNEL root pv\n"), options(false), false);
     for (auto a : w->findChildren<QAction*>()) if (a->text() == "Force Process Variable...") a->trigger();
