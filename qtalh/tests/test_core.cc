@@ -1038,6 +1038,44 @@ private slots:
     }
   }
 
+  // Documented in the user guide ($ACKPV, $FORCEPV) and the masks Help page:
+  // with nobody acknowledging, a global active Force PV writes its requested
+  // ACKT bit before an IOC ACKT is observed (without -caputackt), and its reset
+  // acknowledges a cleared transient through ACKS and ACKPV.
+  void forcePvAutomaticWrites() {
+    for (bool passive : {false, true}) for (QString force : {"--A--", "-D---"}) {
+      auto d = parseConfig("GROUP NULL root\n$FORCEPV gate " + force + " 1 0\n"
+                           "CHANNEL root pv\n$ACKPV output 7\n");
+      FakePv pv; Engine e(d, {true, passive}, &pv); e.start();
+      auto n = d.channels()[0];
+      QVERIFY(pv.writes.isEmpty());
+      QVERIFY(pv.numbers.contains("gate"));
+      pv.numbers["gate"](0); // First sample is the reset (normal) value.
+      QCOMPARE(pv.writes.size(), passive ? 0 : 1);
+      if (!passive) {
+        QCOMPARE(pv.writes[0].name, QString("pv"));
+        QCOMPARE(pv.writes[0].kind, WriteKind::AckTransient);
+        QCOMPARE(pv.writes[0].value, 1.0);
+      }
+      e.event(n, {0, 0, 0, 1, "0"});
+      pv.numbers["gate"](1);
+      e.event(n, {3, 2, 2, 1, "alarm"});
+      e.event(n, {0, 0, 2, 1, "cleared"}); // IOC ACKS retains MAJOR.
+      pv.writes.clear();
+      pv.numbers["gate"](0);
+      QCOMPARE(pv.writes.size(), passive ? 0 : 2);
+      if (!passive) {
+        QCOMPARE(pv.writes[0].name, QString("pv"));
+        QCOMPARE(pv.writes[0].kind, WriteKind::Acknowledge);
+        QCOMPARE(pv.writes[0].value, 2.0);
+        QCOMPARE(pv.writes[1].name, QString("output"));
+        QCOMPARE(pv.writes[1].kind, WriteKind::AckValue);
+        QCOMPARE(pv.writes[1].value, 7.0);
+        QCOMPARE(e.state(n).unack, 0);
+      }
+    }
+  }
+
   void timedNoAckPreservesDescendantTimers() {
     auto d = parseConfig("GROUP NULL root\nGROUP root branch\nCHANNEL branch nested\n"
                          "CHANNEL root direct\nCHANNEL root independent\n");

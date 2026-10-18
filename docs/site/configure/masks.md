@@ -35,6 +35,11 @@ $FORCEPV example:maintenance -D--- 1 0
 
 When `example:maintenance` becomes 1, Disable is applied. When it becomes 0, the configured channel mask is restored. A group Force PV acts on descendant channels. Use `NE` as the reset value to restore the mask when the force value is left.
 
+The first value counts as a change: if the Force PV is already at its reset value, the configured masks are restored at startup. In global active mode (`-global` without `-S`), forcing and resetting can write to the IOC with nobody acknowledging:
+
+- The resulting NoAckT setting is written to each channel's ACKT when it differs from the current ACKT, and always before that ACKT has been read. This happens without `-caputackt` and can change an ACKT that other clients share.
+- When Disable or NoAck is removed, an alarm that has already cleared but is still unacknowledged is acknowledged automatically: QtALH writes the IOC ACKS and the channel's `$ACKPV`. Expiry of NoAck for One Hour and Runtime Overrides **Restore Selected** do the same.
+
 Open **Force Process Variable** (**Ctrl+V**) for the selected node. In the modern
 appearance the mask choices use two columns and the CALC expression and inputs
 follow the force and reset values, so the form normally fits without scrolling;

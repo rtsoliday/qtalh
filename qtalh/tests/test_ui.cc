@@ -175,6 +175,21 @@ private slots:
     QVERIFY(showHelp(second.get()) != help);
     w.reset(); QVERIFY(!help);
   }
+  void helpDescribesAutomaticAcknowledgementWrites() {
+    // Global active mode also writes ACKS/ACKPV/ACKT without operator
+    // acknowledgement (Enable/NoAck removal, NoAck expiry, Force PVs).
+    QWidget owner;
+    auto help = showHelp(&owner);
+    auto browser = help->findChild<QTextBrowser*>("helpBrowser");
+    QVERIFY(browser);
+    const auto text = browser->toPlainText().simplified();
+    QVERIFY(!text.contains("Written on global active acknowledgement."));
+    QVERIFY(text.contains("including NoAck expiry and Force PV resets"));
+    QVERIFY(text.contains("when NoAck for One Hour expires, when a Force PV force or reset removes the setting"));
+    QVERIFY(text.contains("writes the resulting T bit to the IOC's ACKT, even without -caputackt"));
+    QVERIFY(text.contains("This happens without -caputackt and can change an ACKT that other clients share."));
+    help->close();
+  }
   void helpSearchAndKeyboard() {
     QWidget owner;
     owner.show();

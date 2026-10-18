@@ -159,7 +159,7 @@ INCLUDE paths retain their separate configuration-directory rule.
 | `-c` | Configuration editor; otherwise runtime monitoring. |
 | `-global` | Use IOC ACKS/ACKT fields for global acknowledgement. Default: local acknowledgement. |
 | `-S` | Passive mode: suppress CA and pvAccess writes and operator acknowledgement. |
-| `-caputackt` | In global active mode, write each record's configured transient acknowledgement (ACKT) setting once, when a configured channel first becomes writable after startup or reload. This includes an IOC that connects, or grants write access, later. |
+| `-caputackt` | In global active mode, write each record's configured transient acknowledgement (ACKT) setting once, when a configured channel first becomes writable after startup or reload. This includes an IOC that connects, or grants write access, later. Force PVs can also write ACKT without it; see `$FORCEPV`. |
 | `-D` | Disable alarm and operation **file** logging. Does not disable CA writes or configured helper queues. |
 | `-s` | Start with Silence Forever enabled; it can be changed in Setup. |
 | `-p file` | Play a local audio file instead of the system beep. Formats depend on the installed Qt Multimedia backend; the suite exercises Ogg/Vorbis. |
@@ -307,6 +307,13 @@ letters and save in canonical `CDATL` positions; short/reordered forms such as
 Disable alone does not suppress alarm-file records; use NoLog for that. Timed
 NoAck is an operator setting and displays `H` in the mask summary.
 
+In global active mode, when Disable or NoAck is removed and the channel is left
+neither disabled nor cancelled, an alarm that has already cleared but is still
+unacknowledged is acknowledged automatically, as in ALH. This writes the IOC
+ACKS and any `$ACKPV`, as operator acknowledgement does. It also happens with
+nobody choosing Acknowledge: when NoAck for One Hour expires, when a Force PV
+force or reset removes the setting, and on Runtime Overrides **Restore Selected**.
+
 `INCLUDE parent filename` attaches another file beneath the named parent.
 Every relative include, including nested includes, resolves against `-f` or
 `ALARMHANDLER` (default `.`), not the containing include's directory. For example,
@@ -326,9 +333,9 @@ Directives normally apply to the preceding group/channel:
 | `$BEEPSEVERITY` | Facility beep threshold (default MINOR); may occur before the root. |
 | `$BEEPSEVR` | Threshold for the current node; ancestor thresholds also apply. The last directive on a node wins. |
 | `$HEARTBEATPV` | `pv [interval_seconds [short_integer_value]]`; defaults 1 second and value 1. The first heartbeat in the facility, including includes, wins. Writes require global active mode. |
-| `$ACKPV` | `pv short_integer_value`; channel only. Written on global active acknowledgement. |
+| `$ACKPV` | `pv short_integer_value`; channel only. Written in global active mode whenever QtALH acknowledges the channel's alarm: on operator acknowledgement, and on the automatic acknowledgement of a cleared transient when Disable or NoAck is removed (see the mask notes above), including NoAck expiry and Force PV resets. |
 | `$SEVRPV` | Output PV for the node's severity (0–4); disabled channels publish -1. Writes require global active mode. `-` leaves the output unset; the first real PV replaces earlier `-` placeholders and takes precedence over later directives. |
-| `$FORCEPV` | `pv mask [force_value [reset_value]]`; default force 1, reset 0. At force, apply the mask; at reset, restore configured channel masks. `NE` or a reset equal to force resets on leaving the force value. Applies to descendant channels for a group. |
+| `$FORCEPV` | `pv mask [force_value [reset_value]]`; default force 1, reset 0. At force, apply the mask; at reset, restore configured channel masks. `NE` or a reset equal to force resets on leaving the force value. Applies to descendant channels for a group. The first value counts as a change, so a Force PV already at its reset value restores the configured masks at startup. In global active mode, a force or reset writes the resulting `T` bit to the IOC's ACKT, even without `-caputackt`: when it differs from the current ACKT, and always before that ACKT has been read. Removing Disable or NoAck can also acknowledge cleared transients (ACKS and `$ACKPV`). |
 | `$FORCEPV_CALC` | EPICS CALC expression required when the FORCEPV name is `CALC`. |
 | `$FORCEPV_CALC_A` through `$FORCEPV_CALC_F` | Numeric constants or PV inputs for CALC. Unspecified inputs default to zero; all named PV inputs must become available before evaluation. |
 | `$SEVRCOMMAND` | `UP_severity command` or `DOWN_severity command`, matching direction and destination severity; `ANY` matches any change in that direction, `UP_ALARM` matches leaving NO_ALARM. Channel startup is evaluated from ERROR, matching ALH. Repeat to add commands. |

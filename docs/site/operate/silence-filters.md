@@ -33,7 +33,7 @@ The command-line equivalents are `-filter no`, `-filter active`, and `-filter un
 
 ## Temporarily remove acknowledgement requirements
 
-Timed NoAck (**Ctrl+N**) is different from silence. It changes acknowledgement behavior and is shown as `H` in the mask summary. Use the [mask reference](/reference/configuration) before changing NoAck, NoAckT, Disable, or Cancel settings.
+Timed NoAck (**Ctrl+N**) is different from silence. It changes acknowledgement behavior and is shown as `H` in the mask summary. In global active mode, when the hour expires, an alarm that cleared meanwhile is acknowledged automatically: QtALH writes the IOC ACKS and any `$ACKPV`. Use the [mask reference](/reference/configuration) before changing NoAck, NoAckT, Disable, or Cancel settings.
 
 ## Temporarily shelve alarms
 
