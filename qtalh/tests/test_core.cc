@@ -2759,7 +2759,7 @@ $GUIDANCE https://example.invalid/guide
                               "<xi:include href=\"part.xml\"/></config>", dir.path())
             : loadPhoebusXml(file.fileName());
       };
-      QCOMPARE(parse().channels().size(), include ? size_t(1) : size_t(0));
+      QCOMPARE(parse().channels().size(), include ? 1 : 0);
       QVERIFY(file.open(QIODevice::Append));
       const QByteArray tail = "<trailing-invalid";
       QCOMPARE(file.write(tail), qint64(tail.size()));
