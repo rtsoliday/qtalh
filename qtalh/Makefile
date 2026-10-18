@@ -14,6 +14,7 @@ GUI = ui/analytics.cc ui/notifications.cc ui/appearance.cc ui/workflows.cc ui/to
 OBJECTS = $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.obj) $(SERVICES:.cc=.obj) $(GUI:.cc=.obj)) $(OBJ_DIR)/resources.obj
 # MSVC does not emit GCC-style .d files. Rebuild on project header changes.
 HEADERS = $(wildcard core/*.h services/*.h ui/*.h)
+TEST_HEADERS = $(wildcard tests/*.h)
 LIBS = advapi32.lib $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(LDLIBS)
 # pvData needs delayed template parsing, while Qt 6.11 requires /permissive-.
 # Limit the EPICS compatibility option to translation units using its headers.
@@ -23,7 +24,7 @@ $(OBJ_DIR)/services/pv_access.obj $(OBJ_DIR)/tests/test_pva.obj: CXXFLAGS += /Zc
 PROD = qtalh
 $(OBJ_DIR)/qtalh.exe: $(OBJECTS) $(OBJ_DIR)/main.obj
 	$(LINKEXE) $(LDFLAGS) /OUT:$@ $^ $(LIBS)
-$(OBJ_DIR)/tests/%.obj: tests/%.cc $(HEADERS) $(BUILD_FILES)
+$(OBJ_DIR)/tests/%.obj: tests/%.cc $(HEADERS) $(TEST_HEADERS) $(BUILD_FILES)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CPPFLAGS) $(INCLUDES) $(QT_CFLAGS) $(QT_TEST_CFLAGS) $(CXXFLAGS) /c $< /Fo$@
 $(OBJ_DIR)/resources.cc: resources/qtalh.qrc resources/alh.xbm $(HELP_DOCS)
@@ -31,7 +32,7 @@ $(OBJ_DIR)/resources.cc: resources/qtalh.qrc resources/alh.xbm $(HELP_DOCS)
 	$(RCC) $< -o $@
 $(OBJ_DIR)/resources.obj: $(OBJ_DIR)/resources.cc $(BUILD_FILES)
 	$(CXX) $(CPPFLAGS) $(INCLUDES) $(QT_CFLAGS) $(CXXFLAGS) /c $< /Fo$@
-$(OBJ_DIR)/test_%.moc: tests/test_%.cc $(HEADERS) $(BUILD_FILES)
+$(OBJ_DIR)/test_%.moc: tests/test_%.cc $(HEADERS) $(TEST_HEADERS) $(BUILD_FILES)
 	@mkdir -p $(OBJ_DIR)
 	$(MOC) -D_WIN32 $(CPPFLAGS) $(INCLUDES) $(QT_CFLAGS) $< -o $@
 
