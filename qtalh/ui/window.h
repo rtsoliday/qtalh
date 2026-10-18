@@ -97,6 +97,8 @@ public:
   void redoEdit();
   void showInitial();
   void saveTo(const QString&);
+  // SIGINT under -B: the normal exit path without the confirmation popup.
+  void exitOnInterrupt();
 
 protected:
   void closeEvent(QCloseEvent*) override;
@@ -211,4 +213,7 @@ private:
   void expandOneLevel(const QModelIndex&);
   void expandBranch(const QModelIndex&);
 };
+// ALH -B: route SIGINT to window->exitOnInterrupt() (Linux/macOS). Without
+// -B, and for other signals, the default action applies, as in ALH.
+void handleInterrupt(Window* window);
 } // namespace alh

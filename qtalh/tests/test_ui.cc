@@ -2653,6 +2653,73 @@ private slots:
     QFile audit(o.opmodFile); QVERIFY(audit.open(QIODevice::ReadOnly));
     QVERIFY(!audit.readAll().contains("Setup---Exit"));
   }
+  void interruptRefusedWhileSending() {
+    // ALH exit_quit refuses while amIsender; a killed sender would leave its
+    // .MESS for every later -B startup to execute.
+    QTemporaryDir dir;
+    auto o = options(false); o.broadcast = true; o.config = dir.filePath("config");
+    o.noLog = false; o.alarmFile = dir.filePath("alarm"); o.opmodFile = dir.filePath("ops");
+    auto w = std::make_unique<Window>(sample(), o, false);
+    w->setAttribute(Qt::WA_DeleteOnClose, false); w->showInitial();
+    QWidget* runtime = nullptr;
+    for (auto widget : QApplication::topLevelWidgets())
+      if (widget->objectName() == "runtimeWindow") runtime = widget;
+    QVERIFY(runtime);
+    for (auto action : w->findChildren<QAction*>())
+      if (QString(action->text()).remove('&') == "Stop Alarm Logging...") action->trigger();
+    auto broadcast = w->findChild<QDialog*>("broadcastDialog"); QVERIFY(broadcast);
+    broadcast->findChild<QLineEdit*>("broadcastMessage")->setText("maintenance");
+    auto buttons = broadcast->findChild<QDialogButtonBox*>(); QVERIFY(buttons);
+    QTest::mouseClick(buttons->button(QDialogButtonBox::Ok), Qt::LeftButton);
+    QFile message(o.config + ".MESS"); QVERIFY(message.open(QIODevice::ReadOnly));
+    const auto payload = message.readAll(); message.close();
+    QVERIFY(payload.contains("MIN  ALH  WILL  NOT  SAVE ALARM LOG"));
+    w->exitOnInterrupt(); w->exitOnInterrupt();
+    QTest::qWait(100);
+    QVERIFY(runtime->isVisible());
+    QVERIFY(!w->findChild<QMessageBox*>("exitConfirmation"));
+    QVERIFY(message.open(QIODevice::ReadOnly)); QCOMPARE(message.readAll(), payload);
+    QFile audit(o.opmodFile); QVERIFY(audit.open(QIODevice::ReadOnly));
+    const auto ops = audit.readAll();
+    QVERIFY(!ops.contains("Setup---Exit"));
+    QVERIFY(ops.contains("A broadcast is still being delivered"));
+  }
+#ifndef Q_OS_WIN
+  void interruptMatchesLegacy_data() {
+    QTest::addColumn<int>("number"); QTest::addColumn<bool>("broadcast");
+    QTest::addColumn<bool>("handled");
+    QTest::newRow("-B SIGINT") << int(SIGINT) << true << true;
+    QTest::newRow("SIGINT") << int(SIGINT) << false << false;
+    QTest::newRow("-B SIGTERM") << int(SIGTERM) << true << false;
+  }
+  void interruptMatchesLegacy() {
+    // ALH installs broadcastMess_exit_quit for SIGINT only with -B; that exit
+    // logs Setup---Exit and releases its locks. Other cases keep the default.
+    QFETCH(int, number); QFETCH(bool, broadcast); QFETCH(bool, handled);
+    QTemporaryDir dir; const auto config = dir.filePath("signal.alhConfig"), ops = dir.filePath("ops");
+    saveConfig(parseConfig("GROUP NULL root\nCHANNEL root signal:never:connects\n"), config);
+    QStringList args{"-platform", "offscreen", "-s", "-a", dir.filePath("alarm"), "-o", ops, config};
+    if (broadcast) args.insert(3, "-B");
+    QProcess process;
+    const auto previous = std::signal(number, SIG_DFL); // Inherited by the child.
+    process.start(QDir(QCoreApplication::applicationDirPath()).filePath("qtalh"), args);
+    const bool started = process.waitForStarted();
+    std::signal(number, previous);
+    QVERIFY(started);
+    QTRY_VERIFY_WITH_TIMEOUT(QFileInfo(ops).size() > 0, 10000);
+    QTest::qWait(500); // Past window construction, when main installs the handler.
+    QCOMPARE(::kill(pid_t(process.processId()), number), 0);
+    QVERIFY(process.waitForFinished(10000));
+    QFile audit(ops); QVERIFY(audit.open(QIODevice::ReadOnly));
+    if (handled) {
+      QCOMPARE(process.exitStatus(), QProcess::NormalExit); QCOMPARE(process.exitCode(), 0);
+      QCOMPARE(audit.readAll().count("Setup---Exit"), 1);
+    } else {
+      QCOMPARE(process.exitStatus(), QProcess::CrashExit);
+      QVERIFY(!audit.readAll().contains("Setup---Exit"));
+    }
+  }
+#endif
   void failedAlarmSoundFallsBack() {
 #ifdef Q_OS_MACOS
     if (QGuiApplication::platformName() != "cocoa") {

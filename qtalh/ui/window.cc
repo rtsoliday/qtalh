@@ -18,8 +18,23 @@
 #include <QTextDocument>
 #include <QtWidgets>
 #include <cmath>
+#ifndef Q_OS_WIN
+#include <cerrno>
+#include <csignal>
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 namespace alh {
 namespace {
+#ifndef Q_OS_WIN
+int interruptPipe[2] = {-1, -1};
+void writeInterruptPipe(int) {
+  const int saved = errno;
+  const char byte = 1;
+  if (::write(interruptPipe[1], &byte, 1) < 0) {} // A full pipe already wakes the reader.
+  errno = saved;
+}
+#endif
 // Used by both command execution and its tooltip preview.
 QString launchCommand(QString command) {
   if (command.startsWith("MASTER_ONLY")) command = command.mid(11).trimmed();
@@ -2893,6 +2908,38 @@ void Window::broadcast(int mode) {
     else error("Could not broadcast message");
   });
   sizeDialog(dialog, legacy ? QSize(390, mode == 1 ? 135 : 105) : QSize(460, 0)); dialog->show();
+}
+void Window::exitOnInterrupt() {
+  // ALH -B: SIGINT runs exit_quit without confirmation. closeEvent refuses
+  // while this instance's broadcast is being delivered, as exit_quit does.
+  quitting = true;
+  close();
+}
+void handleInterrupt(Window* window) {
+#ifndef Q_OS_WIN
+  static QPointer<Window> target;
+  target = window;
+  if (interruptPipe[0] >= 0 || ::pipe(interruptPipe) != 0) return;
+  for (int fd : interruptPipe) {
+    ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL) | O_NONBLOCK);
+    ::fcntl(fd, F_SETFD, FD_CLOEXEC);
+  }
+  auto notifier = new QSocketNotifier(interruptPipe[0], QSocketNotifier::Read, qApp);
+  QObject::connect(notifier, &QSocketNotifier::activated, notifier, [] {
+    char bytes[16];
+    while (::read(interruptPipe[0], bytes, sizeof bytes) > 0) {}
+    if (target) target->exitOnInterrupt();
+  });
+  // Like ALH's signal(SIGINT, broadcastMess_exit_quit), the handler stays
+  // installed, so a refused interrupt can be repeated after delivery.
+  struct sigaction action = {};
+  action.sa_handler = writeInterruptPipe;
+  sigemptyset(&action.sa_mask);
+  action.sa_flags = SA_RESTART;
+  sigaction(SIGINT, &action, nullptr);
+#else
+  Q_UNUSED(window);
+#endif
 }
 void Window::exitApplication() {
   if (exitPopup) {

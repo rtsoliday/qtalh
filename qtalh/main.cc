@@ -88,6 +88,7 @@ int main(int argc, char** argv) {
       doc = alh::loadConfig(options.config, options.configDir);
     }
     auto window = new alh::Window(std::move(doc), options);
+    if (!options.editor && options.broadcast) alh::handleInterrupt(window);
     window->showInitial();
     return app.exec();
   } catch (const std::exception& e) {

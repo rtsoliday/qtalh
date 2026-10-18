@@ -614,6 +614,10 @@ installs its handlers. Messages are polled every two seconds, and senders hold d
 for 60 seconds; another send reports busy during that interval. Broadcast actions
 send a message, reload the named configuration, or suppress alarm logging and
 commands for 1–10 minutes. Monitoring continues. Reload preserves Silence Forever.
+As in ALH, on Linux/macOS a `-B` runtime handles SIGINT (Ctrl-C) as an Exit
+without confirmation. A sender refuses, with a warning, until its message has
+been delivered; send SIGINT again afterwards. Without `-B`, and for other
+signals, the default action applies.
 Receivers see the text, including a reload reason, in a Broadcast Message
 window that stays open after the reload. A reload closes other tool and viewer
 windows, such as Active Alarms, Find Alarm, Runtime Overrides, Shelved Alarms,
