@@ -291,6 +291,8 @@ content-sized names and the reference initial expansion. See
 [the Radiation Monitors comparison](qtalh-appearance.md). Qt scroll bars, some
 dialog arrangements and menu labels still differ from Motif. Reports use a
 simpler indented text format.
+Current Alarm History lists the newest entry first in both appearances; ALH
+lists the oldest of its ten entries first and the newest last.
 Font family/size/weight from XLFD are approximated where possible. Native file,
 print and font rendering differences are expected. These differences currently
 exceed a claim of pixel or complete arrangement parity and need operator review.

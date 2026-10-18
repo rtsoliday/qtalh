@@ -32,6 +32,8 @@ historical browser to search older records.
 ## Read current history
 
 Choose **View → Current Alarm History** for the most recent in-memory entries.
+The newest entry is listed first. Legacy ALH lists the oldest first and the
+newest last.
 The modern appearance shows a table with Time, Process Variable, Status,
 Severity and Value columns, with severity cells in the alarm colors; the classic
 appearance shows aligned fixed-width text. Outside Motif mode, the
