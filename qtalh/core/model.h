@@ -48,6 +48,9 @@ struct Document {
   std::shared_ptr<Node> root;
   QString filename;
   int beepSeverity = 1;
+  // Text that was not valid in the locale encoding is read as ISO-8859-1;
+  // saveConfig() then writes ISO-8859-1 again when it can represent the text.
+  bool latin1 = false;
   QVector<Node*> nodes() const;
   QVector<Node*> channels() const;
 };

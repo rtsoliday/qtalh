@@ -2788,6 +2788,27 @@ private slots:
     QCOMPARE(loadConfig(dir.filePath("saved.alhConfig")).channels().size(), count + 1);
     QVERIFY(w->grab().save(QString(TEST_OUTPUT) + "/" + artifactStyle() + "-editor.png"));
   }
+  void saveKeepsLatin1Configuration() {
+    // Editor edits, undo/redo and runtime Save As keep ISO-8859-1 bytes.
+    QTemporaryDir dir;
+    const QByteArray latin1 = "GROUP NULL root\nCHANNEL root pv -----\n$ALIAS K\xfc" "hler\n";
+    QFile file(dir.filePath("latin1.alhConfig"));
+    QVERIFY(file.open(QIODevice::WriteOnly) && file.write(latin1) == latin1.size());
+    file.close();
+    for (bool editor : {false, true}) {
+      auto w = std::make_unique<Window>(loadConfig(file.fileName()), options(editor), false);
+      if (editor) {
+        w->addNode(false, "added");
+        w->undoEdit();
+        w->redoEdit();
+      }
+      const auto path = dir.filePath(editor ? "editor" : "runtime");
+      w->saveTo(path);
+      QFile saved(path);
+      QVERIFY(saved.open(QIODevice::ReadOnly));
+      QCOMPARE(saved.readAll(), editor ? latin1 + "CHANNEL root added -----\n" : latin1);
+    }
+  }
   void editorBeepSeverityUndoAndSave() {
     auto w = std::make_unique<Window>(sample(), options(true), false);
     QTemporaryDir dir;

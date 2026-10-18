@@ -28,6 +28,7 @@ void Window::activateRuntime() {
       if (doc.filename.isEmpty()) return;
     }
     snapshot.filename = doc.filename;
+    snapshot.latin1 = doc.latin1;
     auto runtimeOptions = options;
     runtimeOptions.editor = false;
     runtimeOptions.config = doc.filename;

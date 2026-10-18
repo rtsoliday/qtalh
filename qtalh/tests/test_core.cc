@@ -2532,6 +2532,53 @@ $GUIDANCE https://example.invalid/guide
     QVERIFY(write("shared", "GROUP NULL shared\nINCLUDE shared sub/child\n"));
     QVERIFY_THROWS_EXCEPTION(ParseError, loadConfig(dir.filePath("entry/main"), dir.path()));
   }
+  void latin1ConfigurationRoundTrips() {
+    // ALH copies configuration bytes verbatim. ISO-8859-1 text that is not
+    // valid in a UTF-8 locale must load as text and save byte for byte.
+    QTemporaryDir dir;
+    auto write = [&](const QString& path, const QByteArray& text) {
+      QFile file(dir.filePath(path));
+      return file.open(QIODevice::WriteOnly) && file.write(text) == text.size();
+    };
+    auto read = [&](const QString& path) {
+      QFile file(dir.filePath(path));
+      return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    };
+    const QByteArray latin1 = "GROUP NULL root\nCHANNEL root pv -----\n$ALIAS K\xfc" "hler\n"
+                              "$GUIDANCE\nStra\xdf" "e \xe4ndern\n$END\n";
+    QVERIFY(write("latin1", latin1));
+    auto d = loadConfig(dir.filePath("latin1"));
+    QCOMPARE(d.channels()[0]->option("ALIAS"), QString::fromLatin1("K\xfc" "hler"));
+    QCOMPARE(d.channels()[0]->option("GUIDANCE_TEXT"), QString::fromLatin1("Stra\xdf" "e \xe4ndern"));
+    saveConfig(d, dir.filePath("saved"));
+    QCOMPARE(read("saved"), latin1);
+    // Included ISO-8859-1 names survive the expanded save.
+    QVERIFY(write("child", "GROUP NULL K\xfc" "hlung\nCHANNEL K\xfc" "hlung pv2\n"));
+    QVERIFY(write("main", "GROUP NULL root\nINCLUDE root child\n"));
+    d = loadConfig(dir.filePath("main"));
+    QCOMPARE(d.channels()[0]->parent->name, QString::fromLatin1("K\xfc" "hlung"));
+    saveConfig(d, dir.filePath("saved"));
+    QCOMPARE(read("saved"), QByteArray("GROUP NULL root\nGROUP root K\xfc" "hlung\n"
+                                       "CHANNEL K\xfc" "hlung pv2 -----\n"));
+    // Valid locale text, including a literal U+FFFD, keeps its encoding.
+    const QByteArray utf8 = "GROUP NULL root\nCHANNEL root pv -----\n$ALIAS K\xc3\xbchler \xef\xbf\xbd\n";
+    QVERIFY(write("utf8", utf8));
+    d = loadConfig(dir.filePath("utf8"));
+    QCOMPARE(d.channels()[0]->option("ALIAS"), QString::fromLocal8Bit("K\xc3\xbchler \xef\xbf\xbd"));
+    saveConfig(d, dir.filePath("saved"));
+    QCOMPARE(read("saved"), utf8);
+    // Text outside ISO-8859-1 added to such a document is saved without '?'
+    // substitution, using the locale encoding instead.
+    const QString euro = QString::fromUtf8("\xe2\x82\xac");
+    if (QString::fromLocal8Bit(euro.toLocal8Bit()) == euro) {
+      d = loadConfig(dir.filePath("latin1"));
+      d.channels()[0]->setOption("ALIAS", euro);
+      saveConfig(d, dir.filePath("saved"));
+      d = loadConfig(dir.filePath("saved"));
+      QCOMPARE(d.channels()[0]->option("ALIAS"), euro);
+      QCOMPARE(d.channels()[0]->option("GUIDANCE_TEXT"), QString::fromLatin1("Stra\xdf" "e \xe4ndern"));
+    }
+  }
   void valueUpdatesDoNotLogAlarms() {
     auto d = parseConfig("GROUP NULL root\nCHANNEL root pv");
     Engine e(d, {true});

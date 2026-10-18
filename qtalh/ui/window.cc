@@ -1764,6 +1764,7 @@ void Window::open(bool insert) {
       parent->children.pop_back();
       auto result = parseConfig(next);
       result.filename = doc.filename;
+      result.latin1 = doc.latin1;
       replace(std::move(result));
     } else {
       auto o = options;
@@ -1823,6 +1824,7 @@ void Window::addNode(bool group, const QString& name) {
   parent->children.pop_back();
   auto d = parseConfig(text);
   d.filename = doc.filename;
+  d.latin1 = doc.latin1;
   replace(std::move(d));
 }
 void Window::rememberEdit(QStringList& stack, QString snapshot) {
@@ -1855,6 +1857,7 @@ void Window::undoEdit() {
   rememberEdit(redo, writeConfig(doc));
   auto d = parseConfig(previous);
   d.filename = doc.filename;
+  d.latin1 = doc.latin1;
   replace(std::move(d), false);
   modified = true;
   refresh();
@@ -1866,6 +1869,7 @@ void Window::redoEdit() {
   rememberEdit(undo, writeConfig(doc));
   auto d = parseConfig(next);
   d.filename = doc.filename;
+  d.latin1 = doc.latin1;
   replace(std::move(d), false);
   modified = true;
   refresh();
@@ -1916,6 +1920,7 @@ void Window::clearNode() {
   c.insert(c.begin() + offset, backup);
   auto d = parseConfig(text);
   d.filename = doc.filename;
+  d.latin1 = doc.latin1;
   replace(std::move(d));
 }
 void Window::paste() {
@@ -1946,6 +1951,7 @@ void Window::paste() {
   try {
     auto d = parseConfig(text);
     d.filename = doc.filename;
+    d.latin1 = doc.latin1;
     replace(std::move(d));
   } catch (const std::exception& e) {
     error(e.what());
@@ -2374,6 +2380,7 @@ void Window::properties() {
           if (!value.trimmed().isEmpty()) n->directives.push_back({item.second, value.trimmed()});
       n->setOption("GUIDANCE_TEXT", guidance->toPlainText());
       auto checked = parseConfig(writeConfig(candidate)); checked.filename = doc.filename;
+      checked.latin1 = doc.latin1;
       replace(std::move(checked));
     } catch (const std::exception& e) {
       QMessageBox::warning(dialog, "Invalid properties", e.what());

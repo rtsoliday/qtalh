@@ -20,6 +20,17 @@ QStringList words(const QString& s) {
   static const QRegularExpression whitespace("\\s+");
   return s.split(whitespace, Qt::SkipEmptyParts);
 }
+// ALH copies configuration bytes verbatim. Bytes that the locale codec cannot
+// decode (for example ISO-8859-1 text under a UTF-8 locale) would become
+// U+FFFD and be saved that way, so read such files losslessly as ISO-8859-1.
+QString decode(const QByteArray& bytes, bool& latin1) {
+  const QString text = QString::fromLocal8Bit(bytes);
+  // Only replacements added by the decoder count, not U+FFFD stored as UTF-8.
+  if (text.count(QChar::ReplacementCharacter) <= bytes.count("\xEF\xBF\xBD"))
+    return text;
+  latin1 = true;
+  return QString::fromLatin1(bytes);
+}
 bool forceCalcInput(const QString& name) {
   static const QRegularExpression input("^FORCEPV_CALC_[A-F]$");
   return input.match(name).hasMatch();
@@ -157,7 +168,7 @@ public:
         QByteArray text;
         if (!readFile(f, text))
           fail("Cannot read include: " + path + ": " + f.errorString());
-        read(QString::fromLocal8Bit(text), base, parent, depth + 1, path);
+        read(decode(text, doc.latin1), base, parent, depth + 1, path);
         stack.remove(canonical);
         current = parent;
         declared = true;
@@ -418,7 +429,7 @@ Document loadConfig(const QString& path, const QString& configDir) {
   QByteArray text;
   if (!readFile(f, text))
     throw ParseError("Cannot read " + path + ": " + f.errorString());
-  p.read(QString::fromLocal8Bit(text),
+  p.read(decode(text, p.doc.latin1),
          configDir.isEmpty() ? QFileInfo(path).absolutePath() : configDir);
   p.validate();
   p.doc.filename = QFileInfo(path).absoluteFilePath();
@@ -438,7 +449,11 @@ void saveConfig(const Document& doc, const QString& path) {
   QSaveFile f(path);
   if (!f.open(QIODevice::WriteOnly))
     throw ParseError(f.errorString());
-  auto data = writeConfig(doc).toLocal8Bit();
+  const auto text = writeConfig(doc);
+  // Edits may add text that ISO-8859-1 cannot represent; keep it, not '?'.
+  auto data = doc.latin1 ? text.toLatin1() : text.toLocal8Bit();
+  if (doc.latin1 && QString::fromLatin1(data) != text)
+    data = text.toLocal8Bit();
   if (f.write(data) != data.size() || !f.commit())
     throw ParseError(f.errorString());
 }

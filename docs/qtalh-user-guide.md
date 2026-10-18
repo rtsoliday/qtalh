@@ -363,6 +363,15 @@ exhaust memory at startup or reload. The top-level configuration may still be
 a pipe, such as `qtalh <(generator)`. The C++ `loadConfig` API uses
 the top-level file's directory when no configuration directory is supplied.
 
+Configuration files are read in the locale encoding (normally UTF-8). A file,
+or an included file, that is not valid in that encoding is read as ISO-8859-1
+instead, so legacy Latin-1 names, aliases, guidance, and command text display
+correctly rather than as U+FFFD replacement characters. Such a configuration
+is saved in ISO-8859-1 again, byte for byte when unchanged; if edits add
+characters that ISO-8859-1 cannot represent, it is saved in the locale encoding.
+Saving expands INCLUDEs into one file, so if any included file was ISO-8859-1
+the whole saved file uses ISO-8859-1 when it can represent every character.
+
 Directives normally apply to the preceding group/channel. A file, including an
 included file, must declare a GROUP, CHANNEL or INCLUDE before any other
 directive; only `$BEEPSEVERITY` and `$HEARTBEATPV` may come first. ALH ignores
