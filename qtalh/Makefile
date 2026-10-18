@@ -132,7 +132,10 @@ $(OBJ_DIR)/test_pva.moc: tests/test_pva.cc
 $(OBJ_DIR)/tests/test_pva.o: $(OBJ_DIR)/test_pva.moc
 $(OBJ_DIR)/test_pva: $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o)) $(OBJ_DIR)/services/pv_access.o $(OBJ_DIR)/tests/test_pva.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(call qt_libs,Test Core)
-.PHONY: test-pva
+.PHONY: test-pva test-build
+# Qt discovery checks (Conda qmake6/PKG_CONFIG_PATH); dry make queries, no compile.
+test-build:
+	tests/test_build.sh
 test-pva: $(OBJ_DIR)/test_pva
 	$(OBJ_DIR)/test_pva
 test-ioc: $(OBJ_DIR)/test_ioc

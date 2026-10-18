@@ -831,9 +831,11 @@ RCC = "$(QT_DIR)/bin/rcc.exe"
 else
 QT6_AVAILABLE := $(shell $(PKG_CONFIG) --exists Qt6Widgets Qt6Network 2>/dev/null && echo 1)
 QT5_AVAILABLE := $(shell $(PKG_CONFIG) --atleast-version=5.15 Qt5Widgets Qt5Network 2>/dev/null && echo 1)
-QMAKE6 ?= qmake6
+# qmake6 first on PATH may be Conda's; on Linux use the distribution qmake6
+# unless QMAKE6 is set explicitly.
+QMAKE6 ?= $(if $(filter Linux,$(OS)),$(firstword $(wildcard /usr/bin/qmake6 /usr/lib/qt6/bin/qmake /usr/lib64/qt6/bin/qmake)),qmake6)
 ifeq ($(QT6_AVAILABLE),)
-QT6_QMAKE_VERSION := $(shell $(QMAKE6) -query QT_VERSION 2>/dev/null)
+QT6_QMAKE_VERSION := $(if $(strip $(QMAKE6)),$(shell $(QMAKE6) -query QT_VERSION 2>/dev/null))
 ifneq ($(filter 6.%,$(QT6_QMAKE_VERSION)),)
 QT6_HEADERS := $(shell $(QMAKE6) -query QT_INSTALL_HEADERS 2>/dev/null)
 QT6_LIB_DIR := $(shell $(QMAKE6) -query QT_INSTALL_LIBS 2>/dev/null)
@@ -1026,10 +1028,12 @@ QT6_PKG_AVAILABLE := $(shell $(PKG_CONFIG) --exists $(QT6_PACKAGES) 2>/dev/null 
 # Ubuntu 22.04's Qt 6.2 development packages provide qmake metadata but no
 # pkg-config files. Query that installation instead of reporting Qt missing.
 # This fallback targets shared Linux Qt; other platforms retain pkg-config.
-QMAKE6 ?= qmake6
+# qmake6 first on PATH may be Conda's; on Linux use the distribution qmake6
+# unless QMAKE6 is set explicitly.
+QMAKE6 ?= $(if $(filter Linux,$(OS)),$(firstword $(wildcard /usr/bin/qmake6 /usr/lib/qt6/bin/qmake /usr/lib64/qt6/bin/qmake)),qmake6)
 ifeq ($(OS),Linux)
 ifeq ($(QT6_PKG_AVAILABLE),)
-QT6_QMAKE_VERSION := $(shell $(QMAKE6) -query QT_VERSION 2>/dev/null)
+QT6_QMAKE_VERSION := $(if $(strip $(QMAKE6)),$(shell $(QMAKE6) -query QT_VERSION 2>/dev/null))
 ifneq ($(filter 6.%,$(QT6_QMAKE_VERSION)),)
 QT6_HEADERS := $(shell $(QMAKE6) -query QT_INSTALL_HEADERS 2>/dev/null)
 QT6_LIB_DIR := $(shell $(QMAKE6) -query QT_INSTALL_LIBS 2>/dev/null)
@@ -1076,6 +1080,24 @@ QT_CFLAGS = $(call qt_cflags,Widgets Network PrintSupport Multimedia)
 QT_LIBS = $(call qt_libs,Widgets Network PrintSupport Multimedia)
 MOC = $(firstword $(wildcard $(addsuffix /moc,$(QT_TOOL_DIRS))))
 RCC = $(firstword $(wildcard $(addsuffix /rcc,$(QT_TOOL_DIRS))))
+ifneq ($(and $(filter 1,$(QTALH_GUI)),$(filter-out clean distclean,$(or $(MAKECMDGOALS),all))),)
+# PKG_CONFIG_PATH can mix Qt installations; require a single prefix.
+ifeq ($(QT_USE_QMAKE)-$(HAVE_QT),-1)
+QT_PREFIXES := $(sort $(foreach pkg,$(QT_CORE) $(QT_PACKAGES),$(shell $(PKG_CONFIG) --variable=prefix $(pkg) 2>/dev/null)))
+ifneq ($(words $(QT_PREFIXES)),1)
+$(error Qt $(QT_VERSION) modules come from different installations: $(QT_PREFIXES). Fix PKG_CONFIG_PATH or set PKG_CONFIG)
+endif
+endif
+# An active Conda environment must not silently supply Qt or link paths.
+# QTALH_ALLOW_CONDA=1 accepts a Conda Qt deliberately.
+qtalh_comma := ,
+ifneq ($(and $(strip $(CONDA_PREFIX)),$(if $(filter 1,$(QTALH_ALLOW_CONDA)),,1)),)
+QT_CONDA_PATHS := $(sort $(filter $(CONDA_PREFIX)/%,$(patsubst -I%,%,$(patsubst -L%,%,$(subst $(qtalh_comma), ,$(QT_CFLAGS) $(QT_LIBS) $(CPPFLAGS) $(LDFLAGS)))) $(MOC) $(RCC)))
+ifneq ($(QT_CONDA_PATHS),)
+$(error Qt build paths point into the active Conda environment $(CONDA_PREFIX): $(QT_CONDA_PATHS). Deactivate Conda or pass QTALH_ALLOW_CONDA=1)
+endif
+endif
+endif
 endif
 endif
 
