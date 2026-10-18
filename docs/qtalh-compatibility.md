@@ -626,9 +626,13 @@ transient acknowledgement is enabled and clears on recovery with NoAckT. Cancel,
 Disable, NoAck, shelving, and passive acknowledgement restrictions still apply.
 Notification escalation remains paused during the communication gap.
 
-Failed ACKS submissions emit a failure operation rather than acknowledgement-success
-records or ACKPV writes. Group acknowledgement continues with other channels. An
-accepted submission still waits for the IOC monitor to confirm its acknowledgement.
+ACKS writes that cannot be sent (disconnected, not writable, or refused by the CA
+client library) emit a failure operation rather than acknowledgement-success records
+or ACKPV writes. Group acknowledgement continues with other channels. A sent write is
+not confirmed by the IOC before these side effects. If the IOC rejects it (for example
+`DISP=1` or an access-security change), ACKPV and the success records still occur, as
+in ALH, and the rejection appears only on standard error. The alarm stays
+unacknowledged until the IOC monitor reports ACKS cleared.
 
 Read-access loss, disconnection, and Cancel invalidate cached CA alarm events. Recovery
 waits for fresh monitored data, avoiding replay of stale alarms and their commands or

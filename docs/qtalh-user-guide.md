@@ -376,8 +376,14 @@ In global mode, communication failures have a separate local ERROR acknowledgeme
 They remain audible and visible in the unacknowledged filter. Acknowledging that
 error does not write to the IOC or ACKPV; any outstanding IOC alarm remains pending.
 The error latch survives recovery when transient acknowledgement is enabled, or
-clears on recovery with NoAckT. Failed IOC acknowledgement submissions are logged
-as failures and do not trigger ACKPV or acknowledgement-success records.
+clears on recovery with NoAckT. An IOC acknowledgement that cannot be sent (the PV
+is disconnected or not writable, or Channel Access refuses the request) is logged as
+a failure and does not write ACKPV or acknowledgement-success records. QtALH does
+not wait for the IOC to accept a sent ACKS write. If the IOC rejects it, for example
+because the record's `DISP` field is 1 or access security changed, ACKPV is still
+written and the acknowledgement is still logged, as in ALH. The alarm stays
+unacknowledged, and the rejection is reported only on standard error. ACKPV
+therefore does not confirm that the IOC accepted the acknowledgement.
 
 Severity and heartbeat outputs use the legacy short-integer CA type; ACKPV uses
 the legacy unsigned-enum type. This also preserves integer text on string PVs.
