@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <limits>
 #include <mutex>
+#include <QPointer>
 #include <utility>
 namespace pva = epics::pvAccess;
 namespace pvd = epics::pvData;
@@ -374,21 +375,24 @@ size_t PvAccess::pendingWriteCount(const QString& name) const {
   return n;
 }
 void PvAccess::report(const QString& message) {
-  if (error)
-    error(message);
+  // A diagnostic can replace the configuration and destroy this service.
+  if (const auto callback = error)
+    callback(message);
 }
 bool PvAccess::connectProvider() {
   if (provider)
     return true;
+  QPointer<PvAccess> self(this);
   try {
     pva::ClientFactory::start();
     provider = pva::ChannelProviderRegistry::clients()->getProvider("pva");
   } catch (const std::exception& e) {
     report(QString("pvAccess client: ") + e.what());
+    if (!self) return false;
   }
   if (!provider)
     report("pvAccess client provider is not available");
-  return bool(provider);
+  return self && bool(provider);
 }
 void PvAccess::writeFailed(Channel* c, const QString& reason) {
   // PVA has no access-rights events: a server that rejects every put would
@@ -402,9 +406,11 @@ void PvAccess::numericUnavailable(Channel* c, const QString& reason) {
   if (!c->numeric)
     return;
   const auto id = c->id;
+  QPointer<PvAccess> self(this);
   if (c->numericError != reason) {
     c->numericError = reason;
     report(reason + ": " + c->name);
+    if (!self) return;
   }
   // A diagnostic can clear the service or remove this Force/CALC input.
   c = channelsById.value(id);
@@ -428,13 +434,15 @@ PvAccess::Channel* PvAccess::add(const QString& name) {
   channelsById.insert(c->id, c);
   channelsByName[name].push_back(c);
   noteDeadline(c);
+  QPointer<PvAccess> self(this);
   createChannel(c);
-  return channelsById.value(id);
+  return self ? channelsById.value(id) : nullptr;
 }
 void PvAccess::createChannel(Channel* c) {
   const auto id = c->id;
   const auto name = c->name;
-  if (connectProvider() && (c = channelsById.value(id))) {
+  QPointer<PvAccess> self(this);
+  if (connectProvider() && self && (c = channelsById.value(id))) {
     try {
       c->ops->channelRequester = std::make_shared<ChannelRequester>(inbox, c->id);
       c->ops->channel = provider->createChannel(name.mid(6).toStdString(), c->ops->channelRequester,
@@ -481,6 +489,7 @@ void PvAccess::sendPut(Channel* c) {
   const auto id = c->id;
   const auto owned = c->ops;
   auto& ops = *owned;
+  QPointer<PvAccess> self(this);
   while (c->connected && !c->putBusy && !c->puts.empty() && ops.putReady && ops.put) {
     const auto write = c->puts.front();
     const double v = write.value;
@@ -515,6 +524,7 @@ void PvAccess::sendPut(Channel* c) {
       c->putBusy = false;
       c->putDeadline = 0;
       writeFailed(c, e.what());
+      if (!self) return;
       c = channelsById.value(id);
       if (!c) return;
     }
@@ -569,6 +579,7 @@ void PvAccess::deliverAlarm(quint64 id, Event event) {
   QVector<QPair<const void*, quint64>> recipients;
   for (auto it = c->observers.cbegin(); it != c->observers.cend(); ++it)
     if (!it->cancelled) recipients.push_back({it.key(), it->revision});
+  QPointer<PvAccess> self(this);
   for (const auto& recipient : recipients) {
     c = channelsById.value(id);
     if (!c) return;
@@ -578,6 +589,7 @@ void PvAccess::deliverAlarm(quint64 id, Event event) {
     observer->delivered = true;
     const auto callback = observer->callback;
     if (callback) callback(event);
+    if (!self) return;
   }
 }
 void PvAccess::text(const QString& name, std::function<void(QString)> callback) {
@@ -655,7 +667,9 @@ bool PvAccess::put(const QString& n, double v, WriteKind kind) {
       return true;
     }
     const auto id = c->id;
+    QPointer<PvAccess> self(this);
     ensurePut(c);
+    if (!self) return false;
     if (!(c = channelsById.value(id)))
       return false;
     if (!c->ops->put)
@@ -676,6 +690,7 @@ bool PvAccess::put(const QString& n, double v, WriteKind kind) {
     // A queued severity stays pending until the server confirms it, so a
     // disconnect, refusal, timeout or rejection replays it on connection.
     sendPut(c);
+    if (!self) return false;
     if ((c = channelsById.value(id)) && !c->putBusy && !c->puts.empty() && !c->putDeadline) {
       // Queued behind an unanswered put setup.
       c->putDeadline = monotonicNow() + qMax(1, writeTimeoutMs);
@@ -758,6 +773,7 @@ void PvAccess::noteDeadline(const Channel* c) {
   deadlineTimer.start(int(qBound(qint64(0), nextDeadline - monotonicNow(), qint64(1000))));
 }
 void PvAccess::checkDeadlines() {
+  QPointer<PvAccess> self(this);
   const auto now = monotonicNow();
   if (nextDeadline && now < nextDeadline) {
     deadlineTimer.start(int(qMin<qint64>(nextDeadline - now, 1000)));
@@ -776,6 +792,7 @@ void PvAccess::checkDeadlines() {
       c->puts.clear();
       c->ops->stopPut();
       report("Write " + c->name + ": operation timed out; pending writes cancelled (acceptance uncertain)");
+      if (!self) return;
     }
   for (auto& c : channels)
     if (!c->cancelled && c->connectionDeadline && now >= c->connectionDeadline) {
@@ -787,8 +804,10 @@ void PvAccess::checkDeadlines() {
     if (auto c = channelsById.value(id)) {
       if (const auto callback = c->alarm)
         callback({ALARM_NSTATUS, 4, 0, -1, "0"});
+      if (!self) return;
       if ((c = channelsById.value(id)))
         numericUnavailable(c, "PV not connected");
+      if (!self) return;
     }
   for (auto& c : channels)
     noteDeadline(c.get());
@@ -801,6 +820,7 @@ void PvAccess::changeRecord(const QString& name) {
     QTimer::singleShot(0, this, [this] { publishRecords(); });
 }
 void PvAccess::publishRecords() {
+  QPointer<PvAccess> self(this);
   const auto changed = std::exchange(changedRecords, {});
   QVector<quint64> ids;
   for (auto& c : channels)
@@ -815,6 +835,7 @@ void PvAccess::publishRecords() {
     c->last.ackt = r.ackt;
     const auto callback = c->alarm;
     callback(c->last);
+    if (!self) return;
   }
 }
 void PvAccess::connected(Channel* c) {
@@ -822,14 +843,17 @@ void PvAccess::connected(Channel* c) {
   c->connected = true;
   c->connectionDeadline = 0;
   const auto id = c->id;
+  QPointer<PvAccess> self(this);
   if (c->prepared)
     ensurePut(c);
+  if (!self) return;
   if (!(c = channelsById.value(id)))
     return;
   if (pendingSeverity.contains(c->name))
     put(c->name, pendingSeverity.value(c->name), WriteKind::Severity);
 }
 void PvAccess::disconnected(Channel* c) {
+  QPointer<PvAccess> self(this);
   debugLog(options.debug, "PVA", c->name + " disconnected");
   c->connected = false;
   c->haveLast = false;
@@ -843,12 +867,14 @@ void PvAccess::disconnected(Channel* c) {
   const auto id = c->id;
   if (writing) {
     report("Write " + c->name + ": PV disconnected");
+    if (!self) return;
     if (!(c = channelsById.value(id))) return;
   }
   if (c->cancelled)
     return;
   if (const auto callback = c->alarm)
     callback({ALARM_NSTATUS, 4, 0, -1, "0"});
+  if (!self) return;
   if ((c = channelsById.value(id)))
     numericUnavailable(c, "PV not connected");
 }
@@ -857,8 +883,10 @@ void PvAccess::monitorFailed(Channel* c, const QString& message) {
     return;
   c->haveLast = false;
   const auto id = c->id;
+  QPointer<PvAccess> self(this);
   if (const auto callback = c->alarm)
     callback({ALARM_NSTATUS, 4, 0, -1, "0"});
+  if (!self) return;
   if (!(c = channelsById.value(id)))
     return;
   if (c->numeric)
@@ -911,7 +939,10 @@ void PvAccess::readStrings(const QStringList& names,
   auto read = std::make_unique<Read>();
   read->id = ++nextId;
   read->done = std::move(done);
-  if (connectProvider())
+  QPointer<PvAccess> self(this);
+  const bool available = connectProvider();
+  if (!self) return;
+  if (available)
     for (const auto& name : names) {
       auto ops = std::make_shared<Operations>();
       ops->id = ++nextId;
@@ -950,14 +981,19 @@ void PvAccess::finishRead(quint64 id) {
     owned->done(owned->values);
 }
 void PvAccess::recoverInbox() {
+  QPointer<PvAccess> self(this);
   {
     std::lock_guard<std::mutex> guard(inbox->lock);
     inbox->updates.clear(); inbox->bytes = 0; inbox->overflow = false;
   }
   report("PVA update buffer overflow: observations lost; requesting fresh channel state");
+  if (!self) return;
   QVector<quint64> readIds;
   for (const auto& r : reads) readIds << r->id;
-  for (auto id : readIds) finishRead(id);
+  for (auto id : readIds) {
+    finishRead(id);
+    if (!self) return;
+  }
   QVector<quint64> ids;
   restarting.clear();
   for (const auto& c : channels) ids << c->id;
@@ -965,6 +1001,7 @@ void PvAccess::recoverInbox() {
     auto c = channelsById.value(id);
     if (!c) continue;
     disconnected(c); // Publish an observation gap before any fresh sample.
+    if (!self) return;
     if (!(c = channelsById.value(id))) continue;
     c->ops.reset(); // Subsequent callbacks carry an obsolete channel id.
     c->ops = std::make_shared<Operations>();
@@ -987,6 +1024,7 @@ void PvAccess::recoverInbox() {
   }
 }
 void PvAccess::resumeChannels() {
+  QPointer<PvAccess> self(this);
   restartScheduled = false;
   // Large configurations must not reproduce the overflow by reconnecting all
   // channels in one GUI turn. Leave time to drain connection/initial events.
@@ -998,6 +1036,7 @@ void PvAccess::resumeChannels() {
     c->connectionDeadline = monotonicNow() + 1000;
     noteDeadline(c);
     createChannel(c);
+    if (!self) return;
     if ((c = channelsById.value(id))) subscribe(c);
   }
   if (!restarting.empty()) {
@@ -1006,6 +1045,7 @@ void PvAccess::resumeChannels() {
   }
 }
 void PvAccess::drain() {
+  QPointer<PvAccess> self(this);
   std::vector<Inbox::Update> updates;
   bool overflow;
   {
@@ -1018,6 +1058,7 @@ void PvAccess::drain() {
     }
   }
   if (overflow) recoverInbox();
+  if (!self) return;
   for (auto& u : updates) {
     if (auto read = readsByItem.value(u.channel)) {
       auto item = std::find_if(read->items.begin(), read->items.end(),
@@ -1083,6 +1124,7 @@ void PvAccess::drain() {
       debugLog(options.debug, "PVA", "write " + c->name + ": " + (u.ok ? "done" : u.message));
       if (!u.ok) {
         writeFailed(c, u.message);
+        if (!self) return;
         if (!(c = channelsById.value(u.channel)))
           break;
       } else {
@@ -1096,6 +1138,7 @@ void PvAccess::drain() {
     default:
       break;
     }
+    if (!self) return;
   }
   {
     std::lock_guard<std::mutex> guard(inbox->lock);

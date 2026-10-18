@@ -361,6 +361,83 @@ private slots:
     QCoreApplication::processEvents();
     QCOMPARE(numbers, 0); // clear() released the callback during the diagnostic.
   }
+  void callbackCanDestroyService_data() {
+    QTest::addColumn<QString>("mode");
+    for (const auto mode : {"alarm", "numeric", "text", "disconnect", "monitor failure",
+                            "numeric diagnostic", "write rejection", "write timeout",
+                            "write conversion", "overflow diagnostic", "overflow read",
+                            "creation diagnostic", "connection deadline"})
+      QTest::newRow(mode) << QString(mode);
+  }
+  void callbackCanDestroyService() {
+    QFETCH(QString, mode);
+    // Replacing a configuration can release the adapter from a notification.
+    // Both the recipient loop and the inbox batch must stop using it then.
+    auto pv = std::make_unique<PvAccess>();
+    int calls = 0, first = 0, second = 0;
+    auto destroy = [&] { ++calls; pv.reset(); };
+    auto release = [&](Event) { ++calls; pv.reset(); };
+    std::shared_ptr<TestMonitor> monitor;
+    qint64 now = 0;
+    if (mode == "creation diagnostic") {
+      provider->refuse = "alarm";
+      pv->error = [&](const QString&) { destroy(); };
+      pv->monitor("pva://alarm", release);
+    } else if (mode.startsWith("write")) {
+      pv->error = [&](const QString&) { destroy(); };
+      pv->writeTimeoutMs = 1;
+      pv->prepare("pva://output");
+      auto writer = provider->channels.back()->writer;
+      writer->ready(mode == "write conversion" ? pvd::getFieldCreate()->createStructure()
+                                                : scalarType());
+      QTRY_VERIFY(pv->canWrite("pva://output"));
+      QCoreApplication::processEvents(); // Deliver the queued put setup.
+      pv->put("pva://output", 1);
+      if (mode == "write rejection") writer->reject();
+    } else if (mode.startsWith("overflow")) {
+      if (mode == "overflow diagnostic")
+        pv->error = [&](const QString&) { destroy(); };
+      else
+        pv->readStrings({"pva://pending"}, [&](QHash<QString, QString>) { destroy(); }, 60000);
+      pv->monitor("pva://alarm", [](Event) {});
+      monitor = provider->channels.back()->monitor;
+      for (size_t i = 0; i <= PvAccess::MaximumPendingUpdates; ++i) monitor->post(double(i));
+    } else if (mode == "numeric" || mode == "numeric diagnostic") {
+      if (mode == "numeric diagnostic") pv->error = [&](const QString&) { destroy(); };
+      pv->number("pva://input", [&](double) { destroy(); });
+      monitor = provider->channels.back()->monitor;
+      if (mode == "numeric") monitor->post(1);
+      else monitor->postText("not a number");
+    } else if (mode == "text") {
+      pv->text("pva://text", [&](QString) { destroy(); });
+      monitor = provider->channels.back()->monitor;
+      monitor->postText("text");
+    } else {
+      if (mode == "connection deadline") {
+        provider->connectOnCreate = false;
+        pv->monotonicNow = [&] { return now; };
+      }
+      pv->monitor("pva://alarm", release, &first);
+      pv->monitor("pva://alarm", release, &second);
+      auto channel = provider->channels.back();
+      monitor = channel->monitor;
+      if (mode == "connection deadline") now = 2000;
+      else if (mode == "disconnect") channel->state(pva::Channel::DISCONNECTED);
+      else if (mode == "monitor failure") monitor->fail();
+      else {
+        monitor->post(1);
+        monitor->post(2); // Work queued behind the destructive callback.
+      }
+    }
+    QTRY_VERIFY(!pv);
+    QCOMPARE(calls, 1);
+    if (monitor) {
+      QVERIFY(monitor->destroyed);
+      monitor->post(3); // A server may finish posting after destroy().
+    }
+    QCoreApplication::processEvents();
+    QCOMPARE(calls, 1);
+  }
   void changedAlarmMessageNeedsAcknowledgement() {
     PvAccess pv({true});
     Event last;
