@@ -132,9 +132,16 @@ public:
           fail("INCLUDE requires parent and filename");
         Node* parent = findParent(w[1]);
         const QString path = QFileInfo(QDir(base).filePath(w[2])).absoluteFilePath();
-        const QString canonical = QFileInfo(path).canonicalFilePath();
+        const QFileInfo target(path);
+        const QString canonical = target.canonicalFilePath();
         if (stack.contains(canonical))
           fail("Include cycle: " + path);
+        // Check before opening: reading a device such as /dev/zero never ends,
+        // and opening a FIFO waits for a writer, at startup and on reload. A
+        // symbolic link to a regular file is accepted; a missing file is an
+        // open error below. The top-level path may still be a pipe (qtalh <(...)).
+        if (target.exists() && !target.isFile())
+          fail("Include is not a regular file: " + path);
         QFile f(path);
         if (!f.open(QIODevice::ReadOnly))
           fail("Cannot open include: " + path);

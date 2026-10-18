@@ -15,7 +15,15 @@
 #include <cstring>
 #include <limits>
 #ifndef Q_OS_WIN
+#include <cerrno>
+#include <chrono>
+#include <fcntl.h>
+#include <future>
 #include <sys/msg.h>
+#include <sys/resource.h>
+#include <sys/stat.h>
+#include <thread>
+#include <unistd.h>
 #endif
 #if defined(Q_OS_LINUX) && !defined(_FORTIFY_SOURCE)
 #define QTALH_SHORT_READ 1
@@ -2302,6 +2310,114 @@ $GUIDANCE https://example.invalid/guide
     f.close();
     QVERIFY_THROWS_EXCEPTION(ParseError,
                              parseConfig("GROUP NULL root\nINCLUDE root child", temp.path()));
+  }
+  // INCLUDE accepts regular files and symbolic links to them. Reading a device
+  // such as /dev/zero never ends and opening a FIFO waits for a writer, so
+  // other file types are rejected before they are opened.
+  void includeTargetTypes_data() {
+    QTest::addColumn<QString>("target");
+    QTest::addColumn<bool>("accepted");
+    QTest::newRow("regular file") << "child" << true;
+    QTest::newRow("link to regular file") << "link" << true;
+    QTest::newRow("directory") << "directory" << false;
+    QTest::newRow("fifo") << "fifo" << false;
+    QTest::newRow("/dev/zero") << "/dev/zero" << false;
+  }
+  void includeTargetTypes() {
+#ifdef Q_OS_WIN
+    QSKIP("Uses POSIX FIFOs and /dev/zero");
+#else
+    QFETCH(QString, target); QFETCH(bool, accepted);
+    QTemporaryDir dir;
+    QFile child(dir.filePath("child"));
+    QVERIFY(child.open(QIODevice::WriteOnly));
+    child.write("GROUP NULL child\nCHANNEL child pv\n");
+    child.close();
+    QVERIFY(QFile::link(child.fileName(), dir.filePath("link")));
+    QVERIFY(QDir(dir.path()).mkdir("directory"));
+    const auto fifo = QFile::encodeName(dir.filePath("fifo"));
+    QCOMPARE(::mkfifo(fifo.constData(), 0600), 0);
+    const QString include = "INCLUDE root " + target;
+    const QString text = "GROUP NULL root\n" + include + "\nCHANNEL root after\n";
+    // A regression must not hang or exhaust memory. Parse on a worker with a
+    // deadline, and cap the address space so endless reads fail with bad_alloc.
+    auto parse = [&] {
+      try {
+        return QString("accepted %1 channels").arg(parseConfig(text, dir.path()).channels().size());
+      } catch (const ParseError& e) {
+        return QString::fromStdString(e.what());
+      } catch (const std::bad_alloc&) {
+        return QString("std::bad_alloc");
+      }
+    };
+    struct rlimit original{};
+    QCOMPARE(getrlimit(RLIMIT_AS, &original), 0);
+    auto restore = qScopeGuard([&] { setrlimit(RLIMIT_AS, &original); });
+#ifdef Q_OS_LINUX
+    QFile statm("/proc/self/statm");
+    QVERIFY(statm.open(QIODevice::ReadOnly));
+    const auto mapped = statm.readAll().split(' ').value(0).toULongLong() * sysconf(_SC_PAGESIZE);
+    QVERIFY(mapped > 0);
+    struct rlimit capped = original;
+    capped.rlim_cur = std::min<rlim_t>(original.rlim_cur, mapped + (rlim_t(1) << 30));
+    QCOMPARE(setrlimit(RLIMIT_AS, &capped), 0);
+#endif
+    auto result = std::async(std::launch::async, parse);
+    const bool finished = result.wait_for(std::chrono::seconds(10)) == std::future_status::ready;
+    if (!finished) {
+      // Release a reader blocked in open(2) so the worker can return.
+      const int writer = ::open(fifo.constData(), O_WRONLY | O_NONBLOCK);
+      if (writer >= 0) ::close(writer);
+    }
+    const auto outcome = result.get();
+    restore.dismiss();
+    QCOMPARE(setrlimit(RLIMIT_AS, &original), 0);
+    QVERIFY2(finished, "INCLUDE blocked");
+    const auto path = target.startsWith('/') ? target : dir.filePath(target);
+    QCOMPARE(outcome, accepted ? QString("accepted 2 channels")
+                               : "Line 2: Include is not a regular file: " + path + " [" + include + "]");
+#endif
+  }
+  // Only INCLUDE targets must be regular files: the top-level configuration
+  // may still be a pipe, as with process substitution (qtalh <(generator)).
+  void fifoTopLevelConfiguration() {
+#ifdef Q_OS_WIN
+    QSKIP("Uses a POSIX FIFO");
+#else
+    QTemporaryDir dir;
+    QFile child(dir.filePath("child"));
+    QVERIFY(child.open(QIODevice::WriteOnly));
+    child.write("GROUP NULL child\nCHANNEL child pv\n");
+    child.close();
+    const auto fifo = QFile::encodeName(dir.filePath("generated"));
+    QCOMPARE(::mkfifo(fifo.constData(), 0600), 0);
+    const QByteArray text = "GROUP NULL root\nINCLUDE root child\nCHANNEL root after\n";
+    // Write once the parser has opened the FIFO for reading. A nonblocking
+    // open fails with ENXIO until then; give up rather than block forever.
+    auto writer = std::async(std::launch::async, [&] {
+      for (int attempt = 0; attempt < 2000; ++attempt) {
+        const int fd = ::open(fifo.constData(), O_WRONLY | O_NONBLOCK);
+        if (fd >= 0) {
+          const bool written = ::write(fd, text.constData(), size_t(text.size())) == text.size();
+          ::close(fd);
+          return written;
+        }
+        if (errno != ENXIO) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      }
+      return false;
+    });
+    QString error;
+    Document d;
+    try {
+      d = loadConfig(dir.filePath("generated"), dir.path());
+    } catch (const ParseError& e) {
+      error = e.what();
+    }
+    QVERIFY(writer.get());
+    QCOMPARE(error, QString());
+    QCOMPARE(d.channels().size(), 2);
+#endif
   }
   void readErrorsRejectConfiguration() {
 #ifndef Q_OS_LINUX

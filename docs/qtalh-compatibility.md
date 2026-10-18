@@ -10,7 +10,7 @@ in `alh/`; all Qt runtime changes are under `qtalh/`.
 
 | In-scope feature | Source / Qt implementation | Evidence |
 | --- | --- | --- |
-| GROUP, CHANNEL, INCLUDE, five mask bits | alConfig.c / core/config.cc, model.cc | Sample and directive round trips, recursive include and malformed-file tests |
+| GROUP, CHANNEL, INCLUDE, five mask bits | alConfig.c / core/config.cc, model.cc | Sample and directive round trips, recursive include, include file-type and malformed-file tests |
 | BEEPSEVERITY, BEEPSEVR | beepSevr.c / core/engine.cc | Directive, ancestor threshold and save tests |
 | GUIDANCE inline/block, ALIAS, COMMAND | alConfig.c, guidance.c, process.c / core/config.cc, ui/window.cc | Parser round trips; guidance dialog smoke test |
 | HEARTBEATPV | heartbeat.c / core/engine.cc | Fake-clock and isolated IOC output tests |
@@ -165,7 +165,14 @@ explicit directory, the `loadConfig` library API uses the top-level file's direc
 ALH does not check `ferror()`, so a read error could leave a shorter valid
 configuration. QtALH rejects a read error in the configuration or any include;
 `--validate` fails and GUI open/insert and broadcast reload keep the running
-configuration.
+configuration. INCLUDE targets must be regular files (or symbolic links to
+them). ALH opens whatever the name refers to: a FIFO blocks startup or reload
+until a writer opens it, and a device such as `/dev/zero` is read without end.
+QtALH rejects a device, FIFO, socket, or directory with
+`Include is not a regular file` before opening it, so an INCLUDE of a pipe
+such as `/dev/stdin` no longer works. Directories were already rejected, as
+`Cannot open include`.
+The top-level configuration may still be a pipe (`qtalh <(generator)`).
 
 Startup ACKT writes also apply to cancelled channels through connections without
 alarm subscriptions. A completed startup setting is tracked per PV and is not
@@ -262,6 +269,7 @@ Examples of lines that ALH tolerates but QtALH rejects:
 | Severity with a suffix, such as `$BEEPSEVR MAJOR_ALARM` or `UP_MAJOR_ALARM` | Prefix match (`MAJOR`) | `Unknown severity` |
 | `$SEVRCOMMAND` trigger without `UP_`/`DOWN_`, or with an unknown severity | Usually runs as `ANY` (downward if the trigger starts with `D`) | Trigger or severity error |
 | `$STATCOMMAND` with an unknown status | Stored; never runs | `Unknown status command trigger` |
+| `INCLUDE` naming a FIFO or a device | A FIFO blocks until a writer opens it; a device such as `/dev/zero` never finishes | `Include is not a regular file` |
 
 ALH applies directives that follow a skipped declaration to an earlier group or
 channel, so review them when correcting the declaration. Before migrating, run

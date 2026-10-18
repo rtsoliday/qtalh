@@ -111,6 +111,7 @@ private slots:
     QVERIFY(browser->toPlainText().contains("Without -T or -L, startup empties an existing alarm file"));
     // A subsection must not truncate the configuration topic's INCLUDE and directive text.
     QVERIFY(browser->toPlainText().contains("Include cycles and excessive nesting are errors"));
+    QVERIFY(browser->toPlainText().contains("Include is not a regular file before it is opened"));
     // Runtime Overrides restores and mask changes can write to the IOC in global active mode.
     QVERIFY(browser->toPlainText().contains("Auto ack of transient alarms on enable"));
     QVERIFY(browser->toPlainText().contains("mask changes also write to the IOC"));
