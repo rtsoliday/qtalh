@@ -6,11 +6,13 @@
 #include "dialogs.h"
 #include "window.h"
 #include <QtWidgets>
+#include <algorithm>
 #include <cmath>
 namespace alh {
 namespace {
 constexpr int SortRole = Qt::UserRole + 1;
 constexpr int FilterRole = Qt::UserRole + 2;
+constexpr int AckActionRole = Qt::UserRole + 3;
 QString letter(int severity) {
   static const QString letters[] = {QString(), "Y", "R", "V", "E"};
   return letters[qBound(0, severity, 4)];
@@ -641,8 +643,9 @@ void Window::showOverrides() {
   dialog->setObjectName("runtimeOverridesDialog");
   dialog->setWindowTitle("Runtime Overrides: " + doc.root->label());
   auto layout = dialogColumn(dialog);
-  auto hint = new QLabel("Settings changed in this runtime and still in effect. Restore returns the "
-                         "selected items to the configuration.");
+  auto hint = new QLabel("Settings changed in this runtime and failed ACKPV actions. Restore returns "
+      "settings to the configuration. Retry ACKPV submits one failed action per selected row; "
+      "it never repeats ACKS or retries automatically.");
   hint->setWordWrap(true);
   if (!legacyAppearance()) hint->setForegroundRole(QPalette::PlaceholderText);
   layout->addWidget(hint);
@@ -665,8 +668,11 @@ void Window::showOverrides() {
   auto actions = dialogRow(layout);
   auto restore = new QPushButton("Restore Selected");
   restore->setObjectName("restoreOverrides");
+  auto retry = new QPushButton("Retry ACKPV");
+  retry->setObjectName("retryAckValue");
   auto showButton = new QPushButton("Show in Tree");
   actions->addWidget(restore);
+  actions->addWidget(retry);
   actions->addWidget(showButton);
   actions->addStretch();
   dialogActions(layout, dialog, QDialogButtonBox::Close,
@@ -680,7 +686,10 @@ void Window::showOverrides() {
   };
   auto updateButtons = [=] {
     const auto items = selected();
-    restore->setEnabled(!items.isEmpty() && !options.engine.passive);
+    const bool hasAction = std::any_of(items.cbegin(), items.cend(),
+        [](const QPair<Node*, int>& item) { return item.second == 6; });
+    restore->setEnabled(!items.isEmpty() && !hasAction && !engine->options.passive);
+    retry->setEnabled(hasAction && engine->options.global && !engine->options.passive);
     showButton->setEnabled(items.size() == 1);
   };
   connect(table, &QTableWidget::itemSelectionChanged, dialog, updateButtons);
@@ -699,6 +708,14 @@ void Window::showOverrides() {
         break;
       }
     }
+    refresh();
+  });
+  connect(retry, &QPushButton::clicked, dialog, [=] {
+    QVector<quint64> ids;
+    for (const auto& index : table->selectionModel()->selectedRows())
+      if (auto item = table->item(index.row(), 0))
+        if (item->data(SortRole).toInt() == 6) ids << item->data(AckActionRole).toULongLong();
+    for (auto id : ids) engine->retryAckValue(id);
     refresh();
   });
   connect(showButton, &QPushButton::clicked, dialog, [=] {
@@ -787,7 +804,7 @@ void Window::refreshTools() {
   }
   if (overridesDialog) {
     auto table = overridesDialog->findChild<QTableWidget*>("runtimeOverridesTable");
-    struct Item { Node* node; int kind; QString what, current, configured; };
+    struct Item { Node* node; int kind; QString what, current, configured; quint64 action = 0; };
     QVector<Item> items;
     if (doc.beepSeverity != configuredBeepSeverity)
       items.push_back({doc.root.get(), 5, "ALH beep severity", severityName(doc.beepSeverity),
@@ -806,9 +823,17 @@ void Window::refreshTools() {
         items.push_back({n, 4, "Shelved", "Until " + localTime(s.shelf.until) + " by " + s.shelf.username,
                          "Not shelved"});
     }
+    quint64 pendingCount = 0;
+    for (const auto& pending : engine->pendingAckValues()) {
+      items.push_back({pending.channel, 6, "ACKPV action pending",
+          QString("%1 pending: %2 = %3").arg(pending.count).arg(pending.pv).arg(pending.value),
+          "Explicit retry only; ACKS is not repeated", pending.id});
+      pendingCount += pending.count;
+    }
     QStringList signature;
     for (const auto& item : items)
-      signature << QString::number(reinterpret_cast<quintptr>(item.node)) + item.what + item.current;
+      signature << QString::number(reinterpret_cast<quintptr>(item.node)) + item.what + item.current +
+          ':' + QString::number(item.action);
     if (table && table->property("signature").toStringList() != signature) {
       table->setProperty("signature", signature);
       QSet<QString> keep;
@@ -830,6 +855,7 @@ void Window::refreshTools() {
           }
           table->item(row, 0)->setData(Qt::UserRole, nodeValue(item.node));
           table->item(row, 0)->setData(SortRole, item.kind);
+          table->item(row, 0)->setData(AckActionRole, QVariant::fromValue(item.action));
           if (keep.contains(QString::number(reinterpret_cast<quintptr>(item.node)) + ':' + QString::number(item.kind)))
             table->selectionModel()->select(table->model()->index(row, 0),
                                             QItemSelectionModel::Select | QItemSelectionModel::Rows);
@@ -839,7 +865,10 @@ void Window::refreshTools() {
     }
     if (auto status = overridesDialog->findChild<QLabel*>("runtimeOverridesStatus"))
       status->setText(items.isEmpty() ? QString("No runtime overrides: everything matches the configuration.")
-                                      : QString("%1 override%2.").arg(items.size()).arg(items.size() == 1 ? "" : "s"));
+          : pendingCount ? QString("%1 runtime item%2; %3 ACKPV action%4 awaiting explicit retry.")
+              .arg(items.size()).arg(items.size() == 1 ? "" : "s")
+              .arg(pendingCount).arg(pendingCount == 1 ? "" : "s")
+          : QString("%1 override%2.").arg(items.size()).arg(items.size() == 1 ? "" : "s"));
   }
   if (summaryDialog) {
     const auto facility = engine->presentation(doc.root.get());

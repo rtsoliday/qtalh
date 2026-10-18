@@ -5294,6 +5294,60 @@ private slots:
     QCOMPARE(engine.state(channels[2]).shelf.until, qint64(0));
     QVERIFY(dialog->findChild<QLabel*>("runtimeOverridesStatus")->text().startsWith("No runtime overrides"));
   }
+  void runtimeOverridesRetriesOnlyFailedAckValue() {
+    // SuiteEnvironment and TestCaRepeater isolate this IOC on loopback. All
+    // records/files belong to this test. A local permit gates submission of
+    // the action while ACKS remains writable, producing a known rejection.
+    QTemporaryDir dir;
+    const auto prefix = "qtalh_ui_ackpv_" + QString::number(QCoreApplication::applicationPid()) + ":";
+    QFile database(dir.filePath("alarm.db")); QVERIFY(database.open(QIODevice::WriteOnly));
+    database.write(("record(ai,\"" + prefix + "alarm\") { field(VAL,\"0\") "
+        "field(HIHI,\"10\") field(HHSV,\"MAJOR\") }\n"
+        "record(ao,\"" + prefix + "action\") { field(VAL,\"-1\") field(ASG,\"dynamic\") }\n"
+        "record(ao,\"" + prefix + "permit\") { field(VAL,\"0\") }\n").toLatin1()); database.close();
+    QFile access(dir.filePath("action.acf")); QVERIFY(access.open(QIODevice::WriteOnly));
+    access.write(("ASG(DEFAULT) { RULE(1,READ) RULE(1,WRITE) }\nASG(dynamic) { INPA(\"" +
+        prefix + "permit\") RULE(1,READ) RULE(1,WRITE) { CALC(\"A=1\") } }\n").toLatin1()); access.close();
+    struct Ioc {
+      QProcess process;
+      ~Ioc() { process.kill(); process.waitForFinished(3000); }
+    } ioc;
+    ioc.process.start(QString(EPICS_TEST_BIN) + "/softIoc", {"-d", database.fileName(), "-a", access.fileName()});
+    QVERIFY(ioc.process.waitForStarted());
+    auto o = options(false); o.engine.global = true;
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root " + prefix + "alarm\n$ACKPV " + prefix + "action 7\n");
+    auto w = std::make_unique<Window>(d, o, true); w->show();
+    auto& engine = w->alarmEngine(); auto n = w->document().channels()[0];
+    ChannelAccess driver; driver.prepare(prefix + "alarm"); driver.prepare(prefix + "action");
+    driver.prepare(prefix + "permit");
+    double actionValue = -999;
+    driver.number(prefix + "action", [&](double value) { actionValue = value; });
+    QTRY_VERIFY_WITH_TIMEOUT(driver.canWrite(prefix + "alarm"), 10000);
+    QTRY_VERIFY(driver.canWrite(prefix + "permit"));
+    QTRY_COMPARE(actionValue, -1.0); QVERIFY(!driver.canWrite(prefix + "action"));
+    QTRY_COMPARE(engine.state(n).severity, 0);
+    QVERIFY(driver.put(prefix + "alarm", 20)); QTRY_COMPARE(engine.state(n).unack, 2);
+    engine.acknowledge(n); QTRY_COMPARE(engine.state(n).unack, 0);
+    QCOMPARE(engine.pendingAckValues().size(), 1);
+    w->findChild<QAction*>("Runtime Overrides...")->trigger();
+    auto dialog = w->findChild<QDialog*>("runtimeOverridesDialog"); QVERIFY(dialog);
+    auto table = dialog->findChild<QTableWidget*>("runtimeOverridesTable");
+    auto retry = dialog->findChild<QPushButton*>("retryAckValue"); QVERIFY(retry);
+    QTRY_COMPARE(table->rowCount(), 1); QVERIFY(!retry->isEnabled());
+    table->selectRow(0); QVERIFY(retry->isEnabled());
+    QVERIFY(!dialog->findChild<QPushButton*>("restoreOverrides")->isEnabled());
+    QCOMPARE(table->item(0, 1)->text(), QString("ACKPV action pending"));
+    QTest::keyClick(table, Qt::Key_Return);
+    QCOMPARE(engine.pendingAckValues()[0].count, quint64(1));
+    QVERIFY(driver.put(prefix + "permit", 1));
+    QTRY_VERIFY_WITH_TIMEOUT(driver.canWrite(prefix + "action"), 10000);
+    QTRY_COMPARE(actionValue, -1.0);
+    QTest::qWait(300); QCOMPARE(actionValue, -1.0); // Recovery never submits an automatic replay.
+    QCOMPARE(engine.pendingAckValues()[0].count, quint64(1));
+    retry->click(); QTRY_COMPARE(actionValue, 7.0);
+    QTRY_COMPARE(table->rowCount(), 0); QVERIFY(engine.pendingAckValues().isEmpty());
+    QCOMPARE(engine.state(n).unack, 0);
+  }
   void toolDialogsIgnoreEnter() {
     // Enter in a filter or list never presses an operator action as an implicit default button.
     auto w = std::make_unique<Window>(sample(), options(false), false);

@@ -243,6 +243,8 @@ every appearance:
   a mask, NoAck timer or Force PV acts like the matching Action command, so in
   global active mode it can write ACKT, ACKS, `$ACKPV` and `$SEVRPV`. Restoring
   a mask set by an active Force PV overrides that Force PV.
+  Failed `$ACKPV` submissions also appear here. **Retry ACKPV** submits one
+  failed action per selected row without repeating ACKS; retries are explicit.
 - **Alarm Summary Panel…**: a tile per top-level group with alarm counts.
 
 **File → Import/Export Phoebus XML…** and `--to-phoebus`/`--from-phoebus`
@@ -447,6 +449,17 @@ because the record's `DISP` field is 1 or access security changed, ACKPV is stil
 written and the acknowledgement is still logged, as in ALH. The alarm stays
 unacknowledged, and the rejection is reported only on standard error. ACKPV
 therefore does not confirm that the IOC accepted the acknowledgement.
+
+If ACKS is submitted but the separate `$ACKPV` submission fails, QtALH reports
+partial submission and lists the failed action in **View → Runtime Overrides…**.
+After correcting the connection or write-access problem, select its row and
+click **Retry ACKPV**. This submits only the captured ACKPV value, never ACKS.
+Repeated failures for the same channel share a row with a pending count; each
+click retries one action. Recovery alone never retries an ACKPV. This applies
+to operator and automatic acknowledgements. Pending actions are runtime only:
+Cancel or configuration reload discards them, and passive mode prevents retry.
+Only submissions that were refused can be retried; a submitted asynchronous
+write with an uncertain IOC outcome is not offered for replay.
 
 Severity and heartbeat outputs use the legacy short-integer CA type; ACKPV uses
 the legacy unsigned-enum type. This also preserves integer text on string PVs.

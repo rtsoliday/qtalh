@@ -91,6 +91,17 @@ In local mode a restore writes nothing to the IOC; in passive mode (`-S`)
 **Restore Selected** is unavailable. Restoring beep severities and shelves never
 writes to the IOC.
 
+Failed `$ACKPV` submissions appear as **ACKPV action pending**, with the captured
+PV, value and number of pending actions. QtALH reports when ACKS was submitted
+but the separate ACKPV action was not. Correct the connection or write-access
+problem, select the row and click **Retry ACKPV**. Each click submits one
+pending ACKPV action per selected row; it never repeats ACKS. Restore Selected
+does not act on pending ACKPV rows. Recovery alone never retries them.
+Only a rejected submission is retryable; accepted asynchronous writes with an
+uncertain IOC outcome are not replayed. Pending actions are runtime only and
+are discarded by channel Cancel or configuration reload. Retry requires global
+active mode and is unavailable in passive mode.
+
 ## Alarm Summary Panel
 
 **View → Alarm Summary Panel…** shows one tile per top-level group (or the

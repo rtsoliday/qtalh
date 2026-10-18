@@ -658,6 +658,83 @@ private slots:
       QCOMPARE(accepted, QStringList({"failed"})); QCOMPARE(e.state(failed).unack, 2);
     }
   }
+  void partialAcknowledgementRetriesOnlyRejectedAckValue() {
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n$ACKPV ack-action 7\n");
+    FakePv pv; Engine e(d, {true}, &pv); auto n = d.channels()[0];
+    QStringList errors, operations;
+    e.error = [&](const QString& text) { errors << text; };
+    e.operation = [&](Node*, const QString& text, OperationKind) { operations << text; };
+    e.event(n, {3, 2, 2, 1, "alarm"}); pv.unwritable.insert("ack-action");
+    e.acknowledge(n);
+    QCOMPARE(pv.writes.size(), 2); QCOMPARE(pv.writes[0].kind, WriteKind::Acknowledge);
+    QCOMPARE(pv.writes[1].kind, WriteKind::AckValue);
+    QCOMPARE(e.pendingAckValues().size(), 1); QCOMPARE(e.pendingAckValues()[0].count, quint64(1));
+    const auto id = e.pendingAckValues()[0].id;
+    QVERIFY(errors.last().contains("ACKS request submitted"));
+    QVERIFY(errors.last().contains("ACKPV ack-action was not submitted"));
+    e.event(n, {3, 2, 0, 1, "alarm"}); pv.writes.clear();
+    e.acknowledge(n); e.tick(); // An ordinary acknowledge/tick cannot replay the failed action.
+    QVERIFY(pv.writes.isEmpty());
+    QVERIFY(!e.retryAckValue(id)); QCOMPARE(e.pendingAckValues()[0].count, quint64(1));
+    QCOMPARE(pv.writes.size(), 1); QCOMPARE(pv.writes[0].kind, WriteKind::AckValue);
+    pv.unwritable.clear(); pv.writes.clear(); e.tick(); QVERIFY(pv.writes.isEmpty());
+    QVERIFY(e.retryAckValue(id)); QCOMPARE(pv.writes.size(), 1);
+    QCOMPARE(pv.writes[0].name, QString("ack-action")); QCOMPARE(pv.writes[0].value, 7.0);
+    QCOMPARE(pv.writes[0].kind, WriteKind::AckValue); QVERIFY(e.pendingAckValues().isEmpty());
+    QVERIFY(!e.retryAckValue(id)); QCOMPARE(pv.writes.size(), 1);
+    QVERIFY(operations.last().contains("ACKS was not repeated"));
+  }
+  void pendingAckValueActionsAreBoundedAndRuntimeOnly() {
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n$ACKPV ack-action 7\n");
+    FakePv pv; Engine e(d, {true}, &pv); auto n = d.channels()[0];
+    pv.unwritable.insert("ack-action");
+    for (int i = 0; i < 100; ++i) {
+      e.event(n, {3, 2, 2, 1, "alarm"}); e.acknowledge(n);
+      e.event(n, {3, 2, 0, 1, "alarm"});
+    }
+    QCOMPARE(e.pendingAckValues().size(), 1); QCOMPARE(e.pendingAckValues()[0].count, quint64(100));
+    const auto id = e.pendingAckValues()[0].id;
+    pv.unwritable.clear();
+    e.event(n, {3, 2, 2, 1, "another alarm"}); e.acknowledge(n);
+    QCOMPARE(e.pendingAckValues()[0].count, quint64(100)); // A new successful action does not replay an older failure.
+    e.event(n, {3, 2, 0, 1, "another alarm"});
+    pv.writes.clear(); e.options.passive = true;
+    QVERIFY(!e.retryAckValue(id)); QVERIFY(pv.writes.isEmpty());
+    QCOMPARE(e.pendingAckValues()[0].count, quint64(100));
+    e.options.passive = false;
+    QVERIFY(e.retryAckValue(id)); QCOMPARE(e.pendingAckValues()[0].count, quint64(99));
+    QCOMPARE(pv.writes.size(), 1); QCOMPARE(pv.writes[0].kind, WriteKind::AckValue);
+    e.setMask(n, Mask::parse("C")); QVERIFY(e.pendingAckValues().isEmpty());
+    const auto afterCancel = pv.writes.size(); QVERIFY(!e.retryAckValue(id));
+    QCOMPARE(pv.writes.size(), afterCancel);
+    e.resetMask(n); pv.unwritable.insert("ack-action");
+    e.event(n, {3, 2, 2, 1, "alarm"}); e.acknowledge(n);
+    const auto next = e.pendingAckValues()[0].id; QVERIFY(next != id);
+    const auto saved = writeConfig(d); QVERIFY(!saved.contains("pending"));
+    auto replacement = parseConfig(saved); Engine reload(replacement, {true}, &pv);
+    QVERIFY(reload.pendingAckValues().isEmpty()); QVERIFY(!reload.retryAckValue(next));
+    e.stop(); const auto afterStop = pv.writes.size();
+    QVERIFY(!e.retryAckValue(next)); QCOMPARE(pv.writes.size(), afterStop);
+  }
+  void automaticAcknowledgementRetainsRejectedAckValue() {
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv D\n$ACKPV ack-action 7\n");
+    FakePv pv; Engine e(d, {true}, &pv); auto n = d.channels()[0];
+    e.event(n, {0, 0, 2, 1, "normal"}); pv.unwritable.insert("ack-action");
+    e.setMask(n, Mask::parse("-"));
+    QCOMPARE(e.pendingAckValues().size(), 1); QCOMPARE(e.state(n).unack, 0);
+    QCOMPARE(pv.writes.size(), 2); QCOMPARE(pv.writes[0].kind, WriteKind::Acknowledge);
+    pv.unwritable.clear(); pv.writes.clear(); e.tick(); QVERIFY(pv.writes.isEmpty());
+    QVERIFY(e.retryAckValue(e.pendingAckValues()[0].id));
+    QCOMPARE(pv.writes.size(), 1); QCOMPARE(pv.writes[0].kind, WriteKind::AckValue);
+  }
+  void pendingAckValueCannotFollowEditedConfiguration() {
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n$ACKPV ack-action 7\n");
+    FakePv pv; Engine e(d, {true}, &pv); auto n = d.channels()[0];
+    e.event(n, {3, 2, 2, 1, "alarm"}); pv.unwritable.insert("ack-action"); e.acknowledge(n);
+    const auto id = e.pendingAckValues()[0].id;
+    n->setOption("ACKPV", "replacement 8"); pv.writes.clear(); pv.unwritable.clear();
+    QVERIFY(!e.retryAckValue(id)); QVERIFY(pv.writes.isEmpty()); QVERIFY(e.pendingAckValues().isEmpty());
+  }
   void topLevelNullParentsMatchIncludes() {
     const QString body = "GROUP NULL branch\n$BEEPSEVR MAJOR\n$FORCEPV gate D 1 0\n"
         "CHANNEL branch direct\nGROUP NULL leaf\nCHANNEL leaf nested\n";

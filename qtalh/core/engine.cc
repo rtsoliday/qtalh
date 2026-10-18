@@ -303,6 +303,7 @@ void Engine::stop() {
   heartbeatDue = 0;
   heartbeatUnavailable = false;
   pendingForceAckT.clear();
+  pendingAckValueActions.clear();
   if (running && pv)
     pv->clear();
   forces.clear();
@@ -627,14 +628,7 @@ void Engine::acknowledge(Node* n) {
       requestedAcknowledgements.insert(c);
       recordAccepted();
       if (acknowledgement) acknowledgement(c);
-      auto a = fields(c->option("ACKPV"));
-      // Possible inherited ALH bug, deferred: ACKS may succeed while this
-      // separate ACKPV write fails. Once IOC confirmation clears ACKS, another
-      // Acknowledge cannot retry the missing action. Revisit partial-completion
-      // reporting and an independent, explicit ACKPV retry at a later date;
-      // automatically replaying arbitrary ACKPV actions needs separate policy.
-      if (a.size() == 2)
-        pv->put(a[0], a[1].toDouble(), WriteKind::AckValue);
+      submitAckValue(c);
     } else {
       // Shelved channels are skipped above; log only when something is acknowledged.
       recordAccepted();
@@ -645,6 +639,62 @@ void Engine::acknowledge(Node* n) {
     }
   };
   ack(n);
+}
+QVector<PendingAckValue> Engine::pendingAckValues() const {
+  QVector<PendingAckValue> result;
+  for (auto n : document.channels()) {
+    const auto found = pendingAckValueActions.constFind(n);
+    if (found != pendingAckValueActions.cend()) result << found->action;
+  }
+  return result;
+}
+void Engine::submitAckValue(Node* n) {
+  const auto directive = n->option("ACKPV");
+  const auto a = fields(directive);
+  if (a.size() != 2 || !pv || pv->put(a[0], a[1].toDouble(), WriteKind::AckValue)) return;
+  auto found = pendingAckValueActions.find(n);
+  if (found != pendingAckValueActions.end() &&
+      (found->directive != directive || found->channelName != n->name)) {
+    pendingAckValueActions.erase(found);
+    logOperation(n, "Discarded pending ACKPV action after configuration changed");
+  }
+  auto& pending = pendingAckValueActions[n];
+  if (!pending.action.count) {
+    pending.action = {++nextAckValueAction, 0, n, a[0], a[1].toDouble()};
+    pending.channelName = n->name;
+    pending.directive = directive;
+  }
+  ++pending.action.count;
+  const auto message = QString("Acknowledgement partially submitted: ACKS request submitted; "
+      "ACKPV %1 was not submitted. Use Runtime Overrides to explicitly retry the failed "
+      "ACKPV action; ACKS will not be repeated.").arg(a[0]);
+  logOperation(n, message);
+  if (error) error(n->name + ": " + message);
+}
+bool Engine::retryAckValue(quint64 id) {
+  auto found = std::find_if(pendingAckValueActions.begin(), pendingAckValueActions.end(),
+      [id](const AckValueAction& pending) { return pending.action.id == id; });
+  if (found == pendingAckValueActions.end()) return false;
+  const auto pending = *found;
+  auto n = pending.action.channel;
+  if (!states.contains(n) || n->name != pending.channelName ||
+      n->option("ACKPV") != pending.directive || states[n].mask[Cancel]) {
+    pendingAckValueActions.erase(found);
+    logOperation(n, "Discarded pending ACKPV action after cancellation or configuration change");
+    return false;
+  }
+  if (options.passive || !options.global || !pv) {
+    if (error) error("ACKPV retry requires global active mode.");
+    return false;
+  }
+  if (!pv->put(pending.action.pv, pending.action.value, WriteKind::AckValue)) {
+    logOperation(n, "ACKPV retry failed: request was not submitted; action remains pending");
+    if (error) error(n->name + ": ACKPV retry was not submitted; action remains pending.");
+    return false;
+  }
+  if (--found->action.count == 0) pendingAckValueActions.erase(found);
+  logOperation(n, "Explicit ACKPV retry submitted (ACKS was not repeated)");
+  return true;
 }
 void Engine::setMask(Node* n, Mask requested, bool automatic) {
   const bool failed = applyMask(n, requested, automatic, automatic ? n : nullptr);
@@ -687,6 +737,8 @@ bool Engine::applyMask(Node* n, Mask requested, bool automatic, Node* forceSourc
     s.mask[Log] = old.mask[Log];
     if (mask[Cancel] || mask[Disable] || mask[Ack]) requestedAcknowledgements.remove(c);
     if (mask[Cancel]) {
+      if (pendingAckValueActions.remove(c))
+        logOperation(c, "Discarded pending ACKPV action after channel cancellation");
       s.awaitingObservation = true;
       s.filterUntil = s.filterStarted = 0;
       s.edgeIndex = 0;
@@ -735,11 +787,7 @@ bool Engine::applyMask(Node* n, Mask requested, bool automatic, Node* forceSourc
           (!s.iocUnack || pv->put(c->name, s.iocUnack, WriteKind::Acknowledge))) {
         if (s.iocUnack) {
           if (acknowledgement) acknowledgement(c);
-          auto a = fields(c->option("ACKPV"));
-          // As with operator acknowledgement above, a failed ACKPV submission
-          // is currently not retained after ACKS succeeds (deferred ALH bug).
-          if (a.size() == 2)
-            pv->put(a[0], a[1].toDouble(), WriteKind::AckValue);
+          submitAckValue(c);
         }
         s.unack = s.iocUnack = 0;
         s.communicationUnack = false;

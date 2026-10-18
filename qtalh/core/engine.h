@@ -43,6 +43,14 @@ struct ShelfSnapshot {
   int localUnack = 0;
   bool unique = true;
 };
+// Only submissions rejected by PvService are retryable; accepted asynchronous
+// writes have an uncertain outcome and must never be replayed automatically.
+struct PendingAckValue {
+  quint64 id = 0, count = 0;
+  Node* channel = nullptr;
+  QString pv;
+  double value = 0;
+};
 struct State {
   int severity = 4, status = 0, unack = 0, beep = 0;
   // Keep IOC acknowledgement history separate from operator mask/latch changes.
@@ -131,6 +139,8 @@ public:
   void tickHeartbeat();
   int heartbeatDelay() const;
   void acknowledge(Node*);
+  QVector<PendingAckValue> pendingAckValues() const;
+  bool retryAckValue(quint64 id);
   Presentation presentation(Node*) const;
   static QString channelPath(const Node*);
   static QString nodeIdentity(const Node*);
@@ -166,6 +176,15 @@ private:
   struct Observer { std::weak_ptr<void> lifetime; std::function<void(const AlarmObservation&)> callback; };
   QVector<Observer> observers;
   QSet<Node*> requestedAcknowledgements;
+  struct AckValueAction {
+    PendingAckValue action;
+    QString channelName, directive;
+  };
+  // A configuration has one immutable ACKPV per channel. Aggregate repeated
+  // failures as a count, keeping memory bounded by the number of channels.
+  QHash<Node*, AckValueAction> pendingAckValueActions;
+  quint64 nextAckValueAction = 0;
+  void submitAckValue(Node*);
   // Metadata is shared by snapshots; live State and observation times are never cached.
   // Validate the ancestry on access because Document/Node are publicly mutable.
   struct SnapshotMetadata {

@@ -806,6 +806,15 @@ not confirmed by the IOC before these side effects. If the IOC rejects it (for e
 in ALH, and the rejection appears only on standard error. The alarm stays
 unacknowledged until the IOC monitor reports ACKS cleared.
 
+If ACKS is submitted but the separate ACKPV submission is rejected, QtALH now
+reports partial submission and keeps the failed ACKPV action in Runtime
+Overrides. Explicit **Retry ACKPV** submits only that captured PV/value, never
+ACKS. Repeated failures aggregate as a count per channel; each retry submits
+one action and decrements only after acceptance. There is no automatic replay
+on reconnection. Accepted asynchronous writes with an uncertain IOC outcome
+are never offered for retry. Cancel/reload discard these runtime actions, and
+passive mode prevents retry. This also covers automatic transient acknowledgement.
+
 Read-access loss, disconnection, and Cancel invalidate cached CA alarm events. Recovery
 waits for fresh monitored data, avoiding replay of stale alarms and their commands or
 severity outputs. Write-only access loss retains readable, current observations.
