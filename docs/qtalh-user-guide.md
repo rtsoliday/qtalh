@@ -68,6 +68,15 @@ If filtering removes it, the selection clears, selection dialogs close, and
 selection-dependent actions stay disabled until you select another visible row.
 This also applies when an alarm clears while a filter is active.
 
+**Action → NoAck for One Hour** (Ctrl+N) applies as soon as you choose it. ALH
+opens a Modify NoAck Mask dialog with a NoAck For One Hour toggle; QtALH has no
+such dialog and asks for no confirmation. The command starts the one-hour NoAck
+for the selected group or channel, or ends it when that selection's timer is
+running. The runtime starts with the facility selected, so Ctrl+N before you
+select another row removes the acknowledgement requirement from every channel.
+The mask summary then shows `H`; choose the command again, or restore the NoAck
+row in **View → Runtime Overrides…**, to end the timer early.
+
 Changing **Setup → Silence Time Interval** to a different duration ends any
 active timed silence, matching ALH. Enable the silence checkbox again to start
 that duration. Choosing the same interval leaves the countdown unchanged.
@@ -234,12 +243,14 @@ convert to and from the Phoebus alarm-server format. See the docs site pages
 
 QtALH starts with its modern appearance. It keeps ALH's two alarm panes, row
 layout, menus, keyboard shortcuts, alarm colors and letters, mask and count
-notation, and the actions of every dialog, with a cleaner presentation:
+notation, and the actions of every dialog it provides, with a cleaner presentation:
 flat severity chips, a tinted selection, a frameless status area, an
 expandable alarm legend, tabbed Properties, a state-showing Modify Mask
 Settings dialog, a tabular Current Alarm History, and a shared find bar in text
 viewers. The palette follows a dark desktop. Modeless dismiss buttons are
-labeled Close; Apply, Cancel, and Reset retain their behavior.
+labeled Close; Apply, Cancel, and Reset retain their behavior. Neither
+appearance has ALH's Modify NoAck Mask dialog; see **NoAck for One Hour** under
+Selection and alarm silence.
 
 Use `qtalh -style motif -mainwindow facility.alhConfig` (or `qtalh -c -style motif
 facility.alhConfig` for the editor) to retain the original Motif-influenced

@@ -193,6 +193,40 @@ private slots:
     QVERIFY(text.contains("This happens without -caputackt and can change an ACKT that other clients share."));
     help->close();
   }
+  void noAckShortcutTogglesWithoutDialogAsDocumented() {
+    // ALH's Ctrl+N opens a Modify NoAck Mask dialog. QtALH toggles the timer on
+    // the selection at once, and the selection starts at the facility root.
+    auto w = std::make_unique<Window>(sample(), options(false), false);
+    w->show(); w->activateWindow();
+    QVERIFY(QTest::qWaitForWindowActive(w.get()));
+    auto& engine = w->alarmEngine();
+    auto root = w->document().root.get();
+    auto dialogShown = [&] {
+      for (auto widget : QApplication::topLevelWidgets())
+        if (qobject_cast<QDialog*>(widget) && widget->isVisible()) return true;
+      return false;
+    };
+    QTest::keyClick(w.get(), Qt::Key_N, Qt::ControlModifier);
+    QVERIFY(engine.state(root).noAckUntil);
+    for (auto n : w->document().channels()) QVERIFY(engine.state(n).mask[Ack]);
+    QVERIFY(!dialogShown());
+    QTest::keyClick(w.get(), Qt::Key_N, Qt::ControlModifier);
+    QCOMPARE(engine.state(root).noAckUntil, qint64(0));
+    for (auto n : w->document().channels()) QVERIFY(!engine.state(n).mask[Ack]);
+    QVERIFY(!dialogShown());
+    // The guide must not promise ALH's dialog and must describe the toggle.
+    QWidget owner;
+    auto help = showHelp(&owner);
+    auto browser = help->findChild<QTextBrowser*>("helpBrowser");
+    QVERIFY(browser);
+    const auto text = browser->toPlainText().simplified();
+    QVERIFY(!text.contains("and the actions of every dialog, with"));
+    QVERIFY(text.contains("Neither appearance has ALH's Modify NoAck Mask dialog"));
+    QVERIFY(text.contains("QtALH has no such dialog and asks for no confirmation"));
+    QVERIFY(text.contains("Ctrl+N before you select another row removes the "
+                          "acknowledgement requirement from every channel"));
+    help->close();
+  }
   void helpSearchAndKeyboard() {
     QWidget owner;
     owner.show();

@@ -193,7 +193,7 @@ is an unset placeholder: the first subsequent real PV takes precedence.
 | Workflow | Qt implementation | Validation |
 | --- | --- | --- |
 | Compact runtime window, main tree/group panes, severity colors/letters, masks/counts | Window, AlarmModel, RowDelegate | Offscreen and real-display screenshots; alarm-cell click |
-| Acknowledge, guidance, related command, force PV, force mask, modify masks, beep severity, timed NoAck | Action menu and dialogs | Core action tests; dialog construction/lifecycle smoke tests |
+| Acknowledge, guidance, related command, force PV, force mask, modify masks, beep severity, timed NoAck | Action menu and dialogs; timed NoAck toggles the selection at once, without ALH's Modify NoAck Mask dialog | Core action tests; dialog construction/lifecycle smoke tests |
 | Expand one level/branch/all, collapse branch | View menu / tree view | Implemented; manual workflow comparison remains |
 | History, config file, alarm/opmod log windows and search | View menu / text viewers | History dialog smoke test; file/log service tests |
 | All/active/unack display filters | AlarmModel | Membership and filtered selection/expansion regressions |
@@ -209,7 +209,8 @@ is an unset placeholder: the first subsequent real PV takes precedence.
 
 Action shortcuts: Ctrl+A acknowledge, Ctrl+G guidance, Ctrl+P related process,
 Ctrl+V force PV, Ctrl+M force mask, Ctrl+S modify mask, Ctrl+B beep severity,
-Ctrl+N timed NoAck. View shortcuts: `+`, `*`, Ctrl+`*`, `-`. Editor supports
+Ctrl+N timed NoAck (applied at once, without ALH's dialog). View shortcuts:
+`+`, `*`, Ctrl+`*`, `-`. Editor supports
 Alt+Backspace undo, Ctrl+Y redo, Shift+Delete cut, Ctrl+Insert copy,
 Shift+Insert paste. File open uses Ctrl+O.
 
