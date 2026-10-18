@@ -1781,6 +1781,11 @@ void Window::open(bool insert) {
       result.filename = doc.filename;
       result.latin1 = doc.latin1;
       replace(std::move(result));
+    } else if (!options.editor) {
+      // ALH passes its area to setupConfig, which cancels the previous
+      // configuration's Channel Access and heartbeat before reusing the window.
+      replace(std::move(d), false);
+      logging->operation(nullptr, "Setup Config File : " + doc.filename);
     } else {
       auto o = options;
       o.config = path;

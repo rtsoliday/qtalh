@@ -55,6 +55,26 @@ public:
 protected:
   void systemBeep() override { ++bells; }
 };
+// Answers the next file chooser in either appearance with this path.
+static void selectFileLater(const QString& path) {
+  QTimer::singleShot(0, [path] {
+    auto dialog = qApp->activeModalWidget();
+    if (!dialog) return;
+    if (auto files = qobject_cast<QFileDialog*>(dialog)) {
+      files->selectFile(path);
+      QMetaObject::invokeMethod(files, "accept");
+    } else if (auto selection = dialog->findChild<QLineEdit*>("fileSelection")) {
+      selection->setText(path);
+      QMetaObject::invokeMethod(selection, "returnPressed");
+    }
+  });
+}
+static QSet<Window*> applicationWindows() {
+  QSet<Window*> found;
+  for (auto widget : QApplication::topLevelWidgets())
+    if (auto window = dynamic_cast<Window*>(widget)) found.insert(window);
+  return found;
+}
 #ifdef Q_OS_MACOS
 // AVFoundation needs Cocoa's event dispatcher for both playback and errors.
 static void nativeMediaCase(const QString& name) {
@@ -2395,6 +2415,39 @@ private slots:
     w.reset();
     QVERIFY(watch.seen);
     QVERIFY(!watch.attached);
+  }
+  void runtimeOpenReplacesConfiguration() {
+    // ALH's runtime File > Open reuses the window's area, so the previous
+    // configuration stops monitoring and writing outputs. The editor opens a new window.
+    QTemporaryDir dir;
+    QFile file(dir.filePath("second.alhConfig"));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("GROUP NULL second\nCHANNEL second test:second\n");
+    file.close();
+    for (bool editor : {false, true}) {
+      auto o = options(editor);
+      o.noLog = false; o.alarmFile = dir.filePath("alarm"); o.opmodFile = dir.filePath("ops");
+      auto w = std::make_unique<Window>(sample(), o, false);
+      w->showInitial();
+      const auto before = applicationWindows();
+      selectFileLater(file.fileName());
+      w->findChild<QAction*>("Open...")->trigger();
+      struct Added {
+        QSet<Window*> windows;
+        ~Added() { qDeleteAll(windows); }
+      } cleanup{applicationWindows() - before};
+      const auto& added = cleanup.windows;
+      const auto opened = added.isEmpty() ? w.get() : *added.begin();
+      QCOMPARE(opened->document().root->name, QString("second"));
+      QCOMPARE(opened->document().filename, QFileInfo(file.fileName()).absoluteFilePath());
+      QCOMPARE(added.size(), editor ? 1 : 0);
+      QCOMPARE(w->document().root->name, QString(editor ? "BOOSTER" : "second"));
+      if (editor) continue;
+      QCOMPARE(w->windowTitle(), QString("Alarm Handler: second"));
+      QFile audit(o.opmodFile); QVERIFY(audit.open(QIODevice::ReadOnly));
+      QVERIFY(audit.readAll().contains("Setup Config File : " +
+                                       QFileInfo(file.fileName()).absoluteFilePath().toUtf8()));
+    }
   }
   void initialGeometry_data() {
     QTest::addColumn<int>("mode"); QTest::addColumn<QString>("geometry");

@@ -110,6 +110,14 @@ configuration filename or its broadcast and master-lock identity, matching legac
 ALH. Reloads continue to read the original configuration. Editor Save As changes
 the document filename as usual.
 
+Runtime File > Open replaces the configuration in place, as ALH's
+`setupConfig`/`setupArea` does: Channel Access subscriptions and heartbeat
+output for the previous configuration stop, and later reloads read the opened
+file. As with ALH's lock file, logs and the master lock stay bound to the
+startup configuration. QtALH also keeps the `.MESS`/`.MESSLOCK` broadcast
+identity, where ALH rebinds it to the opened file without releasing the previous
+descriptors or polling timer.
+
 
 Channel startup severity commands use ALH's initial ERROR baseline: an initial
 MAJOR or NO_ALARM invokes matching DOWN commands, while an initial ERROR does

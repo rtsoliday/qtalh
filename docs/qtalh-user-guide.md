@@ -454,6 +454,11 @@ commands never run there. As in ALH, clicking **P** in the configuration tool
 runs the related-process command; hover over **P** to review imported or
 untrusted commands without running them.
 
+As in ALH, runtime **File → Open…** replaces the monitored configuration in the
+same window: the previous configuration's subscriptions and
+heartbeat/severity/acknowledgement outputs stop, and the operation log records
+`Setup Config File`. Logs, locks and broadcast files stay those of the startup
+configuration. Configuration tool **File → Open…** opens another editor window.
 Open/insert failures leave the current document intact. Save uses an atomic
 file replacement, expands includes, normalizes masks, orders channels before
 child groups, and discards comments and original formatting. Runtime Save As
