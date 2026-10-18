@@ -64,6 +64,9 @@ Additional 1.0.0 audit decisions and corrections:
   Known connection/access errors retain their more specific status.
 - Send Message rejects reserved reload/stop-logging control prefixes. Explicit
   controls and the legacy broadcast wire format remain supported.
+- With `-xml`, operation records escape `&`, `<`, `>` and `"` in facility
+  labels, names and messages, in the operation log and in database queue
+  records. ALH wrote this text unchanged; text-format logs are unchanged.
 
 Requirements: EPICS 7 Base with its pvAccess and pvData libraries, and Qt 5.15
 or newer or Qt 6 with Widgets, Network, PrintSupport and Multimedia.

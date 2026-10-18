@@ -933,8 +933,12 @@ XML, including the records sent to printer/database queues. Ordinary single-line
 records keep their existing format. XML alarm records also escape `&`, `<`, `>`
 and `"` in the PV name, description and value as `&amp;`, `&lt;`, `&gt;` and
 `&quot;`; ALH inserts these strings unchanged, so a value `a"b` is logged as
-`a&quot;b`. Operation records are not escaped. On bounded-log recovery, older multiline
-records are joined at recognizable timestamp/entry headers before checkpoint
+`a&quot;b`. XML operation records also escape `&`, `<`, `>` and `"` in the
+facility label, node name and message text, including the copies sent to the
+database queue; ALH writes that text unchanged, so a root ALIAS `RF & vacuum`
+appears as `RF &amp; vacuum`. Text-format records are not entity-escaped.
+On bounded-log recovery, older multiline records are joined at recognizable
+timestamp/entry headers before checkpoint
 validation and retention. Surviving records are rewritten with escaped line
 breaks. A matching original checkpoint still determines order, including equal
 timestamps. Without one, the existing timestamp fallback applies. Legacy text
