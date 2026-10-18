@@ -148,9 +148,11 @@ QString usage() {
   return R"(Usage: qtalh [OPTIONS] [configfile]
   -c                 Alarm Configuration Tool
   -global            Use IOC ACKS/ACKT fields
-  -S                 Passive mode (no CA writes or operator acknowledgement)
+  -S                 Passive mode (no CA or pvAccess writes, no operator
+                     acknowledgement)
   -D                 Disable alarm and operation log writing
-  -caputackt         Write configured ACKT settings at startup (global, active)
+  -caputackt         Write each record's configured ACKT once, when it first
+                     becomes writable after startup or reload (global, active)
   -a file -o file    Alarm and operation log filenames
   -f dir -l dir      Configuration and log directories
   -m count           Maximum alarm records (0 unlimited; default 2000, or 0 with -L)
@@ -161,14 +163,23 @@ QString usage() {
   -s -p sound        Silent / audio file (formats depend on Qt media backend)
   -filter no|active|unack
   -mainwindow -maskcolor -noerrorpopup -desc_field -debug
-  -style name        Widget appearance: modern (default), motif (classic ALH),
+  -style name, -style=name
+                     Widget appearance: modern (default), motif (classic ALH),
                      fusion, or an installed Qt style
-  -display display -geometry geometry -fn font
-  -help -version     Show help / version without opening a display
+  -display display, --display display
+                     X11 display
+  -geometry geometry Initial window size and/or position
+  -fn font, -font font
+                     Runtime button font (default: ALHMAINFONT when set)
+  -platform platform Qt platform plugin, for example offscreen or xcb
+  -help, --help, -h  Show help without opening a display
+  -version, --version, -v
+                     Show version without opening a display
   --validate        Validate the configuration without CA connections or GUI
   --to-phoebus out.xml          Convert the configuration to Phoebus alarm XML
   --from-phoebus out.alhConfig  Convert a Phoebus alarm XML file (given as the
                                 configuration) to an ALH configuration
+  --                 End options; the next argument is the configuration file
 QtALH supports ALH configuration files and Qt 5.15/6 on Linux, macOS and Windows.
 )";
 }

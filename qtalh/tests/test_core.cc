@@ -6,6 +6,8 @@
 #include "services/options.h"
 #include <QElapsedTimer>
 #include <QFile>
+#include <QRegularExpression>
+#include <QSet>
 #include <QTemporaryDir>
 #include <QXmlStreamReader>
 #include <alarm.h>
@@ -3394,6 +3396,42 @@ $GUIDANCE https://example.invalid/guide
     QVERIFY(o.config.endsWith("in.xml"));
     QVERIFY_THROWS_EXCEPTION(ParseError, parseOptions({"qtalh", "--to-phoebus"}));
     QVERIFY(usage().contains("--to-phoebus") && usage().contains("--from-phoebus"));
+  }
+  void usageListsOptionsAndWriteBehavior() {
+    // --help must name every switch parseOptions accepts, including aliases.
+    const auto text = usage();
+    QSet<QString> tokens;
+    for (auto token : text.split(QRegularExpression("[\\s,]+"), Qt::SkipEmptyParts))
+      tokens.insert(token);
+    for (const char* option : {"-c", "-global", "-S", "-D", "-caputackt", "-a", "-o", "-f", "-l",
+                               "-m", "-T", "-xml", "-L", "-Lfile", "-B", "-P", "-O", "-s", "-p",
+                               "-filter", "-mainwindow", "-maskcolor", "-noerrorpopup",
+                               "-desc_field", "-debug", "-style", "-style=name", "-display",
+                               "--display", "-geometry", "-fn", "-font", "-platform", "-help",
+                               "--help", "-h", "-version", "--version", "-v", "--validate",
+                               "--to-phoebus", "--from-phoebus", "--"})
+      QVERIFY2(tokens.contains(option), option);
+    // An option's description is its line plus indented continuation lines.
+    auto entry = [&](const QString& option) {
+      QString result;
+      bool inside = false;
+      for (const auto& line : text.split('\n')) {
+        if (line.startsWith("  " + option + ' '))
+          inside = true;
+        else if (inside && !line.startsWith("                     "))
+          break;
+        if (inside)
+          result += line.simplified() + ' ';
+      }
+      return result;
+    };
+    // Passive mode also blocks pvAccess writes (PvAccess::put).
+    QVERIFY2(entry("-S").contains("pvAccess"), qPrintable(entry("-S")));
+    // ACKT is written when a configured target first becomes writable, which
+    // can be long after startup (late IOC, later write access, or a reload).
+    const auto ackt = entry("-caputackt");
+    QVERIFY2(!ackt.contains("at startup"), qPrintable(ackt));
+    QVERIFY2(ackt.contains("writable") && ackt.contains("reload"), qPrintable(ackt));
   }
   void styleOptions() {
     QVERIFY(parseOptions({"qtalh"}).style.isEmpty());

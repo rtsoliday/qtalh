@@ -159,7 +159,7 @@ INCLUDE paths retain their separate configuration-directory rule.
 | `-c` | Configuration editor; otherwise runtime monitoring. |
 | `-global` | Use IOC ACKS/ACKT fields for global acknowledgement. Default: local acknowledgement. |
 | `-S` | Passive mode: suppress CA and pvAccess writes and operator acknowledgement. |
-| `-caputackt` | Apply configured transient acknowledgement settings at startup in global active mode. |
+| `-caputackt` | In global active mode, write each record's configured transient acknowledgement (ACKT) setting once, when a configured channel first becomes writable after startup or reload. This includes an IOC that connects, or grants write access, later. |
 | `-D` | Disable alarm and operation **file** logging. Does not disable CA writes or configured helper queues. |
 | `-s` | Start with Silence Forever enabled; it can be changed in Setup. |
 | `-p file` | Play a local audio file instead of the system beep. Formats depend on the installed Qt Multimedia backend; the suite exercises Ogg/Vorbis. |

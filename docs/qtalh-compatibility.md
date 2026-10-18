@@ -106,6 +106,8 @@ subscriptions, preserving readable text even when global alarm writes are denied
 Initially disabled channels publish -1
 in global active mode, including channels that are also cancelled. Startup ACKT
 settings wait for write access, and are not replayed after a successful write.
+ALH wrote them only to channels connected after its startup connection wait and
+did not retry; Qt also writes when an IOC connects or grants write access later.
 Numeric and case-insensitive severity-command triggers are
 normalized to the legacy uppercase names when parsed and saved.
 

@@ -20,7 +20,7 @@ An acknowledgement can also occur while the alarm is still active. It does not w
 | Global (`-global`) | Uses IOC ACKS/ACKT fields for Channel Access channels. `pva://` channels keep acknowledgement in this runtime. | Active mode can write configured outputs when permitted. |
 | Passive (`-S`, with either local or global) | Operator acknowledgement is disabled; no CA or pvAccess writes. | Writes are suppressed. |
 
-`-caputackt` applies configured ACKT settings at startup in global active mode. PVA alarms have no ACKS/ACKT fields, so [`pva://` channels](/reference/configuration#pvaccess-channels) apply the same acknowledgement rules locally. Access-right failures remain visible; severity-output and automatic Force PV ACKT retries have specific behavior described in [Compatibility](/understand/compatibility).
+In global active mode, `-caputackt` writes each record's configured ACKT setting once, when a configured channel first becomes writable after startup or reload, including when its IOC connects or grants write access later. PVA alarms have no ACKS/ACKT fields, so [`pva://` channels](/reference/configuration#pvaccess-channels) apply the same acknowledgement rules locally. Access-right failures remain visible; severity-output and automatic Force PV ACKT retries have specific behavior described in [Compatibility](/understand/compatibility).
 
 ## Separate the controls
 
