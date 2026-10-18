@@ -2289,10 +2289,10 @@ $GUIDANCE https://example.invalid/guide
     QCOMPARE(d.root->option("FORCEPV_CALC"), QString("1"));
     QFile expression(dir.filePath("expression"));
     QVERIFY(expression.open(QIODevice::WriteOnly));
-    expression.write("$FORCEPV_CALC 1\n");
+    expression.write("GROUP NULL expression\nCHANNEL expression pv\n");
     expression.close();
     d = parseConfig("GROUP NULL parent\n$FORCEPV CALC -D--- 1 NE\n"
-                    "INCLUDE parent expression\n",
+                    "INCLUDE parent expression\n$FORCEPV_CALC 1\n",
                     dir.path());
     QCOMPARE(d.root->option("FORCEPV_CALC"), QString("1"));
   }
@@ -2472,6 +2472,42 @@ $GUIDANCE https://example.invalid/guide
     shortReadCalls = 0;
     QVERIFY_THROWS_EXCEPTION(ParseError, parseConfig(top, dir.path()));
 #endif
+  }
+  void includePreambleDirectives_data() {
+    QTest::addColumn<QString>("preamble");
+    QTest::newRow("SEVRPV") << "$SEVRPV out:sevr\n";
+    QTest::newRow("FORCEPV") << "$FORCEPV gate D 1 0\n";
+    QTest::newRow("FORCEPV_CALC") << "$FORCEPV_CALC 1\n";
+    QTest::newRow("BEEPSEVR") << "$BEEPSEVR MAJOR\n";
+    QTest::newRow("SEVRCOMMAND") << "$SEVRCOMMAND UP_ANY echo up\n";
+    QTest::newRow("ALIAS") << "$ALIAS label\n";
+    QTest::newRow("GUIDANCE") << "$GUIDANCE\ntext\n$END\n";
+  }
+  void includePreambleDirectives() {
+    // ALH reads every file, including INCLUDE files, with no current
+    // group/channel: node directives before the file's first declaration are
+    // rejected, never applied to the INCLUDE's parent group.
+    QFETCH(QString, preamble);
+    QTemporaryDir dir;
+    QFile inc(dir.filePath("inc"));
+    QVERIFY(inc.open(QIODevice::WriteOnly));
+    inc.write((preamble + "GROUP NULL child\nCHANNEL child pv1\n").toUtf8());
+    inc.close();
+    const QString main = "GROUP NULL root\nCHANNEL root other\nINCLUDE root inc\n";
+    QVERIFY_THROWS_EXCEPTION(ParseError, loadConfig(inc.fileName()));
+    QVERIFY_THROWS_EXCEPTION(ParseError, parseConfig(main, dir.path()));
+    // Facility directives may still precede an included file's first group.
+    QVERIFY(inc.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    inc.write(("$BEEPSEVERITY MAJOR\n$HEARTBEATPV beat 1 7\nGROUP NULL child\n" + preamble +
+               "CHANNEL child pv1\n").toUtf8());
+    inc.close();
+    auto d = parseConfig(main, dir.path());
+    QCOMPARE(d.beepSeverity, 2);
+    QCOMPARE(d.root->option("HEARTBEATPV"), QString("beat 1 7"));
+    QCOMPARE(d.root->directives.size(), 1);
+    QCOMPARE(d.root->children.size(), size_t(2));
+    QCOMPARE(d.root->children[1]->name, QString("child"));
+    QCOMPARE(d.root->children[1]->directives.size(), 1);
   }
   void nestedIncludesUseConfiguredDirectory() {
     QTemporaryDir dir;

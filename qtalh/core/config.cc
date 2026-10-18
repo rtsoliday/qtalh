@@ -53,6 +53,10 @@ public:
     if (depth > 50)
       throw ParseError("Configuration exceeds 50 nested includes");
     Node* current = attach;
+    // ALH starts each file, including INCLUDE files, without a current
+    // group/channel: node directives before this file's first GROUP, CHANNEL
+    // or INCLUDE must not attach to the INCLUDE's parent group.
+    bool declared = false;
     const auto lines = text.split('\n');
     for (int i = 0; i < lines.size(); ++i) {
       const QString line = lines[i].trimmed();
@@ -127,6 +131,7 @@ public:
         else
           doc.root = n;
         current = n.get();
+        declared = true;
       } else if (key == "INCLUDE") {
         if (w.size() != 3)
           fail("INCLUDE requires parent and filename");
@@ -155,6 +160,7 @@ public:
         read(QString::fromLocal8Bit(text), base, parent, depth + 1, path);
         stack.remove(canonical);
         current = parent;
+        declared = true;
       } else if (key.startsWith('$')) {
         QString name = key.mid(1);
         QString value = line.mid(key.size()).trimmed();
@@ -198,7 +204,7 @@ public:
             heartbeat = value;
           continue;
         }
-        if (!current)
+        if (!current || !declared)
           fail("Directive requires a group/channel");
         const QSet<QString> supported = {
             "HEARTBEATPV",      "ACKPV",   "FORCEPV", "FORCEPV_CALC", "SEVRPV",

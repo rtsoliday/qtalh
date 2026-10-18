@@ -363,7 +363,11 @@ exhaust memory at startup or reload. The top-level configuration may still be
 a pipe, such as `qtalh <(generator)`. The C++ `loadConfig` API uses
 the top-level file's directory when no configuration directory is supplied.
 
-Directives normally apply to the preceding group/channel:
+Directives normally apply to the preceding group/channel. A file, including an
+included file, must declare a GROUP, CHANNEL or INCLUDE before any other
+directive; only `$BEEPSEVERITY` and `$HEARTBEATPV` may come first. ALH ignores
+such early directives with an input error; QtALH rejects the configuration
+rather than applying them to the INCLUDE's parent group.
 
 | Directive | Arguments and behavior |
 | --- | --- |

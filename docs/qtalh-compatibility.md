@@ -699,6 +699,11 @@ destination selection instead of dereferencing it.
 Inside INCLUDE files, repeated `GROUP NULL` declarations attach to the current
 group, including after channels and nested includes. Regression coverage checks
 the resulting hierarchy, save/reload, inherited beep thresholds and Force PV scope.
+As in ALH, each included file starts with no current group/channel. Group and
+channel directives before its first GROUP, CHANNEL or INCLUDE are never applied
+to the INCLUDE's parent group. ALH logs and ignores them; QtALH rejects the
+configuration, as it does for the same lines at the start of a top-level file.
+`$BEEPSEVERITY` and `$HEARTBEATPV` are facility-wide and may appear there.
 
 A channel can retain an alarm through `D → CD → C`. Changing that channel from
 `C` to `D` now applies Add before Disable, exposing the cached alarm with the
