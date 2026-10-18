@@ -4,6 +4,8 @@
 #include "core/analytics.h"
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QNetworkDatagram>
+#include <QTcpServer>
 #include <QThread>
 #include <QtTest>
 #include <cmath>
@@ -49,6 +51,8 @@ private slots:
     qputenv("EPICS_PVA_SERVER_PORT", QByteArray::number(port + 2));
     qputenv("EPICS_PVA_BROADCAST_PORT", QByteArray::number(port + 3));
     qputenv("EPICS_PVAS_INTF_ADDR_LIST", "127.0.0.1");
+    for (const auto& setting : isolatedEpicsSettings(port))
+      qputenv(setting.first.constData(), setting.second);
     QVERIFY(repeater.start(EPICS_TEST_BIN, port + 1));
     ioc.setProcessEnvironment(QProcessEnvironment::systemEnvironment());
     startIoc();
@@ -73,6 +77,43 @@ private slots:
     ca.clear();
     QTest::qWait(400);
     QVERIFY(!late);
+  }
+  void inheritedSiteSettingsStayOffTheHarness() {
+    // A site shell may name CA name servers, beacon destinations or server
+    // ports that override the private settings above. A child run of this
+    // suite must contact none of them and still reach its own IOC.
+    QTcpServer nameServer;
+    QVERIFY(nameServer.listen(QHostAddress::LocalHost));
+    int nameServerConnections = 0;
+    connect(&nameServer, &QTcpServer::newConnection, [&] {
+      while (auto socket = nameServer.nextPendingConnection()) { ++nameServerConnections; socket->deleteLater(); }
+    });
+    QUdpSocket site;
+    QVERIFY(site.bind(QHostAddress(QHostAddress::LocalHost)));
+    int siteDatagrams = 0;
+    connect(&site, &QUdpSocket::readyRead, [&] {
+      while (site.hasPendingDatagrams()) { site.receiveDatagram(); ++siteDatagrams; }
+    });
+    auto freePort = [] { QUdpSocket probe; probe.bind(QHostAddress(QHostAddress::LocalHost)); return QString::number(probe.localPort()); };
+    const auto sitePort = QString::number(site.localPort());
+    auto environment = QProcessEnvironment::systemEnvironment();
+    environment.insert("EPICS_CA_NAME_SERVERS", "127.0.0.1:" + QString::number(nameServer.serverPort()));
+    environment.insert("EPICS_CAS_SERVER_PORT", freePort());
+    environment.insert("EPICS_CAS_BEACON_PORT", sitePort);
+    environment.insert("EPICS_PVAS_BROADCAST_PORT", freePort());
+    environment.insert("EPICS_PVAS_BEACON_ADDR_LIST", "127.0.0.1:" + sitePort);
+    QProcess child;
+    child.setProcessEnvironment(environment);
+    child.setProcessChannelMode(QProcess::MergedChannels);
+    child.start(QCoreApplication::applicationFilePath(), {"readStringsForAlarmLimits", "pvaMonitorAndWrites"});
+    QVERIFY(child.waitForStarted());
+    QTRY_VERIFY_WITH_TIMEOUT(child.state() == QProcess::NotRunning, 60000);
+    QTest::qWait(200);
+    const bool passed = child.exitStatus() == QProcess::NormalExit && child.exitCode() == 0;
+    QVERIFY2(passed && nameServerConnections == 0 && siteDatagrams == 0,
+             qPrintable(QString("%1 name server connections, %2 site beacons, child %3\n%4")
+                            .arg(nameServerConnections).arg(siteDatagrams)
+                            .arg(passed ? "passed" : "failed", QString::fromLocal8Bit(child.readAll()))));
   }
   void oneShotReadDoesNotCountReconnectTwice() {
     ChannelAccess ca;
@@ -1309,7 +1350,7 @@ private slots:
     QTRY_VERIFY(driver.put(prefix + "severity", 2));
     QTRY_COMPARE(actual, 2.0);
     auto d =
-        parseConfig("GROUP NULL root\n$SEVRPV " + prefix + "severity\nCHANNEL root unused C----\n");
+        parseConfig("GROUP NULL root\n$SEVRPV " + prefix + "severity\nCHANNEL root " + prefix + "unused C----\n");
     ChannelAccess ca({true});
     Engine e(d, {true}, &ca);
     e.start();

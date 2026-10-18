@@ -115,6 +115,11 @@ and ports, using [ioc.db](ioc.db) and [ioc.acf](ioc.acf). They do not write to
 production records. Each also starts its own `caRepeater` on its private
 repeater port and stops it at exit; otherwise Channel Access would start a
 detached repeater that outlives the test and holds piped output open.
+The harnesses also override inherited settings that take precedence over
+their loopback address lists (`isolatedEpicsSettings()` in
+[ca_repeater.h](ca_repeater.h)): they clear `EPICS_CA_NAME_SERVERS` and pin
+the `EPICS_CAS_*` and `EPICS_PVAS_*` server ports and beacon lists to the
+private loopback ones, so a shell set up for a site gateway is not contacted.
 Unix helper tests use owned System V queues, local TCP
 capture servers, and a temporary RPC registration, which they clean up.
 An absent prerequisite fails the relevant test rather than silently skipping it.

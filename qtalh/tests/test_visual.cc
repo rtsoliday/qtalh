@@ -167,6 +167,8 @@ private slots:
     qputenv("EPICS_CA_REPEATER_PORT", QByteArray::number(port + 1));
     qputenv("EPICS_CAS_INTF_ADDR_LIST", "127.0.0.1");
     qputenv("EPICS_CAS_BEACON_ADDR_LIST", ("127.0.0.1:" + QString::number(port + 1)).toLatin1());
+    for (const auto& setting : isolatedEpicsSettings(port))
+      qputenv(setting.first.constData(), setting.second);
     TestCaRepeater repeater;
     QVERIFY(repeater.start(EPICS_TEST_BIN, port + 1));
     Child ioc;

@@ -1984,6 +1984,8 @@ private slots:
     environment.set("EPICS_CA_REPEATER_PORT", QByteArray::number(port.toInt() + 1));
     environment.set("EPICS_CAS_INTF_ADDR_LIST", "127.0.0.1");
     environment.set("EPICS_CAS_BEACON_ADDR_LIST", "127.0.0.1:" + QByteArray::number(port.toInt() + 1));
+    for (const auto& setting : isolatedEpicsSettings(port.toInt()))
+      environment.set(setting.first, setting.second);
     TestCaRepeater repeater;
     QVERIFY(repeater.start(EPICS_TEST_BIN, port.toInt() + 1));
     QFile database(dir.filePath("heartbeat.db")); QVERIFY(database.open(QIODevice::WriteOnly));

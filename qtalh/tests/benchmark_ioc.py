@@ -137,7 +137,12 @@ def run(args, root):
                QTALH_TEST_STYLE='', EPICS_CA_AUTO_ADDR_LIST='NO',
                EPICS_CA_ADDR_LIST=f'127.0.0.1:{port}', EPICS_CA_SERVER_PORT=str(port),
                EPICS_CA_REPEATER_PORT=str(port + 1), EPICS_CAS_INTF_ADDR_LIST='127.0.0.1',
-               EPICS_CAS_BEACON_ADDR_LIST=f'127.0.0.1:{port + 1}')
+               EPICS_CAS_BEACON_ADDR_LIST=f'127.0.0.1:{port + 1}',
+               # As isolatedEpicsSettings() in ca_repeater.h: site settings that take precedence.
+               EPICS_CA_NAME_SERVERS='', EPICS_PVA_NAME_SERVERS='', EPICS_CAS_SERVER_PORT=str(port),
+               EPICS_CAS_BEACON_PORT=str(port + 1), EPICS_CAS_AUTO_BEACON_ADDR_LIST='NO',
+               EPICS_PVAS_SERVER_PORT=str(port + 2), EPICS_PVAS_BROADCAST_PORT=str(port + 3),
+               EPICS_PVAS_BEACON_ADDR_LIST='127.0.0.1', EPICS_PVAS_AUTO_BEACON_ADDR_LIST='NO')
     binaries = list(zip(args.labels, [args.before, args.after]))
     manifest = {'channels': args.channels, 'seconds': args.seconds, 'logged_seconds': args.logged_seconds,
                 'warmup': 3, 'trials': args.trials, 'max_records': args.max_records,
