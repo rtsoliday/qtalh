@@ -831,7 +831,9 @@ void Window::refreshTools() {
     quint64 pendingCount = 0;
     for (const auto& pending : engine->pendingAckValues()) {
       items.push_back({pending.channel, 6, "ACKPV action pending",
-          QString("%1 pending: %2 = %3").arg(pending.count).arg(pending.pv).arg(pending.value),
+          // One substitution pass: a PV name may itself contain %1 or %2.
+          QString("%1 pending: %2 = %3").arg(QString::number(pending.count), pending.pv,
+                                              QString::number(pending.value)),
           "Explicit retry only; ACKS is not repeated", pending.id});
       pendingCount += pending.count;
     }

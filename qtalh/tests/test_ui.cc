@@ -5453,6 +5453,39 @@ private slots:
     forced->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Apply)->click();
     QTRY_COMPARE(ackt, 1.0);
   }
+  void runtimeOverridesShowsAckValueNameLiterally() {
+    // SuiteEnvironment and TestCaRepeater isolate this IOC on loopback. ACKS
+    // is accepted; the $ACKPV PV does not exist, so its submission is refused
+    // and listed. Its name contains %1 and must be shown literally.
+    QTemporaryDir dir;
+    const auto prefix = "qtalh_ui_ackname_" + QString::number(QCoreApplication::applicationPid()) + ":";
+    QFile database(dir.filePath("alarm.db")); QVERIFY(database.open(QIODevice::WriteOnly));
+    database.write(("record(ai,\"" + prefix + "alarm\") { field(VAL,\"0\") "
+        "field(HIHI,\"10\") field(HHSV,\"MAJOR\") }\n").toLatin1()); database.close();
+    struct Ioc {
+      QProcess process;
+      ~Ioc() { process.kill(); process.waitForFinished(3000); }
+    } ioc;
+    ioc.process.start(QString(EPICS_TEST_BIN) + "/softIoc", {"-d", database.fileName()});
+    QVERIFY(ioc.process.waitForStarted());
+    auto o = options(false); o.engine.global = true;
+    const auto missing = prefix + "missing%1";
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root " + prefix + "alarm\n$ACKPV " + missing + " 7\n");
+    auto w = std::make_unique<Window>(d, o, true); w->show();
+    auto& engine = w->alarmEngine(); auto n = w->document().channels()[0];
+    ChannelAccess driver; driver.prepare(prefix + "alarm");
+    QTRY_VERIFY_WITH_TIMEOUT(driver.canWrite(prefix + "alarm"), 10000);
+    QTRY_COMPARE(engine.state(n).severity, 0);
+    if (engine.state(n).unack) engine.acknowledge(n);
+    QVERIFY(driver.put(prefix + "alarm", 20)); QTRY_COMPARE(engine.state(n).unack, 2);
+    engine.acknowledge(n); QTRY_COMPARE(engine.state(n).unack, 0);
+    QTRY_COMPARE(engine.pendingAckValues().size(), 1);
+    w->findChild<QAction*>("Runtime Overrides...")->trigger();
+    auto dialog = w->findChild<QDialog*>("runtimeOverridesDialog"); QVERIFY(dialog);
+    auto table = dialog->findChild<QTableWidget*>("runtimeOverridesTable");
+    QTRY_COMPARE(table->rowCount(), 1);
+    QCOMPARE(table->item(0, 2)->text(), "1 pending: " + missing + " = 7");
+  }
   void toolDialogsIgnoreEnter() {
     // Enter in a filter or list never presses an operator action as an implicit default button.
     auto w = std::make_unique<Window>(sample(), options(false), false);
