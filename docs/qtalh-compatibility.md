@@ -906,8 +906,9 @@ a change by another client or an IOC reboot.
 
 For QtALH 1.0.0, local NoAckT preserves ALH's existing latch behavior: enabling
 it after a transient has already cleared does not erase that unacknowledged
-event. The operator must acknowledge it explicitly. Later alarm transitions
-use the new NoAckT setting.
+event. It stays unacknowledged until the operator acknowledges it or a later
+alarm transition replaces it: with NoAckT set, each transition sets the
+unacknowledged severity to the new severity, so a later recovery clears it.
 
 Force CALC retains received input values separately from its mutable calculation
 variables. Assignments to A through F can no longer make an unchanged callback

@@ -58,8 +58,9 @@ Additional 1.0.0 audit decisions and corrections:
   never write a stale row's NoAckT to ACKT.
 - FORCEPV rejects NaN, infinity and numeric overflow in force/reset values.
   Finite values, legacy parsing defaults and `NE` remain supported.
-- Enabling local NoAckT leaves an existing cleared transient awaiting explicit
-  acknowledgement; later alarm transitions use the new setting.
+- Enabling local NoAckT leaves an existing cleared transient awaiting
+  acknowledgement until it is acknowledged or a later alarm transition, which
+  uses the new setting, replaces it.
 - Failed CA alarm reads invalidate the observation until fresh data arrives.
   Known connection/access errors retain their more specific status.
 - Send Message rejects reserved reload/stop-logging control prefixes. Explicit
