@@ -1178,11 +1178,18 @@ void Logging::finishBroadcast() {
     setLock(broadcastFd, false);
 }
 QString Logging::plainBroadcastError(const QString& text) {
-  if (text.startsWith("RELOAD_FACILITY:"))
+  // Check the bytes receivers decode, as sendBroadcast() writes them.
+  const auto bytes = text.toLocal8Bit();
+  if (text.startsWith("RELOAD_FACILITY:") || bytes.startsWith("RELOAD_FACILITY:"))
     return "This message would be read as a Reload Facility command. "
            "Change its opening text, or use Reload Facility.";
   static const QRegularExpression stop("^\\d+ MIN  ALH  WILL  NOT  SAVE ALARM LOG!!!!");
-  if (stop.match(text).hasMatch())
+  // ALH 1.2.35 receivers (alh/file.c broadcastMessTesting) take the text after
+  // the first space, compare only strlen(rebootString)-1 bytes, and atoi() the
+  // token before it, so "+5", "5x", "\t5", "5\n" and "LOG!!!" also stop logging.
+  static const QByteArray legacyStop("MIN  ALH  WILL  NOT  SAVE ALARM LOG!!!");
+  const int blank = bytes.indexOf(' ');
+  if (stop.match(text).hasMatch() || (blank >= 0 && bytes.mid(blank + 1).startsWith(legacyStop)))
     return "This message would be read as a Stop Alarm Logging command. "
            "Change its opening text, or use Stop Alarm Logging.";
   return {};

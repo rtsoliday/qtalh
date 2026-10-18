@@ -645,7 +645,9 @@ for 60 seconds; another send reports busy during that interval. Broadcast action
 send a message, reload the named configuration, or suppress alarm logging and
 commands for 1–10 minutes. Monitoring continues. Reload preserves Silence Forever.
 **Send Message** rejects text beginning with the reserved `RELOAD_FACILITY:`
-or `<number> MIN  ALH  WILL  NOT  SAVE ALARM LOG!!!!` control prefixes.
+or `<number> MIN  ALH  WILL  NOT  SAVE ALARM LOG!!!!` control prefixes,
+including the looser forms legacy ALH receivers also act on (for example
+`+5`, a number followed by other characters, or `LOG!!!`).
 Change the opening text, or use **Reload Facility** or **Stop Alarm Logging**
 for those actions. Explicit controls and broadcasts from legacy ALH retain
 their existing wire format.

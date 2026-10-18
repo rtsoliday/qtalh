@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
@@ -229,6 +230,29 @@ struct RpcServer {
 };
 #endif
 } // namespace
+// ALH 1.2.35 broadcastMessTesting (alh/file.c) as a legacy -B peer decodes a
+// .MESS file: the body plus the Date and FROM lines in one buffer, the text
+// after its first space compared for strlen(rebootString)-1 bytes, and atoi()
+// of the token before it. Returns the minutes logging stops, -2 for a reload.
+static int legacyAlhNotSaveMinutes(const QString& path) {
+  FILE* fp = std::fopen(QFile::encodeName(path).constData(), "r");
+  if (!fp) return -1;
+  const char* rebootString = "MIN  ALH  WILL  NOT  SAVE ALARM LOG!!!!";
+  char firstLine[30], messBuff[500], buff[250];
+  bool ok = std::fgets(firstLine, sizeof firstLine, fp) && std::fgets(messBuff, sizeof messBuff, fp);
+  for (int line = 0; ok && line < 2; ++line) { // Date, then FROM
+    ok = std::fgets(buff, sizeof buff, fp) != nullptr;
+    if (ok) std::strncat(messBuff, buff, sizeof messBuff - std::strlen(messBuff) - 1);
+  }
+  std::fclose(fp);
+  if (!ok) return -1;
+  if (std::strncmp(messBuff, "RELOAD_FACILITY:", 16) == 0) return -2;
+  char* blank = std::strchr(messBuff, ' ');
+  if (!blank || std::strncmp(blank + 1, rebootString, std::strlen(rebootString) - 1) != 0) return 0;
+  *blank = 0;
+  const int minutes = std::atoi(messBuff);
+  return minutes <= 0 || minutes > 10 ? 0 : minutes;
+}
 class HelperTests : public QObject {
   Q_OBJECT
 private slots:
@@ -2966,6 +2990,33 @@ private slots:
   }
 #endif
 
+  void plainBroadcastNeverStopsLegacyLogging_data() {
+    QTest::addColumn<QString>("text");
+    QTest::addColumn<bool>("rejected");
+    QTest::newRow("plus-sign") << "+5 MIN  ALH  WILL  NOT  SAVE ALARM LOG!!!! IOC work" << true;
+    QTest::newRow("three-bangs") << "5 MIN  ALH  WILL  NOT  SAVE ALARM LOG!!! maintenance" << true;
+    QTest::newRow("trailing-junk") << "5min MIN  ALH  WILL  NOT  SAVE ALARM LOG!!!! x" << true;
+    QTest::newRow("leading-space") << " 5 MIN  ALH  WILL  NOT  SAVE ALARM LOG!!!! x" << false;
+    QTest::newRow("eleven") << "11 MIN  ALH  WILL  NOT  SAVE ALARM LOG!!!! x" << true;
+    QTest::newRow("ordinary") << "Status: IOC work at 5 MIN past" << false;
+  }
+  void plainBroadcastNeverStopsLegacyLogging() {
+    // Legacy ALH -B peers read the shared .MESS file more loosely than QtALH.
+    // A plain Send Message that is sent must not stop their alarm logging.
+    QFETCH(QString, text); QFETCH(bool, rejected);
+    QTemporaryDir dir;
+    Options o; o.broadcast = true; o.noLog = true;
+    o.config = dir.filePath("config");
+    Logging log(o, "root");
+    QString reason;
+    log.error = [&](const QString& error) { reason = error; };
+    QCOMPARE(Logging::plainBroadcastError(text).isEmpty(), !rejected);
+    const bool sent = log.sendBroadcast(text);
+    QCOMPARE(sent, !rejected);
+    if (rejected) QVERIFY2(reason.contains("Stop Alarm Logging"), qPrintable(reason));
+    else QCOMPARE(legacyAlhNotSaveMinutes(o.config + ".MESS"), 0);
+    QVERIFY(log.commandsAllowed());
+  }
   void plainBroadcastReservesControlPrefixes_data() {
     QTest::addColumn<QString>("text");
     QTest::addColumn<QString>("control");
