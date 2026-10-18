@@ -3312,6 +3312,34 @@ private slots:
     QVERIFY(!result.text.contains("out-of-range"));
     QVERIFY(result.text.indexOf("selected-match") < result.text.indexOf("sibling-match"));
   }
+  void historicalLogSearchMatchesXmlEscapedText() {
+    // -xml escapes & < > " in alarm values and operation text (F-119, F-706);
+    // the With filter must still find the text the operator types.
+    QTemporaryDir dir;
+    Options o; o.xml = true; o.maxRecords = 0;
+    o.alarmFile = dir.filePath("alarm"); o.opmodFile = dir.filePath("opmod");
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
+    State state; state.severity = 2; state.status = 3; state.value = "a<b & \"c\"";
+    {
+      Logging log(o, "RF & vacuum");
+      log.operation(nullptr, "Reset <mask> & retry");
+      log.alarm(d.channels()[0], state, QDateTime::currentMSecsSinceEpoch());
+    }
+    LogSearch request;
+    request.from = QDateTime::currentDateTime().addSecs(-3600);
+    request.to = QDateTime::currentDateTime().addSecs(3600);
+    request.path = o.opmodFile;
+    for (const auto& text : {"RF & vacuum", "Reset <mask> & retry"}) {
+      request.contains = text;
+      const auto result = searchLogs(request);
+      QVERIFY2(result.errors.isEmpty(), qPrintable(result.errors.join('\n')));
+      QCOMPARE(result.records, 1);
+    }
+    request.path = o.alarmFile; request.contains = "a<b & \"c\"";
+    QCOMPARE(searchLogs(request).records, 1);
+    request.contains = "&amp;"; // Escaped forms still match the raw record.
+    QCOMPARE(searchLogs(request).records, 1);
+  }
   void historicalLogSearch() {
     QTemporaryDir dir;
     auto write = [&](const QString& name, const QByteArray& text) {

@@ -74,6 +74,14 @@ qint64 searchStart(QFile& input, const std::function<bool()>& cancelled) {
 }
 
 }
+namespace {
+// Undo the entity escaping Logging applies to XML records (&amp; last, so an
+// escaped entity name stays literal).
+QString xmlText(QString text) {
+  return text.replace("&#10;", "\n").replace("&#13;", "\r").replace("&lt;", "<")
+      .replace("&gt;", ">").replace("&quot;", "\"").replace("&amp;", "&");
+}
+} // namespace
 LogSearchResult searchLogs(const LogSearch& request, const std::function<bool()>& cancelled) {
   LogSearchResult result;
   if (!request.from.isValid() || !request.to.isValid() || request.from > request.to ||
@@ -140,7 +148,12 @@ LogSearchResult searchLogs(const LogSearch& request, const std::function<bool()>
       bool matches = request.contains.isEmpty();
       if (length <= request.maximumBytes) {
         raw = input.read(length);
-        matches = QString::fromLocal8Bit(raw).contains(request.contains, Qt::CaseSensitive);
+        const auto text = QString::fromLocal8Bit(raw);
+        matches = text.contains(request.contains, Qt::CaseSensitive);
+        // XML records escape markup characters and line breaks in names,
+        // values and operation text. Match the text the operator typed too.
+        if (!matches && raw.startsWith("<entry>") && raw.contains('&'))
+          matches = xmlText(text).contains(request.contains, Qt::CaseSensitive);
       } else {
         const auto needle = request.contains.toLocal8Bit();
         QByteArray overlap;
