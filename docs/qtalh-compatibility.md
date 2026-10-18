@@ -302,7 +302,9 @@ presentation; see [the appearance guide](qtalh-appearance.md).
 With `-style motif`, the classic appearance retains the blue-gray background,
 yellow MINOR/red MAJOR/white
 INVALID and ERROR indicators, group tree at left and group contents at right,
-and legacy footer descriptions. The runtime and main rows now use custom
+and legacy footer descriptions (one legend line is worded differently; see
+[Observed differences from legacy runs](#observed-differences-from-legacy-runs-2026-10-17)).
+The runtime and main rows now use custom
 Motif-style controls, branch lines,
 content-sized names and the reference initial expansion. See
 [the Radiation Monitors comparison](qtalh-appearance.md). Qt scroll bars, some
@@ -945,3 +947,33 @@ at the next successful write or reconnect.
 `test-ioc` covers monitoring, enumerated values, writes, missing PVs, IOC restart, runtime
 acknowledgement with ACKT, descriptions, mixed CA/PVA field reads, Force PVs,
 and passive mode against softIocPVA.
+
+## Observed differences from legacy runs (2026-10-17)
+
+Side-by-side runs of legacy ALH and QtALH against the same private IOC and
+configuration showed these further differences. Local-mode alarm logs were
+byte-for-byte identical.
+
+- **Startup operation-log records.** ALH writes `Setup Alarm Log File : <file>`
+  and `Setup Config File : <file>` at startup, without the facility and node
+  prefix and with the path as given. QtALH writes only
+  `<facility>: :  Setup Config File : <absolute path>`; it writes
+  `Setup Alarm Log File : <file>` only when the file is changed with
+  **Setup → New Alarm Log File…**.
+- **Global-mode alarm-log records.** With `-global`, ALH writes a startup record
+  for each initially cancelled or disabled channel (for example
+  `<pv> NO_ALARM NO_ALARM NO_ALARM noackT` with an empty value). For a channel
+  with a count filter, ALH also writes a record with the previous status and
+  severity and the new value (for example `<pv> HIHI MAJOR MAJOR ackT 0`) when
+  the value clears inside the filter interval. QtALH writes neither record; all
+  other global-mode records, including the XML `<status-noack>` and
+  `<severity-noack>` fields, matched.
+- **Classic footer legend.** The legend line reads
+  `Channel Alarm Data: <Status,Severity> (<Unack Severity>)` in QtALH and
+  `Channel Alarm Data:  <Status,Severity>,<Unack Severity>` in ALH. Channel rows
+  use ALH's `<status,severity>,<unack severity>` format in both.
+- **Phoebus round trip.** Export keeps trailing spaces on the last guidance line
+  inside `<details>`, but import trims each element's text, so a second export of
+  the round-tripped file differs (for example `alarms.    </details>` becomes
+  `alarms.</details>`). No conversion note reports this; see
+  [Phoebus XML import & export](site/configure/phoebus.md).
