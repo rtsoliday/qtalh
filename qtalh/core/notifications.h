@@ -89,8 +89,9 @@ private:
   qint64 nextExpiry = 0;
   QVector<NotificationEnvelope> queue;
   QHash<QString, QVector<QString>> matches;
+  QVector<QRegularExpression> wildcards; // Compiled once per subscription, in settings_ order.
   const NotificationSubscription* subscription(const QString&) const;
-  bool match(const NotificationSubscription&, const ChannelUpdate&) const;
+  bool match(const NotificationSubscription&, const QRegularExpression&, const ChannelUpdate&) const;
   void end(Episode&, bool resolved);
   void forget(const Episode&);
   void collect();

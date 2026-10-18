@@ -258,20 +258,19 @@ const NotificationSubscription* NotificationPolicy::subscription(const QString& 
       return &r;
   return nullptr;
 }
-bool NotificationPolicy::match(const NotificationSubscription& r, const ChannelUpdate& s) const {
+bool NotificationPolicy::match(const NotificationSubscription& r, const QRegularExpression& wildcard,
+                               const ChannelUpdate& s) const {
   return r.enabled && r.configuration == configuration_ &&
-         (r.scope.isEmpty() || s.ancestors.contains(r.scope)) &&
-         QRegularExpression(pvWildcard(r.wildcard))
-             .match(s.pv)
-             .hasMatch();
+         (r.scope.isEmpty() || s.ancestors.contains(r.scope)) && wildcard.match(s.pv).hasMatch();
 }
 int NotificationPolicy::matchCount(const NotificationSubscription& r,
                                    const QVector<ChannelUpdate>& all) const {
   int n = 0;
   auto copy = r;
   copy.enabled = true;
+  const QRegularExpression wildcard(pvWildcard(r.wildcard));
   for (const auto& s : all)
-    if (match(copy, s))
+    if (match(copy, wildcard, s))
       ++n;
   return n;
 }
@@ -306,6 +305,9 @@ void NotificationPolicy::configure(const NotificationSettings& s, const QString&
     else ++it;
   settings_ = s;
   configuration_ = configuration;
+  wildcards.clear();
+  for (const auto& r : settings_.subscriptions)
+    wildcards << QRegularExpression(pvWildcard(r.wildcard));
   matches.clear();
   batchDeadline.clear();
   for (int i = queue.size() - 1; i >= 0; --i)
@@ -352,9 +354,9 @@ void NotificationPolicy::observe(const ChannelUpdate& s, qint64 now) {
     return;
   if (!matches.contains(s.identity)) {
     QStringList ids;
-    for (const auto& r : settings_.subscriptions)
-      if (match(r, s))
-        ids << r.id;
+    for (int i = 0; i < settings_.subscriptions.size(); ++i)
+      if (match(settings_.subscriptions[i], wildcards[i], s))
+        ids << settings_.subscriptions[i].id;
     matches[s.identity] = ids.toVector();
   }
   for (const auto& id : matches[s.identity]) {

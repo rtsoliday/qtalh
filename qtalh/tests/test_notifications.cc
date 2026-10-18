@@ -557,6 +557,55 @@ private slots:
     p.tick(80004);
     QVERIFY(!p.take(e, 80004));
   }
+  void wildcardsCompileOncePerSubscription() {
+    // Apply, enable, reload and every editor keystroke rematch all channels.
+    // Compare against compiling one pattern per channel on this machine.
+    auto s = settings();
+    s.subscriptions[0].stages.resize(1);
+    s.subscriptions[0].wildcard = "SR:C1*";
+    for (int i = 1; i < 5; ++i) {
+      auto r = s.subscriptions[0];
+      r.id = r.name = QString("rule%1").arg(i);
+      s.subscriptions << r;
+    }
+    QVector<ChannelUpdate> all;
+    for (int i = 0; i < 20000; ++i) {
+      auto a = alarm(QString("SR:C%1:PV%2").arg(i % 40).arg(i));
+      a.severity = a.unack = 0;
+      all << a;
+    }
+    const QRegularExpression compiled(QRegularExpression::anchoredPattern("SR:C1.*"));
+    QVERIFY(compiled.match(all[1].pv).hasMatch());
+    QElapsedTimer timer;
+    timer.start();
+    int expected = 0;
+    for (const auto& a : all)
+      expected += compiled.match(a.pv).hasMatch();
+    const auto matchEach = timer.nsecsElapsed();
+    timer.restart();
+    for (const auto& a : all)
+      QRegularExpression(compiled.pattern()).match(a.pv).hasMatch();
+    const auto compileEach = timer.nsecsElapsed();
+    QCOMPARE(expected, 5500);
+    qInfo() << "20,000 channels, ms: match" << matchEach / 1000000 << "compile and match"
+            << compileEach / 1000000;
+    if (compileEach < 10 * matchEach)
+      QSKIP("Compiling a wildcard is not much costlier than matching it here (no PCRE2 JIT)");
+    NotificationPolicy p;
+    configure(p, s);
+    timer.restart();
+    p.configure(s, notificationConfiguration("/test.alh"));
+    for (const auto& a : all)
+      p.observe(a, 0);
+    const auto apply = timer.nsecsElapsed();
+    timer.restart();
+    QCOMPARE(p.matchCount(s.subscriptions[0], all), expected);
+    const auto count = timer.nsecsElapsed();
+    qInfo() << "20,000 channels x 5 subscriptions, ms: apply" << apply / 1000000 << "count"
+            << count / 1000000;
+    QVERIFY2(apply < 2 * compileEach, "apply compiles a wildcard per channel and subscription");
+    QVERIFY2(4 * count < compileEach, "matchCount compiles a wildcard per channel");
+  }
   void queuePressureRetainsDueWork() {
     NotificationPolicy p;
     auto s = settings();
