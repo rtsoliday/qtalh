@@ -386,7 +386,9 @@ void addChildren(const Element& e, Node& parent, Notes& notes) {
       // ALH aliases occupy one physical line. Flatten XML line breaks without
       // collapsing meaningful internal spacing in an exported ALH alias.
       auto description = c.child("description");
-      description.replace('\n', ' ').replace('\r', ' ');
+      // Include Unicode line terminators, which simplified() also flattened.
+      static const QRegularExpression lineBreaks("[\\r\\n\\x{0085}\\x{2028}\\x{2029}]");
+      description.replace(lineBreaks, " ");
       const int room = LegacyLineBytes - utf8Bytes("$ALIAS ");
       if (utf8Bytes(description) > room) {
         description.truncate(fitting(description, room));

@@ -4263,6 +4263,9 @@ $GUIDANCE https://example.invalid/guide
     QTest::newRow("tab") << QByteArray("Gauge&#9;1") << QString("Gauge\t1");
     QTest::newRow("line-feed") << QByteArray("Gauge\n  1") << QString("Gauge   1");
     QTest::newRow("carriage-return") << QByteArray("Gauge&#13;  1") << QString("Gauge   1");
+    QTest::newRow("next-line") << QByteArray("Gauge\xc2\x85 1") << QString("Gauge  1");
+    QTest::newRow("line-separator") << QByteArray("Gauge\xe2\x80\xa8 1") << QString("Gauge  1");
+    QTest::newRow("paragraph-separator") << QByteArray("Gauge&#x2029; 1") << QString("Gauge  1");
   }
   void phoebusDescriptionWhitespace() {
     QFETCH(QByteArray, description);
