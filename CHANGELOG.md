@@ -40,5 +40,23 @@ Changes that operators and site maintainers should review before deployment:
   active Conda environment unless `QTALH_ALLOW_CONDA=1`, and refuses Qt
   modules mixed from different installations.
 
+Additional 1.0.0 audit decisions and corrections:
+
+- Phoebus XML remains an interchange format with documented conversion limits.
+  Keep the original `.alhConfig` as the authoritative configuration.
+- A rejected ACKPV submission after ACKS is submitted now reports partial
+  submission. Runtime Overrides offers explicit **Retry ACKPV**, without
+  repeating ACKS or retrying automatically when the connection recovers.
+- Rapid opposite NoAckT requests through duplicate rows use the latest accepted
+  record setting, so a stale row cannot discard the newer request.
+- FORCEPV rejects NaN, infinity and numeric overflow in force/reset values.
+  Finite values, legacy parsing defaults and `NE` remain supported.
+- Enabling local NoAckT leaves an existing cleared transient awaiting explicit
+  acknowledgement; later alarm transitions use the new setting.
+- Failed CA alarm reads invalidate the observation until fresh data arrives.
+  Known connection/access errors retain their more specific status.
+- Send Message rejects reserved reload/stop-logging control prefixes. Explicit
+  controls and the legacy broadcast wire format remain supported.
+
 Requirements: EPICS 7 Base with its pvAccess and pvData libraries, and Qt 5.15
 or newer or Qt 6 with Widgets, Network, PrintSupport and Multimedia.
