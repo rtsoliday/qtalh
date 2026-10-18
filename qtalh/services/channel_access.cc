@@ -62,13 +62,17 @@ ChannelAccess::ChannelAccess(EngineOptions o, QObject* parent) : QObject(parent)
   }
   contexts.push_back(this);
   active = true;
-  ca_add_fd_registration(fd, nullptr);
-  for (int descriptor : caDescriptors) {
-    if (sockets.contains(descriptor))
-      continue;
-    auto notifier = new QSocketNotifier(descriptor, QSocketNotifier::Read, this);
-    sockets[descriptor] = notifier;
-    connect(notifier, &QSocketNotifier::activated, this, [this] { poll(); });
+  // One CA context has one wakeup socket. Qt permits only one notifier per
+  // socket/type, so the first adapter owns it for every sharing adapter.
+  if (contexts.front() == this) {
+    ca_add_fd_registration(fd, nullptr);
+    for (int descriptor : caDescriptors) {
+      if (sockets.contains(descriptor))
+        continue;
+      auto notifier = new QSocketNotifier(descriptor, QSocketNotifier::Read, this);
+      sockets[descriptor] = notifier;
+      connect(notifier, &QSocketNotifier::activated, this, [this] { poll(); });
+    }
   }
   timer.setInterval(100);
   connect(&timer, &QTimer::timeout, this, [this] { poll(); });
@@ -78,6 +82,19 @@ ChannelAccess::~ChannelAccess() {
   timer.stop();
   clear();
   contexts.removeAll(this);
+  if (!contexts.isEmpty()) {
+    auto successor = contexts.front();
+    for (auto it = sockets.cbegin(); it != sockets.cend(); ++it) {
+      auto notifier = it.value();
+      // Keep the registered notifier alive across the handoff. Deleting and
+      // recreating it could lose a pending wakeup from the shared CA context.
+      QObject::disconnect(notifier, nullptr, this, nullptr);
+      notifier->setParent(successor);
+      connect(notifier, &QSocketNotifier::activated, successor, [successor] { successor->poll(); });
+      successor->sockets.insert(it.key(), notifier);
+    }
+    sockets.clear();
+  }
   if (active && contexts.isEmpty()) {
     ca_add_fd_registration(nullptr, nullptr);
     ca_context_destroy();
@@ -782,6 +799,8 @@ void ChannelAccess::fd(void* data, int descriptor, int opened) {
     caDescriptors.remove(descriptor);
   for (auto self : contexts) {
     if (opened) {
+      if (self != contexts.front())
+        continue;
       if (self->sockets.contains(descriptor))
         continue;
       auto notifier = new QSocketNotifier(descriptor, QSocketNotifier::Read, self);

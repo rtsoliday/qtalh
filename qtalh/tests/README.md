@@ -81,30 +81,31 @@ descriptions, force inputs, passive mode, and duplicate observers.
 
 ### Windows verification (2026-10-18)
 
-The pre-release audit started from 39e17ce and verified candidate 4fef1fa,
-including the Phoebus alias-spacing correction. A clean native application
-build passed in 60.906 seconds with no compiler warnings or errors, using
-MSVC 2022, Qt 6.11.2 and EPICS Base 7.0.10.1-DEV. The complete required
+The pre-release audit started from 39e17ce. This checkpoint includes the
+Phoebus alias-spacing correction, shared CA wakeup ownership and handoff,
+repeater startup retries, and native test-header dependencies. A clean native
+application build passed in 54.813 seconds with no compiler warnings or
+errors, using MSVC 2022, Qt 6.11.2 and EPICS Base 7.0.10.1-DEV. The complete required
 suite ran in a scratch source copy with loopback-only CA/PVA settings and
-passed 1,386 checks with no failures and 17 skips:
+passed 1,390 checks with no failures and 17 skips in 196.234 seconds:
 
 | Suite | Passed | Skipped |
 | --- | ---: | ---: |
 | Core | 435 | 14 |
 | Modern UI | 258 | 2 |
 | Classic UI | 259 | 1 |
-| Loopback IOC | 147 | 0 |
+| Loopback IOC | 150 | 0 |
 | pvAccess | 77 | 0 |
-| Portable helpers | 124 | 0 |
+| Portable helpers | 125 | 0 |
 | Notifications | 57 | 0 |
 | Analytics | 29 | 0 |
 
-The optional Fusion suite passed 259 checks with one skip. Separate offscreen
-dialog-gallery runs passed three checks each, producing 46 modern and 32
-classic PNG captures. The combined required, Fusion and gallery run
-completed in 218.969 seconds. These checks include
-the test-owned `caRepeater`, shared Makefiles, bounded-memory behavior and
-the regression cases that were unverified in the earlier report.
+The optional Fusion suite passed 259 checks with one skip. Both separate
+offscreen dialog-gallery runs passed, producing 46 modern and 32 classic PNG
+captures. The optional Fusion and gallery targets completed in 122.360 seconds.
+These checks cover test-owned `caRepeater` startup
+retries and cleanup, shared build rules, bounded log recovery, and pvAccess
+callback queues.
 
 Qt 5 was not installed on this Windows host. The current candidate's Linux
 and macOS builds, Motif/X11 visual comparison, Unix helper interoperability,

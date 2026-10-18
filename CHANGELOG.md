@@ -44,6 +44,7 @@ Additional 1.0.0 audit decisions and corrections:
 
 - Phoebus XML remains an interchange format with documented conversion limits.
   Keep the original `.alhConfig` as the authoritative configuration.
+- Shared Channel Access wakeups remain active when closing one of several windows.
 - A rejected ACKPV submission after ACKS is submitted now reports partial
   submission. Runtime Overrides offers explicit **Retry ACKPV**, without
   repeating ACKS or retrying automatically when the connection recovers.

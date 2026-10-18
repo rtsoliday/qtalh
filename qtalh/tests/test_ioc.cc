@@ -15,6 +15,7 @@ namespace alh {
 // normal copied callback queue and dispatch path; no production injection API.
 struct ChannelAccessTestAccess {
   static int channelCount(const ChannelAccess& ca) { return int(ca.channels.size()); }
+  static void stopPollingTimer(ChannelAccess& ca) { ca.timer.stop(); }
   static bool failAlarm(ChannelAccess& ca, const QString& name, int status) {
     for (auto c : ca.channelsByName.value(name))
       if (c->alarm && !c->cancelled) {
@@ -886,6 +887,45 @@ private slots:
     QTRY_VERIFY(e.state(d.channels()[0]).mask[Disable]);
     QVERIFY(driver.put(prefix + "force", 0));
     QTRY_VERIFY(!e.state(d.channels()[0]).mask[Disable]);
+  }
+  void sharedContextUsesOneSocketNotifier() {
+    ChannelAccess first, second;
+    int callbacks = 0;
+    second.monitor(prefix + "alarm", [&](Event) { ++callbacks; });
+    QTRY_VERIFY(callbacks > 0);
+    const auto firstNotifiers = first.findChildren<QSocketNotifier*>();
+    const auto secondNotifiers = second.findChildren<QSocketNotifier*>();
+    QSet<qintptr> descriptors;
+    for (auto notifier : firstNotifiers + secondNotifiers)
+      if (notifier->isEnabled()) descriptors.insert(notifier->socket());
+    QVERIFY(!descriptors.isEmpty());
+    QCOMPARE(firstNotifiers.size() + secondNotifiers.size(), descriptors.size());
+  }
+  void sharedContextNotifierHandoff_data() {
+    QTest::addColumn<bool>("destroyFirst");
+    QTest::newRow("owner") << true;
+    QTest::newRow("other-adapter") << false;
+  }
+  void sharedContextNotifierHandoff() {
+    QFETCH(bool, destroyFirst);
+    auto first = std::make_unique<ChannelAccess>();
+    auto second = std::make_unique<ChannelAccess>();
+    auto survivor = destroyFirst ? second.get() : first.get();
+    int last = -1;
+    survivor->monitor(prefix + "alarm", [&](Event event) { last = event.severity; });
+    QTRY_VERIFY(survivor->canWrite(prefix + "alarm"));
+    QVERIFY(survivor->put(prefix + "alarm", 0));
+    QTRY_COMPARE(last, 0);
+    ChannelAccessTestAccess::stopPollingTimer(*first);
+    ChannelAccessTestAccess::stopPollingTimer(*second);
+    if (destroyFirst) first.reset();
+    else second.reset();
+    // Event delivery must keep working without the 100 ms fallback timer,
+    // whether the notifier's original owner or a later adapter was closed.
+    QVERIFY(survivor->put(prefix + "alarm", 20));
+    QTRY_COMPARE_WITH_TIMEOUT(last, 2, 3000);
+    QVERIFY(survivor->put(prefix + "alarm", 0));
+    QTRY_COMPARE_WITH_TIMEOUT(last, 0, 3000);
   }
   void twoWindowsAndReconnect() {
     auto first = std::make_unique<ChannelAccess>();

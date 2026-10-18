@@ -91,9 +91,9 @@ only; `-P` and `-O` report an explicit unsupported-option error on Windows.
 Windows file locks coordinate native QtALH processes; they do not provide
 POSIX lock interoperability with legacy ALH.
 
-Verified on 2026-10-18 at audited candidate 4fef1fa with MSVC 2022, Qt 6.11.2
+Verified on 2026-10-18 with MSVC 2022, Qt 6.11.2
 (including its installed Multimedia module) and EPICS Base 7.0.10.1-DEV on
-Windows x64: a clean application build and 1,386 checks passed, with 17 skips.
+Windows x64: a clean application build and 1,390 checks passed, with 17 skips.
 The current candidate has not been verified with Qt 5 or on Linux/macOS;
 see the [test guide](qtalh/tests/README.md) for results and limitations.
 The Windows flags explicitly enable
