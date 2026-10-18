@@ -3383,6 +3383,51 @@ $GUIDANCE https://example.invalid/guide
     QVERIFY(!e.state(n).mask[Disable]);
     QCOMPARE(e.state(n).severity, 2);
   }
+  void calculationInputConstantsUseCompleteNumbers_data() {
+    QTest::addColumn<QString>("input");
+    QTest::addColumn<bool>("constant");
+    QTest::addColumn<double>("value");
+    // Documented ALH difference: ALH 1.2.35 used atof() (zero meant a PV name)
+    // when loading and isalpha() in the Force PV dialog. Qt treats an input as a
+    // constant only when the complete token is a number.
+    QTest::newRow("zero") << "0" << true << 0.0;
+    QTest::newRow("decimal zero") << "0.0" << true << 0.0;
+    QTest::newRow("negative") << "-2" << true << -2.0;
+    QTest::newRow("exponent") << "2e0" << true << 2.0;
+    QTest::newRow("digit-leading PV") << "1ID:gate" << false << 0.0;
+    QTest::newRow("digit-leading lowercase PV") << "32idc:shutter" << false << 0.0;
+  }
+  void calculationInputConstantsUseCompleteNumbers() {
+    QFETCH(QString, input);
+    QFETCH(bool, constant);
+    QFETCH(double, value);
+    for (bool dialog : {false, true}) {
+      const QString inputs = "$FORCEPV_CALC_A trigger\n$FORCEPV_CALC_B " + input + "\n";
+      auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n$FORCEPV CALC -D--- 1 0\n"
+                           "$FORCEPV_CALC A+B\n" + (dialog ? QString() : inputs));
+      FakePv pv;
+      Engine e(d, {}, &pv);
+      auto n = d.channels()[0];
+      e.start();
+      if (dialog) {
+        // Force PV dialog edits use the same rule as loading.
+        auto edited = n->directives;
+        edited.push_back({"FORCEPV_CALC_A", "trigger"});
+        edited.push_back({"FORCEPV_CALC_B", input});
+        e.configureForce(n, edited, false);
+      }
+      QVERIFY(pv.numbers.contains("trigger"));
+      QCOMPARE(pv.numbers.contains(input), !constant);
+      pv.numbers["trigger"](1);
+      if (!constant) {
+        QCOMPARE(e.state(n).forceCurrent, -999.0); // Waits for the PV input.
+        QVERIFY(!e.state(n).mask[Disable]);
+        pv.numbers[input](value);
+      }
+      QCOMPARE(e.state(n).forceCurrent, 1 + value);
+      QCOMPARE(e.state(n).mask[Disable], 1 + value == 1);
+    }
+  }
   void commands() {
     auto d = parseConfig(
         "GROUP NULL root\n$SEVRCOMMAND UP_ALARM root-alarm\nCHANNEL root pv\n$SEVRCOMMAND UP_MAJOR "

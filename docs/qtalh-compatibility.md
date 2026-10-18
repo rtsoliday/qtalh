@@ -37,6 +37,18 @@ Numeric CALC inputs wait for all named PV inputs; constants can evaluate without
 subscriptions. Cancelled subscriptions retain their owner identity so one row
 cannot cancel another row using the same PV.
 
+`$FORCEPV_CALC_A` through `F` inputs are constants only when the complete token
+is a number, such as `0`, `-2`, or `2e0`; any other token is a PV name, both when
+loading and in the Force PV dialog. ALH 1.2.35 used the token's leading number
+instead. When loading, a token with a nonzero leading number became that
+constant and any other token, including `0`, named a PV; the dialog treated any
+token not starting with a letter as its leading number. Under ALH, inputs such as
+`1ID:gate` or `32idc:shutter` were therefore constants 1 and 32, and a loaded
+`0` named a PV that normally never connected, so the calculation never ran.
+QtALH monitors those PVs and treats `0` as the constant zero, so a migrated
+calculation can apply or reset masks differently. Check inputs that begin with
+a digit.
+
 Value-only CA updates refresh the displayed value without adding alarm-log records.
 Global ACKS/ACKT changes remain logged, including IOC confirmations of operator
 mask changes. Re-enabling a disabled channel runs its severity commands for the

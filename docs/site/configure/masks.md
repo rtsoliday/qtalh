@@ -68,4 +68,6 @@ $FORCEPV_CALC_A example:maintenance
 
 Evaluation waits until all named PV inputs are available. Constants can evaluate immediately; omitted inputs are zero. The main-window footer shows the facility-wide count of disabled Force PVs.
 
+An input is a constant only when the whole token is a number, such as `0` or `-2`. A name beginning with a digit, such as `1ID:gate`, is a PV; legacy ALH treated it as the constant 1, and treated a loaded `0` as a PV name.
+
 Validate configuration changes before activating them. For argument limits and retry behavior, see the [configuration reference](/reference/configuration) and [compatibility inventory](/understand/compatibility).
