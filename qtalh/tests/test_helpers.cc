@@ -26,6 +26,7 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <csignal>
+#include <fcntl.h>
 #include <cstdarg>
 #include <unistd.h>
 #include <pwd.h>
@@ -2591,6 +2592,27 @@ private slots:
       struct stat info{};
       QCOMPARE(::stat(QFile::encodeName(o.config + suffix).constData(), &info), 0);
       QCOMPARE(suffix + QString::number(info.st_mode & 0777, 8), suffix + QString::number(mode, 8));
+    }
+  }
+  void lockFilesCloseOnExec() {
+    // $COMMAND/$SEVRCOMMAND children and the mailer are started without
+    // closing inherited descriptors, so the lock descriptors must not leak.
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    Options o; o.lock = true; o.broadcast = true; o.noLog = true;
+    o.config = dir.filePath("config");
+    Logging log(o, "root");
+    for (const char* suffix : {".LOCK", ".MESSLOCK"}) {
+      struct stat lock{};
+      QCOMPARE(::stat(QFile::encodeName(o.config + suffix).constData(), &lock), 0);
+      int open = 0;
+      for (int fd = 0; fd < 1024; ++fd) {
+        struct stat info{};
+        if (::fstat(fd, &info) != 0 || info.st_dev != lock.st_dev || info.st_ino != lock.st_ino)
+          continue;
+        ++open;
+        QVERIFY2(::fcntl(fd, F_GETFD) & FD_CLOEXEC, suffix);
+      }
+      QVERIFY2(open > 0, suffix);
     }
   }
   void lockOpenRecoveryWithCompetitor() {
