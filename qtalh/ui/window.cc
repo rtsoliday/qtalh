@@ -2929,6 +2929,27 @@ void Window::exitOnInterrupt() {
   // ALH -B: SIGINT runs exit_quit without confirmation. closeEvent refuses
   // while this instance's broadcast is being delivered, as exit_quit does.
   quitting = true;
+  // A stack modal dialog of this window (file chooser, print dialog, message
+  // box) may be inside exec(). Closing the window there would delete it from
+  // that dialog's event loop and free the stack dialog. Reject such dialogs
+  // and exit once their exec() has returned.
+  bool waiting = false;
+  for (auto window : QApplication::topLevelWidgets()) {
+    if (!window->isModal() || window->testAttribute(Qt::WA_DeleteOnClose) ||
+        (!window->isVisible() && window != QApplication::activeModalWidget()))
+      continue;
+    for (auto w = window->parentWidget(); w; w = w->parentWidget())
+      if (w == this || w == runtime) {
+        waiting = true;
+        if (auto dialog = qobject_cast<QDialog*>(window)) dialog->reject();
+        else window->close();
+        break;
+      }
+  }
+  if (waiting) {
+    QTimer::singleShot(50, this, [this] { exitOnInterrupt(); });
+    return;
+  }
   close();
 }
 void handleInterrupt(Window* window) {

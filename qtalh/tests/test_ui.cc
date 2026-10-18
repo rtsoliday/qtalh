@@ -2774,6 +2774,21 @@ private slots:
     QVERIFY(!ops.contains("Setup---Exit"));
     QVERIFY(ops.contains("A broadcast is still being delivered"));
   }
+  void interruptDuringStackModalExitsAfterIt() {
+    // -B SIGINT closes the window without confirmation. A stack modal dialog,
+    // such as File > Open's chooser, may be inside exec(): it must be rejected
+    // and the window closed after exec() returns, not deleted inside its loop.
+    QPointer<Window> w = new Window(sample(), options(false), false);
+    w->show();
+    int result = -1;
+    QTimer::singleShot(100, w, [&] { w->exitOnInterrupt(); });
+    {
+      QDialog chooser(w);
+      result = chooser.exec();
+    }
+    QCOMPARE(result, int(QDialog::Rejected));
+    QTRY_VERIFY(!w);
+  }
 #ifndef Q_OS_WIN
   void interruptMatchesLegacy_data() {
     QTest::addColumn<int>("number"); QTest::addColumn<bool>("broadcast");
