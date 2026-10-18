@@ -887,7 +887,9 @@ this way: Modify Mask NoAckT, a changed T box in Force Mask, or a Force PV.
 Requests for other bits (Add, Disable, NoAck, NoLog, the NoAck timer, Reset
 and Restore Selected) keep each row's own T bit and write ACKT only when that
 row's bit changes, as ALH's alChangeChanMask does, so a cancelled or not yet
-updated duplicate row cannot write its stale NoAckT.
+updated duplicate row cannot write its stale NoAckT. An accepted request yields
+to a later different value from a row that has already confirmed it, such as
+a change by another client or an IOC reboot.
 
 For QtALH 1.0.0, local NoAckT preserves ALH's existing latch behavior: enabling
 it after a transient has already cleared does not erase that unacknowledged

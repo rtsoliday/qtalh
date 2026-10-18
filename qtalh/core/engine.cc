@@ -416,6 +416,16 @@ void Engine::process(Node* n, Event e, qint64 time, int monitorSeverity) {
       s.mask[AckT] = !e.ackt;
       const auto record = acknowledgementIdentity(n->name);
       observedRecordAckT.insert(record, !e.ackt);
+      // Each monitor delivers its updates in order. Once this row has
+      // confirmed the accepted request, a different value is a later change
+      // (another client, an IOC reboot) that the old intent must not override.
+      auto intent = acceptedAckT.find(record);
+      if (intent != acceptedAckT.end()) {
+        if (intent->value == !e.ackt)
+          intent->confirmedBy.insert(n);
+        else if (intent->confirmedBy.contains(n))
+          acceptedAckT.erase(intent);
+      }
     }
     // Fix an ALH bug: synthetic connection/access errors carry ACKS=0, which
     // used to silence ERROR and hide it in the unacknowledged filter. Latch
@@ -810,7 +820,9 @@ bool Engine::applyMask(Node* n, Mask requested, bool automatic, Node* forceSourc
     // Before an IOC monitor arrives, the configured bit is only a placeholder.
     // An automatic force must write (or defer) even if that bit already matches.
     const auto record = acknowledgementIdentity(c->name);
-    const bool accepted = acceptedAckT.value(record, observedRecordAckT.value(record, old.mask[AckT]));
+    const auto intent = acceptedAckT.constFind(record);
+    const bool accepted = intent != acceptedAckT.cend()
+        ? intent->value : observedRecordAckT.value(record, old.mask[AckT]);
     const bool observed = observedRecordAckT.value(record, accepted);
     // One row's confirmation must not discard accepted intent: another row
     // may still deliver an older observation. Conversely, retaining intent
@@ -823,7 +835,7 @@ bool Engine::applyMask(Node* n, Mask requested, bool automatic, Node* forceSourc
         : mask[AckT] != old.mask[AckT];
     if (options.global && !options.passive && ackTChange) {
       if (pv && pv->put(c->name, !mask[AckT], WriteKind::AckTransient)) {
-        acceptedAckT.insert(record, mask[AckT]);
+        acceptedAckT.insert(record, {mask[AckT], {}});
         observedRecordAckT.remove(record); // Wait for feedback after this submission.
       } else {
         if (automatic)
@@ -874,7 +886,7 @@ void Engine::retryForceWrites() {
     if (current == pendingForceAckT.cend() || current->request != pending.request)
       continue;
     pendingForceAckT.remove(acknowledgementIdentity(c->name));
-    acceptedAckT.insert(acknowledgementIdentity(c->name), pending.mask);
+    acceptedAckT.insert(acknowledgementIdentity(c->name), {pending.mask, {}});
     observedRecordAckT.remove(acknowledgementIdentity(c->name));
     State before = states[c];
     // Preserve per-row display behavior: update the requesting row here; other

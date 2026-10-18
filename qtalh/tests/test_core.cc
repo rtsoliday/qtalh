@@ -849,6 +849,23 @@ private slots:
     QVERIFY(pv.writes.isEmpty());
     QVERIFY(!operations.join('\n').contains("ACKT write failed"));
   }
+  void deferredForceAckTDoesNotOverrideLaterIocChange() {
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n$FORCEPV force -D--- 1 0\n");
+    FakePv pv; Engine e(d, {true}, &pv); e.start(); auto n = d.channels()[0];
+    QStringList operations;
+    e.operation = [&](Node*, const QString& text, OperationKind) { operations << text; };
+    e.event(n, {}); e.modifyMask(n, AckT, 1); e.event(n, {0, 0, 0, 0, "normal"});
+    e.event(n, {}); // Another client sets ACKT=YES (T off).
+    pv.writes.clear(); pv.unwritable.insert("pv");
+    pv.numbers["force"](1); // The force mask's T matches the IOC; nothing to write or defer.
+    QVERIFY(e.state(n).mask[Disable]);
+    QVERIFY(pv.writes.isEmpty());
+    e.event(n, {0, 0, 0, 0, "normal"}); // A newer external ACKT=NO.
+    pv.unwritable.clear(); e.tick();
+    QVERIFY(pv.writes.isEmpty());
+    QVERIFY(!operations.join('\n').contains("Applied deferred force ACKT setting"));
+    QVERIFY(e.state(n).mask[AckT]);
+  }
   void enablingLocalNoAckTPreservesExistingLatch() {
     auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
     Engine e(d); auto n = d.channels()[0];

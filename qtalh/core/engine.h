@@ -224,7 +224,14 @@ private:
   QHash<QString, PendingAckT> pendingForceAckT;
   // Compare requests with the latest accepted intent/record observation, not
   // another display row's mask while its own monitor is still catching up.
-  QHash<QString, bool> acceptedAckT, observedRecordAckT;
+  // An intent stays authoritative over rows that have not confirmed it yet; a
+  // different value from a row that already confirmed it is a newer IOC change.
+  struct AcceptedAckT {
+    bool value = false;
+    QSet<const Node*> confirmedBy; // Compared only, never dereferenced.
+  };
+  QHash<QString, AcceptedAckT> acceptedAckT;
+  QHash<QString, bool> observedRecordAckT;
   quint64 nextAckTRequest = 0;
   struct ForceRuntime;
   // Editable directives do not own live CALC variables or subscription lifetimes.
