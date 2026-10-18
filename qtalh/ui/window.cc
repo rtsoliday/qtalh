@@ -162,6 +162,16 @@ QString code(int s) {
                                   QStringLiteral("V"), QStringLiteral("E")};
   return codes[qBound(0, s, 4)];
 }
+// A modal window below a dialog may be a stack object inside exec(). Closing,
+// clearing or deleting the dialog there would destroy it, so wait until it returns.
+// Delete-on-close heap boxes are not in exec() and are deleted safely with their parent.
+bool hostsModal(const QWidget* dialog) {
+  for (auto window : QApplication::topLevelWidgets())
+    if (window->isVisible() && window->isModal() && !window->testAttribute(Qt::WA_DeleteOnClose))
+      for (auto w = window->parentWidget(); w; w = w->parentWidget())
+        if (w == dialog) return true;
+  return false;
+}
 } // namespace
 AlarmModel::AlarmModel(Document* d, Engine* e, bool t, QObject* p)
     : QAbstractItemModel(p), doc(d), engine(e), tree(t), group(d->root.get()) {}
@@ -648,6 +658,13 @@ void Window::setupEngine() {
     logging->message = [this](const QString& s) { showText("Broadcast Message", s); };
     logging->reload = [this] {
       QTimer::singleShot(0, this, [this] {
+        // replace() closes, clears or deletes every dialog of this window, so it
+        // waits for their file choosers, editors and warnings to return.
+        for (auto dialog : findChildren<QDialog*>(QString(), Qt::FindDirectChildrenOnly))
+          if (hostsModal(dialog)) {
+            QTimer::singleShot(250, this, [this] { logging->reload(); });
+            return;
+          }
         try {
           replace(loadConfig(doc.filename, options.configDir), false);
           // Audit only a validated reload, never editor snapshots or a rejected file.
@@ -1997,7 +2014,15 @@ void Window::scheduleDialogSync() {
   if (!selection) {
     for (const auto& key : selectionDialogs.keys()) {
       const auto dialog = selectionDialogs.value(key).window;
-      if (dialog) dialog->close();
+      if (!dialog) continue;
+      if (!hostsModal(dialog)) dialog->close();
+      else if (!dialogClosePending) {
+        dialogClosePending = true;
+        QTimer::singleShot(250, this, [this] {
+          dialogClosePending = false;
+          scheduleDialogSync();
+        });
+      }
     }
     return;
   }
@@ -2010,8 +2035,8 @@ void Window::scheduleDialogSync() {
     for (const auto& key : selectionDialogs.keys()) {
       const auto entry = selectionDialogs.value(key);
       if (!entry.window) continue;
-      auto modal = QApplication::activeModalWidget();
-      if (modal && (modal == entry.window || entry.window->isAncestorOf(modal))) continue;
+      // isAncestorOf() stops at window boundaries, so it never sees a modal child window.
+      if (QApplication::activeModalWidget() == entry.window || hostsModal(entry.window)) continue;
       if (selection && entry.node == selection) {
         if (auto summary = entry.window->findChild<QLabel*>("currentMaskSummary")) {
           const auto& current = engine->state(selection);

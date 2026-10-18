@@ -4239,6 +4239,46 @@ private slots:
     QTRY_VERIFY(!warning);
     QVERIFY(!qApp->activeModalWidget());
   }
+  void reloadWaitsForToolModal_data() {
+    QTest::addColumn<QString>("action"); QTest::addColumn<QString>("tool");
+    QTest::addColumn<QString>("button"); QTest::addColumn<QString>("modal");
+    QTest::newRow("log-browser-file") << "Browser for Alarm Log" << "alarmLogBrowser" << "Browse..."
+                                      << "fileSelectionDialog";
+    QTest::newRow("notification-editor") << "Notifications..." << "notificationsDialog"
+                                         << "addNotificationDestination" << "notificationDestinationEditor";
+  }
+  void reloadWaitsForToolModal() {
+    // A reload closes every tool dialog. Their file choosers and editors are
+    // stack objects inside exec(), so the reload waits until they return.
+    QFETCH(QString, action); QFETCH(QString, tool); QFETCH(QString, button); QFETCH(QString, modal);
+    QTemporaryDir dir; auto o = options(false); o.broadcast = true;
+    o.configDir = dir.path(); o.config = dir.filePath("config");
+    saveConfig(parseConfig("GROUP NULL root\nCHANNEL root one\n"), o.config);
+    auto w = std::make_unique<Window>(loadConfig(o.config), o, false);
+    w->show();
+    for (auto a : w->findChildren<QAction*>()) if (a->text() == action) a->trigger();
+    QPointer<QDialog> dialog = w->findChild<QDialog*>(tool); QVERIFY(dialog);
+    QPushButton* open = nullptr;
+    for (auto b : dialog->findChildren<QPushButton*>())
+      if (b->objectName() == button || b->text() == button) open = b;
+    QVERIFY(open);
+    saveConfig(parseConfig("GROUP NULL root\n$ALIAS reloaded\nCHANNEL root one\n"), o.config);
+    Logging sender(o, "root");
+    QString shown; bool sent = false, reloadedInside = true;
+    QTimer::singleShot(0, [&] {
+      if (auto child = qApp->activeModalWidget()) shown = child->objectName();
+      sent = sender.sendBroadcast("reload", 0, true);
+      // Logging polls for broadcasts every 2 s, here inside the modal's own loop.
+      QTimer::singleShot(4000, [&] {
+        reloadedInside = w->document().root->label() == "reloaded";
+        if (auto child = qobject_cast<QDialog*>(qApp->activeModalWidget())) child->reject();
+      });
+    });
+    open->click();
+    QCOMPARE(shown, modal); QVERIFY(sent); QVERIFY(!reloadedInside);
+    QTRY_COMPARE(w->document().root->label(), QString("reloaded"));
+    QTRY_VERIFY(!dialog);
+  }
   void summaryIncludesFacilityChannels() {
     auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root direct\nGROUP root branch\nCHANNEL branch nested\n"), options(false), false);
     auto channels = w->document().channels();

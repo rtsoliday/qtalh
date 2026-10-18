@@ -511,6 +511,8 @@ installs its handlers. Messages are polled every two seconds, and senders hold d
 for 60 seconds; another send reports busy during that interval. Broadcast actions
 send a message, reload the named configuration, or suppress alarm logging and
 commands for 1–10 minutes. Monitoring continues. Reload preserves Silence Forever.
+A reload that arrives while a file chooser, editor or warning opened from another
+dialog is open waits until that window closes.
 
 Linux/macOS helpers retain these positional arguments:
 

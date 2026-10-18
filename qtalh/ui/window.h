@@ -146,7 +146,7 @@ private:
   };
   QMap<QString, SelectionDialog> selectionDialogs;
   QString rebuildingDialog;
-  bool dialogSyncPending = false, auditingError = false;
+  bool dialogSyncPending = false, dialogClosePending = false, auditingError = false;
   QDialog* beginSelectionDialog(const QString&, const QString&, std::function<void()>);
   void finishSelectionDialog(QDialog*);
   void clearDialogContent(QDialog*);
