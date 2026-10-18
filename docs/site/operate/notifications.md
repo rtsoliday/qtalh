@@ -123,6 +123,14 @@ needed by those episodes. Dispatch waits for fresh observations. Global latches
 follow the IOC. Removed/ambiguous channels and edited/disabled subscriptions lose
 pending work. Failed configuration reloads leave notifications unchanged.
 
+Subscriptions are bound to the configuration's canonical path, with symbolic
+links resolved. If a reload resolves the configuration to a different file, for
+example after a symbolic link is retargeted, enabled notifications pause, pending
+work is cancelled, and the pause is recorded in **Activity** and the operation
+log. Subscriptions saved for the previous file remain in the settings file but no
+longer match or appear in the dialog; add subscriptions for the new file, or
+restore the link and reload, then enable notifications again.
+
 **Activity** retains the latest 1,000 records, including queued, submitting,
 accepted/submitted, retry, cancelled, failed, and throttled events. URLs, tokens,
 and mailer output are excluded. Notification operations also use the operation

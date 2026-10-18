@@ -917,6 +917,49 @@ private slots:
     QVERIFY(service.activity.join('\n').contains(QRegularExpression(
         "Submitting: Pager%1; message [^;]+; attempt 1(\n|$)")));
   }
+  void configurationChangeRecordsPause() {
+    QTemporaryDir dir;
+    for (auto name : {"a.alh", "b.alh"}) {
+      QFile f(dir.filePath(name));
+      QVERIFY(f.open(QIODevice::WriteOnly));
+    }
+    auto doc = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
+    Engine engine(doc, {});
+    NotificationService service(nullptr, dir.filePath("settings.json"));
+    QStringList operations;
+    service.operation = [&](const QString& s) { operations << s; };
+    auto file = dir.filePath("a.alh");
+#ifndef Q_OS_WIN
+    // Versioned files deployed behind a symlink resolve to a new canonical path on reload.
+    file = dir.filePath("current.alh");
+    QVERIFY(QFile::link(dir.filePath("a.alh"), file));
+#endif
+    service.attach(&engine, doc.channels(), file);
+    QVERIFY(operations.isEmpty());
+    auto s = settings();
+    s.subscriptions[0].configuration = notificationConfiguration(file);
+    service.apply(s);
+    service.enable(true);
+    QCOMPARE(service.policy.matchCount(s.subscriptions[0], service.channels()), 1);
+    service.attach(&engine, doc.channels(), file);
+    QVERIFY(service.policy.enabled());
+    const int before = service.activity.size();
+    operations.clear();
+#ifndef Q_OS_WIN
+    QVERIFY(QFile::remove(file));
+    QVERIFY(QFile::link(dir.filePath("b.alh"), file));
+#else
+    file = dir.filePath("b.alh");
+#endif
+    service.attach(&engine, doc.channels(), file);
+    QVERIFY(!service.policy.enabled());
+    QCOMPARE(service.policy.matchCount(s.subscriptions[0], service.channels()), 0);
+    QCOMPARE(service.activity.size(), before + 1);
+    QVERIFY(service.activity.last().contains("Paused"));
+    QVERIFY(service.activity.last().contains(notificationConfiguration(dir.filePath("b.alh"))));
+    QCOMPARE(operations.size(), 1);
+    QVERIFY(operations[0].startsWith("Notification Paused"));
+  }
   void engineObserverAndLocalReload() {
     auto doc = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
     Engine engine(doc, {});

@@ -101,7 +101,8 @@ channels also discards their session totals and detail; a **PARTIAL SESSION**
 notice and the CSV `removed_channel_history_pruned` flag identify this loss.
 Repeated reloads reuse unchanged ambiguous entries; their alarm histories are
 not merged. A failed configuration reload leaves the
-session unchanged. Opening another configuration starts a new session.
+session unchanged. Opening another configuration, or reloading a symbolic link
+retargeted to another file, starts a new session.
 
 **Reset Analytics** clears only analytics and establishes new observation
 baselines. Alarm, shelving, acknowledgement, and notification state remain intact.

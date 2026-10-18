@@ -128,8 +128,14 @@ void NotificationService::attach(Engine* e, const QVector<Node*>& n, const QStri
   nodes = n;
   auto canonical = notificationConfiguration(file);
   if (canonical != configuration) {
+    // A different resolved file (for example, a retargeted symbolic link) has a
+    // different subscription set; pause as a new runtime would, but say so.
+    const bool wasEnabled = policy.enabled();
     policy.enable(false);
     configuration = canonical;
+    if (wasEnabled)
+      record("Paused; configuration changed to " + configuration +
+             "; pending notifications cancelled");
   }
   policy.configure(policy.settings(), configuration);
   QHash<QString, int> counts;
