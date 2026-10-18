@@ -105,6 +105,7 @@ struct TestChannel final : pva::Channel, std::enable_shared_from_this<TestChanne
 };
 struct TestProvider final : pva::ChannelProvider, std::enable_shared_from_this<TestProvider> {
   std::vector<std::shared_ptr<TestChannel>> channels;
+  bool connectOnCreate = true;
   std::string getProviderName() override { return "pva"; }
   void destroy() override {}
   pva::ChannelFind::shared_pointer channelFind(const std::string&,
@@ -117,7 +118,8 @@ struct TestProvider final : pva::ChannelProvider, std::enable_shared_from_this<T
     channel->name = name;
     channels.push_back(channel);
     requester->channelCreated(pvd::Status::Ok, channel);
-    channel->state(pva::Channel::CONNECTED);
+    if (connectOnCreate)
+      channel->state(pva::Channel::CONNECTED);
     return channel;
   }
 };
@@ -523,6 +525,47 @@ private slots:
     QVERIFY(recovered != writer);
     recovered->ready();
     QTRY_COMPARE(recovered->submitted, QVector<double>{2});
+  }
+  void idleOutputDoesNotReportWriteTimeout_data() {
+    QTest::addColumn<bool>("passive");
+    QTest::addColumn<bool>("online");
+    QTest::newRow("active, never connected") << false << false;
+    QTest::newRow("active, setup unanswered") << false << true;
+    QTest::newRow("passive, never connected") << true << false;
+    QTest::newRow("passive, connected") << true << true;
+  }
+  void idleOutputDoesNotReportWriteTimeout() {
+    // SEVRPV/ACKPV/HEARTBEATPV outputs are prepared in every mode. With no
+    // write submitted, a missing IOC must not produce a cancelled-write report.
+    QFETCH(bool, passive); QFETCH(bool, online);
+    provider->connectOnCreate = online;
+    PvAccess pv({true, passive});
+    pv.writeTimeoutMs = 30;
+    QStringList errors;
+    pv.error = [&](const QString& s) { errors << s; };
+    pv.prepare("pva://output");
+    auto channel = provider->channels.back();
+    QTest::qWait(200);
+    QVERIFY2(errors.isEmpty(), qPrintable(errors.join("; ")));
+    if (!online) channel->state(pva::Channel::CONNECTED);
+    QCoreApplication::processEvents();
+    if (passive) {
+      QVERIFY(!channel->writer); // Passive mode opens no put operation.
+      QVERIFY(!pv.put("pva://output", 1));
+      QVERIFY(!channel->writer);
+      QVERIFY(errors.isEmpty());
+      return;
+    }
+    QVERIFY(channel->writer);
+    channel->writer->ready();
+    QCoreApplication::processEvents();
+    QVERIFY(pv.canWrite("pva://output"));
+    QVERIFY(pv.put("pva://output", 1));
+    QCOMPARE(channel->writer->submitted, QVector<double>{1});
+    channel->writer->done();
+    QCoreApplication::processEvents();
+    QTest::qWait(100);
+    QVERIFY2(errors.isEmpty(), qPrintable(errors.join("; ")));
   }
 };
 QTEST_GUILESS_MAIN(PvaTests)

@@ -439,16 +439,15 @@ void PvAccess::subscribe(Channel* c) {
 }
 void PvAccess::ensurePut(Channel* c) {
   auto& ops = *c->ops;
-  if (!ops.channel || ops.put)
+  // Passive mode never writes. The setup deadline starts with a queued write
+  // (see put()): an idle output, or one whose IOC is down, has none pending.
+  if (options.passive || !ops.channel || ops.put)
     return;
-  c->putDeadline = monotonicNow() + qMax(1, writeTimeoutMs);
-  noteDeadline(c);
   try {
     ops.putSerial = ++nextId;
     ops.putRequester = std::make_shared<PutRequester>(inbox, c->id, ops.putSerial);
     ops.put = ops.channel->createChannelPut(ops.putRequester, request("field(value)"));
   } catch (const std::exception& e) {
-    c->putDeadline = 0;
     report("Write " + c->name + ": " + e.what());
   }
 }
@@ -651,6 +650,11 @@ bool PvAccess::put(const QString& n, double v, WriteKind kind) {
     // A queued severity stays pending until the server confirms it, so a
     // disconnect, refusal, timeout or rejection replays it on connection.
     sendPut(c);
+    if ((c = channelsById.value(id)) && !c->putBusy && !c->puts.empty() && !c->putDeadline) {
+      // Queued behind an unanswered put setup.
+      c->putDeadline = monotonicNow() + qMax(1, writeTimeoutMs);
+      noteDeadline(c);
+    }
     return true;
   }
   debugLog(options.debug, "PVA", "write unavailable: " + n);
