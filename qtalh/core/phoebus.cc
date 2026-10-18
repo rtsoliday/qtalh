@@ -290,10 +290,17 @@ void addTitleDetails(const Element& e, Node& n, Notes& notes) {
       // Web guidance opens like ALH's guidance URL; display files need Phoebus.
       const bool url = !details.contains('\n') && !details.contains('\r') &&
           details.contains(QRegularExpression("^(https?|file):", QRegularExpression::CaseInsensitiveOption));
-      if (url && utf8Bytes("$GUIDANCE " + details) <= LegacyLineBytes)
+      // ALH opens a guidance URL with /bin/sh -c 'xdg-open "<url>" &'
+      // (alh/browser.c), where " $ ` and \ are shell syntax inside the quotes.
+      static const QRegularExpression shellQuoting("[\"$`\\\\]");
+      const bool quoting = details.contains(shellQuoting);
+      if (url && !quoting && utf8Bytes("$GUIDANCE " + details) <= LegacyLineBytes)
         n.directives.push_back({"GUIDANCE", details});
       else {
-        if (url) notes.add("Display URLs longer than ALH's 498-byte line limit kept as guidance text", path(&n));
+        if (url && quoting)
+          notes.add("Display URLs containing \", $, ` or \\ kept as guidance text", path(&n));
+        else if (url)
+          notes.add("Display URLs longer than ALH's 498-byte line limit kept as guidance text", path(&n));
         guidance << "Display " + c.child("title") + ": " + details;
         notes.add("Phoebus displays kept as guidance text", path(&n));
       }

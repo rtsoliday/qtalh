@@ -47,6 +47,8 @@ Additional 1.0.0 audit decisions and corrections:
 - Phoebus imports keep every line within legacy ALH's 498-byte line limit:
   long descriptions are truncated, long commands and display URLs are kept
   as guidance text, and long guidance lines are wrapped, each with a note.
+  Display URLs containing shell quoting characters are also kept as guidance
+  text, because ALH opens guidance URLs through the shell.
 - Shared Channel Access wakeups remain active when closing one of several windows.
 - A rejected ACKPV submission after ACKS is submitted now reports partial
   submission. Runtime Overrides offers explicit **Retry ACKPV**, without

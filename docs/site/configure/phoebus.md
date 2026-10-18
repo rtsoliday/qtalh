@@ -73,7 +73,9 @@ written as `\$`, because ALH ends a guidance block at any such line and reads th
 rest as configuration. ALH also reads a line longer than 498 bytes as several
 lines, so imports keep every line within that limit: longer guidance lines are
 wrapped, longer descriptions are truncated, and longer commands and display URLs
-are kept as guidance text, each with a conversion note. Delay and count must be nonnegative integers; counts are limited
+are kept as guidance text, each with a conversion note. A display URL that
+contains `"`, `$`, `` ` `` or `\` is also kept as guidance text with a note,
+because ALH passes guidance URLs to `/bin/sh` inside double quotes. Delay and count must be nonnegative integers; counts are limited
 to ALH's maximum of 1,000,000.
 
 Command text is copied unchanged, but the two systems run it differently.

@@ -4254,6 +4254,23 @@ $GUIDANCE https://example.invalid/guide
     for (auto n : back.nodes())
       QVERIFY(n->option("SEVRCOMMAND").isEmpty());
   }
+  void phoebusDisplayUrlShellQuoting() {
+    // Legacy ALH opens $GUIDANCE URLs through /bin/sh inside double quotes.
+    QStringList notes;
+    const auto doc = parsePhoebusXml(
+        "<config name=\"F\"><pv name=\"a\"><display><title>Panel</title>"
+        "<details>https://example.invalid/x?a=1&amp;b=2</details></display></pv>"
+        "<pv name=\"b\"><display><title>Bad</title>"
+        "<details>https://example.invalid/$(touch x)`id`\"\\</details></display></pv></config>",
+        {}, &notes);
+    QCOMPARE(doc.channels().size(), 2);
+    QCOMPARE(doc.channels()[0]->option("GUIDANCE"), QString("https://example.invalid/x?a=1&b=2"));
+    QVERIFY(doc.channels()[1]->option("GUIDANCE").isEmpty());
+    QVERIFY(doc.channels()[1]->option("GUIDANCE_TEXT").contains("$(touch x)`id`\"\\"));
+    QVERIFY(notes.join('\n').contains("kept as guidance text"));
+    for (const auto& line : writeConfig(doc).split('\n'))
+      QVERIFY2(!line.startsWith("$GUIDANCE https://example.invalid/$"), qPrintable(line));
+  }
   void phoebusRoundTrip() {
     const auto original = parseConfig(
         "GROUP NULL facility\nGROUP facility area\nCHANNEL area pv1 -D---\n$ALIAS First  PV\talias\n"
