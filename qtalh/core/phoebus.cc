@@ -340,7 +340,10 @@ void addChildren(const Element& e, Node& parent, Notes& notes) {
           notes.add("Disable-until dates imported as Disable; shelve instead", where);
       }
       if (c.child("latching").compare("false", Qt::CaseInsensitive) == 0) n->mask[AckT] = true;
-      const auto description = c.child("description").simplified();
+      // ALH aliases occupy one physical line. Flatten XML line breaks without
+      // collapsing meaningful internal spacing in an exported ALH alias.
+      auto description = c.child("description");
+      description.replace('\n', ' ').replace('\r', ' ');
       if (!description.isEmpty()) n->directives.push_back({"ALIAS", description});
       auto integer = [&](const QString& field, int maximum) {
         const auto text = c.child(field);

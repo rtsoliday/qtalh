@@ -28,6 +28,9 @@ paths. A few changes are not reported:
   characters, are left out on export.
 - Leading and trailing white space in each imported element's text is removed.
 
+Imported descriptions retain their internal spacing. Line breaks become spaces
+because an ALH alias occupies one line.
+
 ## From the command line
 
 ```sh

@@ -4097,7 +4097,7 @@ $GUIDANCE https://example.invalid/guide
   }
   void phoebusRoundTrip() {
     const auto original = parseConfig(
-        "GROUP NULL facility\nGROUP facility area\nCHANNEL area pv1 -D---\n$ALIAS First PV\n"
+        "GROUP NULL facility\nGROUP facility area\nCHANNEL area pv1 -D---\n$ALIAS First  PV\talias\n"
         "$GUIDANCE\nLine one\nLine two\n$END\n$COMMAND striptool pv1.stp\n$ALARMCOUNTFILTER 2 30\n"
         "CHANNEL area pv2 ---T-\nGROUP area inner\nCHANNEL inner pv3\n");
     QStringList notes;
@@ -4117,6 +4117,28 @@ $GUIDANCE https://example.invalid/guide
       return lines;
     };
     QCOMPARE(normalized(back), normalized(original));
+  }
+  void phoebusDescriptionWhitespace_data() {
+    QTest::addColumn<QByteArray>("description");
+    QTest::addColumn<QString>("alias");
+    QTest::newRow("spaces") << QByteArray("Gauge  1") << QString("Gauge  1");
+    QTest::newRow("tab") << QByteArray("Gauge&#9;1") << QString("Gauge\t1");
+    QTest::newRow("line-feed") << QByteArray("Gauge\n  1") << QString("Gauge   1");
+    QTest::newRow("carriage-return") << QByteArray("Gauge&#13;  1") << QString("Gauge   1");
+  }
+  void phoebusDescriptionWhitespace() {
+    QFETCH(QByteArray, description);
+    QFETCH(QString, alias);
+    const auto doc = parsePhoebusXml("<config name=\"root\"><pv name=\"pv\"><description>" +
+                                      description + "</description></pv></config>");
+    QCOMPARE(doc.channels().size(), 1);
+    QCOMPARE(doc.channels()[0]->option("ALIAS"), alias);
+    // A multiline XML description must still save as a single ALH alias line.
+    const auto saved = writeConfig(doc);
+    QVERIFY(saved.contains("$ALIAS " + alias + '\n'));
+    const auto back = parseConfig(saved);
+    QCOMPARE(back.channels().size(), 1);
+    QCOMPARE(back.channels()[0]->option("ALIAS"), alias);
   }
   void phoebusUnreportedChanges() {
     // Documented in docs/site/configure/phoebus.md: these changes have no note.
