@@ -609,8 +609,9 @@ int acquireLock(const QString& name, QString* failure = nullptr) {
 #endif
   return fd;
 }
-bool setLock(int fd, bool acquire) {
+bool setLock(int fd, bool acquire, QString* failure = nullptr) {
 #ifdef Q_OS_WIN
+  Q_UNUSED(failure); // Windows lock failures remain contention, as before.
   auto it = sharedLocks.find(fd);
   if (it == sharedLocks.end())
     return false;
@@ -626,7 +627,11 @@ bool setLock(int fd, bool acquire) {
     it->locked = acquire;
   return ok;
 #else
-  return lockf(fd, acquire ? F_TLOCK : F_ULOCK, 0) == 0;
+  if (lockf(fd, acquire ? F_TLOCK : F_ULOCK, 0) == 0) return true;
+  // As in ALH, only EAGAIN/EACCES mean that another process holds the lock.
+  if (failure && errno != EAGAIN && errno != EACCES)
+    *failure = QString::fromLocal8Bit(strerror(errno));
+  return false;
 #endif
 }
 void releaseLock(int fd) {
@@ -1037,11 +1042,13 @@ void Logging::tick(bool receiveBroadcast) {
     // instance in Slave forever. Reuse the inode-aware descriptor registry:
     // opening/closing an alias directly can release another window's lock.
     // Stay Slave until both opening the file and acquiring its lock succeed.
+    const auto path = options.lockFile + ".LOCK";
+    QString reason;
     if (lockFd < 0)
-      lockFd = acquireLock(options.lockFile + ".LOCK");
+      lockFd = acquireLock(path, &reason);
     if (lockFd >= 0) {
       bool wasMaster = master;
-      master = setLock(lockFd, true);
+      master = setLock(lockFd, true, &reason);
       if (wasMaster != master)
         debugLog(options.debug, "logging", master ? "became master" : "became slave");
       if (alarmFile) {
@@ -1049,8 +1056,10 @@ void Logging::tick(bool receiveBroadcast) {
           alarmFile->limit = -1; // Re-read records written by the previous process.
         alarmFile->master = master;
       }
-    } else if (error)
-      error("Cannot open logging lock file");
+      if (reason.isEmpty()) lockError.clear();
+      else reportLockError("Cannot lock logging lock file " + path + ": " + reason);
+    } else
+      reportLockError("Cannot open logging lock file " + path + ": " + reason);
   }
   if (suppressUntil && elapsed >= suppressUntil) {
     suppressUntil = 0;
@@ -1096,6 +1105,16 @@ void Logging::tick(bool receiveBroadcast) {
       suppressUntil = elapsed + minutes * 60000;
     }
   }
+}
+void Logging::reportLockError(const QString& failure) {
+  if (failure == lockError) return;
+  lockError = failure;
+  // Startup runs before the window installs its error handler.
+  QTimer::singleShot(0, this, [this, failure] {
+    if (lockError != failure) return;
+    if (error) error(failure);
+    else qWarning("%s", qPrintable(failure));
+  });
 }
 bool Logging::ensureBroadcastLock() {
   if (broadcastFd >= 0) return true;

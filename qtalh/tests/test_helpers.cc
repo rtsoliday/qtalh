@@ -12,7 +12,9 @@
 #include <QTimer>
 #include <QtTest>
 #include <algorithm>
+#include <cerrno>
 #include <cstdio>
+#include <cstring>
 #ifdef Q_OS_WIN
 #include <qt_windows.h>
 #else
@@ -27,8 +29,24 @@
 #include <cstdarg>
 #include <unistd.h>
 #include <pwd.h>
+#include <dlfcn.h>
 #endif
 using namespace alh;
+#ifndef Q_OS_WIN
+// Link-time seam: logging.o resolves lockf() to this definition, so a test can
+// emulate a lock directory whose filesystem rejects POSIX locks (for example,
+// NFS without lockd returns ENOLCK). Zero passes every call through to libc.
+static int lockfFailure = 0;
+extern "C" int lockf(int fd, int cmd, off_t len) {
+  if (lockfFailure && cmd == F_TLOCK) {
+    errno = lockfFailure;
+    return -1;
+  }
+  using Lockf = int (*)(int, int, off_t);
+  static const auto real = reinterpret_cast<Lockf>(dlsym(RTLD_NEXT, "lockf"));
+  return real(fd, cmd, len);
+}
+#endif
 static QString checkpointFor(const QString& path) {
   QFile file(path);
   if (!file.open(QIODevice::ReadOnly)) return {};
@@ -2450,14 +2468,71 @@ private slots:
     LoggingClock clock{[&] { ++reads; return QDateTime::currentMSecsSinceEpoch(); },
                        [&] { return elapsed; }};
     Logging log(o, "root", nullptr, clock);
+    QStringList errors; // Installed after construction, as Window does.
+    log.error = [&](const QString& s) { errors << s; };
     QVERIFY(!log.isMaster());
+    // The startup failure is deferred to the handler and names the file and cause.
+    QTRY_COMPARE(errors.size(), 1);
+    QVERIFY2(errors[0].contains(o.lockFile + ".LOCK"), qPrintable(errors[0]));
+#ifdef Q_OS_WIN
+    QVERIFY2(errors[0].contains("Windows error"), qPrintable(errors[0]));
+#else
+    QVERIFY2(errors[0].contains(QString::fromLocal8Bit(strerror(ENOENT))), qPrintable(errors[0]));
+#endif
     elapsed = 20000;
     const int before = reads; QTRY_VERIFY(reads > before);
     QVERIFY(!log.isMaster()); // A repeated failure must never imply ownership.
+    QTest::qWait(10);
+    QCOMPARE(errors.size(), 1); // An unchanged failure is not repeated every check.
     QVERIFY(QDir().mkpath(dir.filePath("missing")));
     elapsed = 40000;
     QTRY_VERIFY(log.isMaster());
+    QCOMPARE(errors.size(), 1);
   }
+#ifndef Q_OS_WIN
+  void lockFailureIsNotContention_data() {
+    QTest::addColumn<int>("failure");
+    QTest::addColumn<bool>("reported");
+    QTest::newRow("EAGAIN contention") << EAGAIN << false;
+    QTest::newRow("EACCES contention") << EACCES << false;
+    QTest::newRow("ENOLCK") << ENOLCK << true;
+    QTest::newRow("EINVAL") << EINVAL << true;
+  }
+  void lockFailureIsNotContention() {
+    QFETCH(int, failure);
+    QFETCH(bool, reported);
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    Options o; o.lock = true; o.noLog = true; o.lockFile = dir.filePath("lock");
+    qint64 elapsed = 0;
+    int reads = 0;
+    LoggingClock clock{[&] { ++reads; return QDateTime::currentMSecsSinceEpoch(); },
+                       [&] { return elapsed; }};
+    lockfFailure = failure;
+    struct Restore { ~Restore() { lockfFailure = 0; } } restore;
+    Logging log(o, "root", nullptr, clock);
+    QStringList errors;
+    log.error = [&](const QString& s) { errors << s; };
+    QVERIFY(!log.isMaster());
+    QTest::qWait(10);
+    if (!reported) {
+      QVERIFY2(errors.isEmpty(), qPrintable(errors.join('\n'))); // Another master is not an error.
+    } else {
+      // ALH reported non-contention lockf errors instead of silently staying Slave.
+      QCOMPARE(errors.size(), 1);
+      QVERIFY2(errors[0].contains(o.lockFile + ".LOCK"), qPrintable(errors[0]));
+      QVERIFY2(errors[0].contains(QString::fromLocal8Bit(strerror(failure))), qPrintable(errors[0]));
+    }
+    elapsed = 20000;
+    int before = reads; QTRY_VERIFY(reads > before);
+    QVERIFY(!log.isMaster());
+    QTest::qWait(10);
+    QCOMPARE(errors.size(), reported ? 1 : 0); // Deduplicated across lock checks.
+    lockfFailure = 0;
+    elapsed = 40000;
+    QTRY_VERIFY(log.isMaster());
+    QCOMPARE(errors.size(), reported ? 1 : 0);
+  }
+#endif
 #ifndef Q_OS_WIN
   void lockFilesHonorUmask_data() {
     QTest::addColumn<int>("mask"); QTest::addColumn<int>("mode");

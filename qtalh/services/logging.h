@@ -81,6 +81,8 @@ private:
   void tick(bool receiveBroadcast = true);
   void reportOpenError(bool alarm, const QString&);
   QString alarmOpenError, opmodOpenError;
+  void reportLockError(const QString&);
+  QString lockError;
   bool ensureBroadcastLock();
   QString broadcastOpenError;
   void finishBroadcast();
