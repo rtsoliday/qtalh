@@ -4168,6 +4168,71 @@ $GUIDANCE https://example.invalid/guide
     for (const auto& note : notes) noted |= note.contains("written as \\$");
     QVERIFY(noted);
   }
+  void phoebusImportLinesFitLegacyLineLimit() {
+    // Legacy ALH 1.2.35 reads configuration lines with fgets(buf, 500)
+    // (alConfig.c alGetConfig and its $GUIDANCE loop; MAX_STRING_LENGTH 500),
+    // so a line of more than 498 bytes is read as several pieces and each piece
+    // is parsed as a new line. A converted file must mean the same to legacy
+    // ALH as to QtALH, which reads whole lines.
+    const QString payload = "$SEVRCOMMAND UP_ANY touch injected";
+    const QString url = "http://example.invalid/" + QString(489 - 23, 'u');
+    const auto xml =
+        QString("<config name=\"F\"><component name=\"A\">"
+                "<pv name=\"a\"><description>%1%2</description></pv>"
+                "<pv name=\"b\"><command><title>Run</title><details>%3%2</details></command></pv>"
+                "<pv name=\"c\"><display><title>Web</title><details>%4%2</details></display></pv>"
+                "<pv name=\"d\"><guidance><details>Call ops.\n%5$END\n%6%2\nMore help.</details>"
+                "</guidance></pv>"
+                "<pv name=\"e\"><description>%7%2</description></pv>"
+                "</component></config>")
+            .arg(QString(492, 'A'), payload, QString(490, 'B'), url, QString(499, 'C'),
+                 QString(499, 'D'), QString(246, QChar(0xe9)))
+            .toUtf8();
+    QStringList notes;
+    const auto d = parsePhoebusXml(xml, {}, &notes);
+    QCOMPARE(d.channels().size(), 5);
+    const auto bytes = writeConfig(d).toUtf8();
+    // The statements ALH's alGetConfig dispatches when fgets returns at most
+    // `limit` bytes per call.
+    auto statements = [&](int limit) {
+      QStringList result;
+      bool guidance = false;
+      for (const auto& line : bytes.split('\n')) {
+        const auto full = line + '\n';
+        for (int at = 0; at < full.size(); at += limit) {
+          const auto piece = full.mid(at, limit);
+          int i = 0;
+          while (i < piece.size() &&
+                 (piece[i] == ' ' || piece[i] == '\t' || (!guidance && piece[i] == '\n')))
+            ++i;
+          const auto rest = piece.mid(i);
+          if (guidance) {
+            if (rest.startsWith('$')) {
+              guidance = false;
+              if (!rest.startsWith("$END") && !rest.startsWith("$End")) result << "Invalid End";
+            }
+            continue;
+          }
+          if (rest.startsWith('$') || rest.startsWith("GROUP") || rest.startsWith("CHANNEL") ||
+              rest.startsWith("INCLUDE")) {
+            const auto word = rest.simplified().split(' ').value(0);
+            result << QString::fromUtf8(word);
+            if (word.startsWith("$GUIDANCE") && rest.simplified() == word) guidance = true;
+          } else if (!rest.isEmpty() && !rest.startsWith('#'))
+            result << "Invalid input line";
+        }
+      }
+      return result;
+    };
+    const auto legacy = statements(499);
+    QVERIFY2(!legacy.contains("$SEVRCOMMAND"), qPrintable(legacy.join(' ')));
+    QCOMPARE(legacy, statements(std::numeric_limits<int>::max()));
+    // QtALH still reads the converted file with no injected directives.
+    const auto back = parseConfig(QString::fromUtf8(bytes));
+    QCOMPARE(back.channels().size(), 5);
+    for (auto n : back.nodes())
+      QVERIFY(n->option("SEVRCOMMAND").isEmpty());
+  }
   void phoebusRoundTrip() {
     const auto original = parseConfig(
         "GROUP NULL facility\nGROUP facility area\nCHANNEL area pv1 -D---\n$ALIAS First  PV\talias\n"

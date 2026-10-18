@@ -54,6 +54,38 @@ private:
   QHash<QString, QStringList> entries;
   QHash<QString, int> counts;
 };
+// Legacy ALH reads configuration lines with fgets(buf, 500): a line of more
+// than 498 bytes is read as several lines, and a piece that starts with $,
+// GROUP, CHANNEL or INCLUDE is parsed as configuration. Converted lines stay
+// within the limit (measured as UTF-8, the widest encoding saveConfig writes).
+constexpr int LegacyLineBytes = 498;
+int utf8Bytes(const QString& text) { return text.toUtf8().size(); }
+// The number of leading QChars of text that fit in limit UTF-8 bytes without
+// splitting a surrogate pair.
+int fitting(const QString& text, int limit) {
+  int bytes = 0, at = 0;
+  while (at < text.size()) {
+    const int width = text[at].isHighSurrogate() && at + 1 < text.size() ? 2 : 1;
+    const int size = utf8Bytes(text.mid(at, width));
+    if (bytes + size > limit) break;
+    bytes += size;
+    at += width;
+  }
+  return at;
+}
+QString wrapLines(const QString& text, int limit, bool* wrapped) {
+  QStringList lines;
+  for (auto rest : text.split('\n')) {
+    while (utf8Bytes(rest) > limit) {
+      const int cut = fitting(rest, limit);
+      lines << rest.left(cut);
+      rest = rest.mid(cut);
+      *wrapped = true;
+    }
+    lines << rest;
+  }
+  return lines.join('\n');
+}
 QStringList commandEntries(const QString& command) {
   // ALH's related-process syntax: one command, or !label!command! pairs.
   return command.split(QRegularExpression("[!\\n]"), Qt::SkipEmptyParts);
@@ -256,10 +288,12 @@ void addTitleDetails(const Element& e, Node& n, Notes& notes) {
     } else if (c.name == "display") {
       const auto details = c.child("details");
       // Web guidance opens like ALH's guidance URL; display files need Phoebus.
-      if (!details.contains('\n') && !details.contains('\r') &&
-          details.contains(QRegularExpression("^(https?|file):", QRegularExpression::CaseInsensitiveOption)))
+      const bool url = !details.contains('\n') && !details.contains('\r') &&
+          details.contains(QRegularExpression("^(https?|file):", QRegularExpression::CaseInsensitiveOption));
+      if (url && utf8Bytes("$GUIDANCE " + details) <= LegacyLineBytes)
         n.directives.push_back({"GUIDANCE", details});
       else {
+        if (url) notes.add("Display URLs longer than ALH's 498-byte line limit kept as guidance text", path(&n));
         guidance << "Display " + c.child("title") + ": " + details;
         notes.add("Phoebus displays kept as guidance text", path(&n));
       }
@@ -289,11 +323,20 @@ void addTitleDetails(const Element& e, Node& n, Notes& notes) {
       }
       commands << title << details;
     }
-  if (commands.size() == 2) n.directives.push_back({"COMMAND", commands[1]});
-  else if (!commands.isEmpty())
-    n.directives.push_back({"COMMAND", '!' + commands.join('!') + '!'});
+  QString command;
+  if (commands.size() == 2) command = commands[1];
+  else if (!commands.isEmpty()) command = '!' + commands.join('!') + '!';
+  if (utf8Bytes("$COMMAND " + command) > LegacyLineBytes) {
+    for (int i = 0; i + 1 < commands.size(); i += 2)
+      guidance << "Command " + commands[i] + ":\n" + commands[i + 1];
+    notes.add("Commands longer than ALH's 498-byte line limit kept as guidance text", &n);
+  } else if (!command.isEmpty())
+    n.directives.push_back({"COMMAND", command});
   if (!guidance.isEmpty()) {
-    auto text = guidance.join("\n\n");
+    // Leave one byte for the \$ escape below.
+    bool wrapped = false;
+    auto text = wrapLines(guidance.join("\n\n"), LegacyLineBytes - 1, &wrapped);
+    if (wrapped) notes.add("Guidance lines longer than ALH's 498-byte line limit wrapped", path(&n));
     // ALH ends a guidance block at any line whose first non-blank character is $
     // and reads the following lines as configuration; QtALH also skips Unicode
     // whitespace before $END. Prefix such lines so they stay guidance in both.
@@ -344,6 +387,11 @@ void addChildren(const Element& e, Node& parent, Notes& notes) {
       // collapsing meaningful internal spacing in an exported ALH alias.
       auto description = c.child("description");
       description.replace('\n', ' ').replace('\r', ' ');
+      const int room = LegacyLineBytes - utf8Bytes("$ALIAS ");
+      if (utf8Bytes(description) > room) {
+        description.truncate(fitting(description, room));
+        notes.add("Descriptions longer than ALH's 498-byte line limit truncated", where);
+      }
       if (!description.isEmpty()) n->directives.push_back({"ALIAS", description});
       auto integer = [&](const QString& field, int maximum) {
         const auto text = c.child(field);
@@ -410,7 +458,11 @@ Document parsePhoebusXml(const QByteArray& bytes, const QString& baseDir, QStrin
   addChildren(root, *doc.root, collected);
   collected.write(notes);
   // Serialize and reparse: the result obeys every ALH configuration rule.
-  return parseConfig(writeConfig(doc), baseDir);
+  const auto text = writeConfig(doc);
+  for (const auto& line : text.split('\n'))
+    if (utf8Bytes(line) > LegacyLineBytes)
+      throw ParseError("Converted line exceeds ALH's 498-byte line limit: " + line.left(60) + "…");
+  return parseConfig(text, baseDir);
 }
 Document loadPhoebusXml(const QString& path, QStringList* notes) {
   QFile f(path);

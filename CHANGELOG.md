@@ -44,6 +44,9 @@ Additional 1.0.0 audit decisions and corrections:
 
 - Phoebus XML remains an interchange format with documented conversion limits.
   Keep the original `.alhConfig` as the authoritative configuration.
+- Phoebus imports keep every line within legacy ALH's 498-byte line limit:
+  long descriptions are truncated, long commands and display URLs are kept
+  as guidance text, and long guidance lines are wrapped, each with a note.
 - Shared Channel Access wakeups remain active when closing one of several windows.
 - A rejected ACKPV submission after ACKS is submitted now reports partial
   submission. Runtime Overrides offers explicit **Retry ACKPV**, without
