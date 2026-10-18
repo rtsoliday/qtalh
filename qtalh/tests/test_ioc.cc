@@ -846,6 +846,48 @@ private slots:
     ++elapsed; ca.poll(); QCOMPARE(unavailable, 1);
     ca.poll(); QCOMPARE(unavailable, 1);
   }
+  void deadlineCallbacksMayChangeChannels_data() {
+    QTest::addColumn<QString>("mode");
+    QTest::addColumn<int>("alarms");
+    QTest::addColumn<int>("numbers");
+    QTest::newRow("none") << "none" << 3 << 1;
+    QTest::newRow("alarm adds channels") << "add" << 3 << 1;
+    QTest::newRow("alarm clears service") << "clear" << 1 << 0;
+    QTest::newRow("input cancels itself") << "cancel" << 3 << 1;
+    QTest::newRow("diagnostic cancels input") << "error" << 3 << 0;
+  }
+  void deadlineCallbacksMayChangeChannels() {
+    // Engine callbacks run from poll()'s connection-deadline loop and may
+    // add, cancel or remove channels through the public interface.
+    QFETCH(QString, mode); QFETCH(int, alarms); QFETCH(int, numbers);
+    ChannelAccess ca;
+    qint64 elapsed = 1000;
+    ca.monotonicNow = [&] { return elapsed; };
+    int fired = 0, received = 0, added = 0, owner = 0;
+    ca.error = [&](const QString&) {
+      if (mode == "error") ca.cancelNumbers(&owner);
+    };
+    std::function<void(Event)> alarm = [&](Event) {
+      ++fired;
+      if (mode == "add" && !added)
+        for (; added < 64; ++added)
+          ca.monitor(prefix + "missing_reentry_added" + QString::number(added), [](Event) {});
+      if (mode == "clear") ca.clear();
+    };
+    for (int i = 0; i < 3; ++i)
+      ca.monitor(prefix + "missing_reentry" + QString::number(i), alarm);
+    ca.number(prefix + "missing_reentry_input", [&](double v) {
+      if (!std::isfinite(v)) ++received;
+      if (mode == "cancel") ca.cancelNumbers(&owner);
+    }, &owner);
+    elapsed += 5000; // Every connection deadline has expired.
+    ca.poll();
+    QCOMPARE(fired, alarms);
+    QCOMPARE(received, numbers);
+    ca.poll();
+    QCOMPARE(fired, alarms);
+    QCOMPARE(received, numbers);
+  }
   void missingChannel() {
     ChannelAccess ca;
     Event last;

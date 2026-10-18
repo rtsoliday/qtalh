@@ -93,14 +93,20 @@ void ChannelAccess::report(int status, const QString& context) {
 void ChannelAccess::numericUnavailable(Channel* c, const QString& reason) {
   if (!c->numeric)
     return;
+  const auto serial = c->serial;
   if (c->numericError != reason) {
     c->numericError = reason;
     if (error)
       error(reason + ": " + c->name);
   }
+  // A diagnostic can remove this input; revalidate it, as PvAccess does.
   // CALC inputs must become unavailable, while scalar force masks retain the
   // last valid value until the connection recovers.
-  c->numeric(std::numeric_limits<double>::quiet_NaN());
+  c = channelsBySerial.value(serial);
+  if (c && c->numeric) {
+    const auto callback = c->numeric;
+    callback(std::numeric_limits<double>::quiet_NaN());
+  }
 }
 ChannelAccess::Channel* ChannelAccess::add(const QString& name) {
   debugLog(options.debug, "CA", "create " + name);
@@ -312,10 +318,11 @@ void ChannelAccess::connected(Channel* c, long op) {
     rightsChanged(c);
   } else if (op == CA_OP_CONN_DOWN) {
     c->haveLast = false; // Recovery must wait for a fresh subscription event.
-    if (c->alarm)
-      c->alarm({ALARM_NSTATUS, 4, 0, -1, "0"});
-    // The alarm callback may have cancelled or removed this channel.
-    if ((c = channelsBySerial.value(c->serial)))
+    const auto serial = c->serial;
+    // Call a copy: the alarm callback may cancel or remove this channel.
+    if (const auto callback = c->alarm)
+      callback({ALARM_NSTATUS, 4, 0, -1, "0"});
+    if ((c = channelsBySerial.value(serial)))
       numericUnavailable(c, "PV not connected");
   }
 }
@@ -323,6 +330,7 @@ void ChannelAccess::rightsChanged(Channel* c) {
   if (clearing || c->cancelled || !c->id || ca_state(c->id) != cs_conn)
     return;
   const auto a = c->id;
+  const auto serial = c->serial;
   c->recheckAccess = false;
   if (options.debug)
     debugLog(true, "CA", QString("%1 access read=%2 write=%3").arg(c->name)
@@ -331,15 +339,20 @@ void ChannelAccess::rightsChanged(Channel* c) {
     // A cached alarm predates the access gap. Replaying it on recovery can
     // dispatch false commands/outputs before the IOC's current event arrives.
     c->haveLast = false;
-    c->owner->numericUnavailable(c, "No read access for PV");
+    numericUnavailable(c, "No read access for PV");
+    if (!(c = channelsBySerial.value(serial)))
+      return;
   }
-  if (c->alarm) {
+  // Call a copy: the alarm callback may cancel or remove this channel.
+  if (const auto callback = c->alarm) {
     if (!ca_read_access(a))
-      c->alarm({ALARM_NSTATUS + 1, 4, 0, -1, "0"});
+      callback({ALARM_NSTATUS + 1, 4, 0, -1, "0"});
     else if (c->owner->options.global && !c->owner->options.passive && !ca_write_access(a))
-      c->alarm({ALARM_NSTATUS + 2, 4, 0, -1, "0"});
+      callback({ALARM_NSTATUS + 2, 4, 0, -1, "0"});
     else if (c->haveLast)
-      c->alarm(c->last);
+      callback(c->last);
+    if (!(c = channelsBySerial.value(serial)))
+      return;
   }
   // Write access ends an outage; a later unavailable write is reported again.
   if (ca_write_access(a))
@@ -565,31 +578,56 @@ void ChannelAccess::poll() {
   auto now = monotonicNow();
   // Scan the channels only when an access recheck or connection deadline is
   // pending; the periodic poll otherwise costs nothing per channel.
+  // Engine callbacks below may add, cancel or remove channels. Visit a
+  // snapshot in channel order and revalidate each entry before using it.
+  auto snapshot = [this] {
+    QVector<quint64> serials;
+    serials.reserve(int(channels.size()));
+    for (const auto& c : channels)
+      serials << c->serial;
+    return serials;
+  };
   if (recheckPending) {
     recheckPending = false;
-    for (auto& c : channels) {
-      if (!c->recheckAccess || c->cancelled)
+    for (auto serial : snapshot()) {
+      auto c = channelsBySerial.value(serial);
+      if (!c || !c->recheckAccess || c->cancelled)
         continue;
       c->recheckAccess = false;
       if (c->id && ca_state(c->id) == cs_conn) {
         // Cancel invalidates haveLast; healthy recovery must use fresh IOC data.
         // Keeping this work on the channel also makes cancel/clear discard it.
-        rightsChanged(c.get());
+        rightsChanged(c);
+        if (!self) {
+          dispatching = false;
+          return;
+        }
       }
     }
   }
   // CA does not send an initial disconnect callback for a PV that never existed.
   if (nextDeadline && now >= nextDeadline) {
     nextDeadline = 0;
-    for (auto& c : channels)
-      if (!c->cancelled && c->connectionDeadline && now >= c->connectionDeadline) {
-        c->connectionDeadline = 0;
-        if (c->id && ca_state(c->id) == cs_conn)
-          continue;
-        if (c->alarm)
-          c->alarm({ALARM_NSTATUS, 4, 0, -1, "0"});
-        numericUnavailable(c.get(), "PV not connected");
+    for (auto serial : snapshot()) {
+      auto c = channelsBySerial.value(serial);
+      if (!c || c->cancelled || !c->connectionDeadline || now < c->connectionDeadline)
+        continue;
+      c->connectionDeadline = 0;
+      if (c->id && ca_state(c->id) == cs_conn)
+        continue;
+      if (const auto callback = c->alarm) // A copy: the callback may remove this channel.
+        callback({ALARM_NSTATUS, 4, 0, -1, "0"});
+      if (!self) {
+        dispatching = false;
+        return;
       }
+      if ((c = channelsBySerial.value(serial)))
+        numericUnavailable(c, "PV not connected");
+      if (!self) {
+        dispatching = false;
+        return;
+      }
+    }
     for (auto& c : channels)
       noteDeadline(c.get());
   }
