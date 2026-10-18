@@ -376,6 +376,14 @@ bool PvAccess::connectProvider() {
     report("pvAccess client provider is not available");
   return bool(provider);
 }
+void PvAccess::writeFailed(Channel* c, const QString& reason) {
+  // PVA has no access-rights events: a server that rejects every put would
+  // otherwise produce one diagnostic per heartbeat or severity write.
+  if (c->writeError != reason) {
+    c->writeError = reason;
+    report("Write " + c->name + ": " + reason);
+  }
+}
 void PvAccess::numericUnavailable(Channel* c, const QString& reason) {
   if (!c->numeric)
     return;
@@ -448,7 +456,7 @@ void PvAccess::ensurePut(Channel* c) {
     ops.putRequester = std::make_shared<PutRequester>(inbox, c->id, ops.putSerial);
     ops.put = ops.channel->createChannelPut(ops.putRequester, request("field(value)"));
   } catch (const std::exception& e) {
-    report("Write " + c->name + ": " + e.what());
+    writeFailed(c, e.what());
   }
 }
 void PvAccess::sendPut(Channel* c) {
@@ -488,7 +496,7 @@ void PvAccess::sendPut(Channel* c) {
     } catch (const std::exception& e) {
       c->putBusy = false;
       c->putDeadline = 0;
-      report("Write " + c->name + ": " + e.what());
+      writeFailed(c, e.what());
       c = channelsById.value(id);
       if (!c) return;
     }
@@ -812,6 +820,7 @@ void PvAccess::disconnected(Channel* c) {
   c->putBusy = false;
   c->putDeadline = 0;
   c->putOverflow = false;
+  c->writeError.clear();
   c->puts.clear();
   const auto id = c->id;
   if (writing) {
@@ -1042,7 +1051,7 @@ void PvAccess::drain() {
         c->putBusy = false;
         c->putOverflow = false;
         ops.stopPut();
-        report("Write " + c->name + ": " + u.message);
+        writeFailed(c, u.message);
       }
       break;
     case Update::PutDone:
@@ -1052,12 +1061,14 @@ void PvAccess::drain() {
       c->putDeadline = 0;
       debugLog(options.debug, "PVA", "write " + c->name + ": " + (u.ok ? "done" : u.message));
       if (!u.ok) {
-        report("Write " + c->name + ": " + u.message);
+        writeFailed(c, u.message);
         if (!(c = channelsById.value(u.channel)))
           break;
-      } else if (c->sending.kind == WriteKind::Severity && pendingSeverity.contains(c->name) &&
-                 pendingSeverity.value(c->name) == c->sending.value) {
-        pendingSeverity.remove(c->name); // A newer requested severity stays pending.
+      } else {
+        c->writeError.clear();
+        if (c->sending.kind == WriteKind::Severity && pendingSeverity.contains(c->name) &&
+            pendingSeverity.value(c->name) == c->sending.value)
+          pendingSeverity.remove(c->name); // A newer requested severity stays pending.
       }
       sendPut(c);
       break;

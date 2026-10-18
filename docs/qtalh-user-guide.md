@@ -446,7 +446,9 @@ acknowledgements are not shared with other QtALH instances or Channel Access
 clients, and the record's own ACKS is unchanged. Configure the bare record name
 (Channel Access) where acknowledgements must be shared. PVA reports no access
 rights, so `NO_READ_ACCESS` and `NO_WRITE_ACCESS` do not appear; write failures
-are reported when the server rejects them.
+are reported when the server rejects them. Heartbeat and output writes continue
+during a rejection, but a repeated identical failure is reported once until a
+write succeeds or the PV reconnects.
 
 ## Logging and shared operation
 

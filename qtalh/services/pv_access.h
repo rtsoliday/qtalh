@@ -81,6 +81,7 @@ private:
     Write sending{0, WriteKind::Value}; // The in-flight write while putBusy.
     qint64 putDeadline = 0;
     bool putOverflow = false;
+    QString writeError; // Last rejection reported; cleared by success or disconnect.
     std::deque<Write> puts;
   };
   struct Record {
@@ -118,6 +119,7 @@ private:
   void sendPut(Channel*);
   void destroy(Channel*);
   void report(const QString&);
+  void writeFailed(Channel*, const QString&);
   void numericUnavailable(Channel*, const QString&);
   void noteDeadline(const Channel*);
   void checkDeadlines();

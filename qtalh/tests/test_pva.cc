@@ -75,7 +75,8 @@ struct TestPut final : pva::ChannelPut, std::enable_shared_from_this<TestPut> {
   void ready() { requester->channelPutConnect(pvd::Status::Ok, shared_from_this(), scalarType()); }
   void refuse() { requester->channelPutConnect(pvd::Status::error("write refused"), shared_from_this(), {}); }
   void done() { requester->putDone(pvd::Status::Ok, shared_from_this()); }
-  void reject() { requester->putDone(pvd::Status::error("write rejected"), shared_from_this()); }
+  // QSRV rejects a put denied by access security when it completes.
+  void reject() { requester->putDone(pvd::Status::error("Put not permitted"), shared_from_this()); }
 };
 struct TestChannel final : pva::Channel, std::enable_shared_from_this<TestChannel> {
   pva::ChannelProvider::shared_pointer provider;
@@ -324,6 +325,56 @@ private slots:
     channel->writer->ready();
     QTRY_COMPARE(channel->writer->submitted, QVector<double>{2});
   }
+  void repeatedWriteRejectionReportedOncePerOutage() {
+    // PVA has no access-rights events, so heartbeats keep writing to a PV whose
+    // server rejects each put. Report one diagnostic per outage, not per beat.
+    PvAccess pv;
+    QStringList errors;
+    pv.error = [&](const QString& s) { errors << s; };
+    pv.prepare("pva://output");
+    auto channel = provider->channels.back();
+    auto writer = channel->writer;
+    writer->ready();
+    QTRY_VERIFY(pv.canWrite("pva://output"));
+    const auto beat = [&](bool accept) {
+      const int sent = writer->submitted.size();
+      QVERIFY(pv.put("pva://output", 1, WriteKind::Heartbeat));
+      QTRY_COMPARE(writer->submitted.size(), sent + 1);
+      if (accept) writer->done(); else writer->reject();
+      QCoreApplication::processEvents();
+    };
+    for (int i = 0; i < 5; ++i) beat(false);
+    const QString rejected = "Write pva://output: Put not permitted";
+    QCOMPARE(errors, QStringList{rejected});
+    // A successful write ends the outage.
+    beat(true);
+    for (int i = 0; i < 3; ++i) beat(false);
+    QCOMPARE(errors, (QStringList{rejected, rejected}));
+    // So does a reconnect.
+    channel->state(pva::Channel::DISCONNECTED);
+    channel->state(pva::Channel::CONNECTED);
+    QTRY_VERIFY(channel->writer != writer);
+    writer = channel->writer;
+    writer->ready();
+    QTRY_VERIFY(pv.canWrite("pva://output"));
+    for (int i = 0; i < 3; ++i) beat(false);
+    QCOMPARE(errors, (QStringList{rejected, rejected, rejected}));
+    // A rejected put setup is torn down and recreated by the next beat.
+    channel->state(pva::Channel::DISCONNECTED);
+    channel->state(pva::Channel::CONNECTED);
+    QTRY_VERIFY(channel->writer != writer);
+    errors.clear();
+    for (int i = 0; i < 3; ++i) {
+      auto refused = channel->writer;
+      QVERIFY(pv.put("pva://output", 1, WriteKind::Heartbeat));
+      refused->refuse();
+      QTRY_VERIFY(refused->destroyed);
+      QCOMPARE(pv.pendingWriteCount("pva://output"), size_t(0));
+      QVERIFY(pv.put("pva://output", 1, WriteKind::Heartbeat));
+      QVERIFY(channel->writer != refused);
+    }
+    QCOMPARE(errors, QStringList{"Write pva://output: write refused"});
+  }
   void boundedInboxPreservesOrder() {
     PvAccess pv;
     QVector<int> values;
@@ -484,7 +535,7 @@ private slots:
       QTRY_VERIFY(errors.join(' ').contains("write refused"));
     } else if (failure == "rejected") {
       old->reject();
-      QTRY_VERIFY(errors.join(' ').contains("write rejected"));
+      QTRY_VERIFY(errors.join(' ').contains("Put not permitted"));
     } else if (failure.contains("timeout")) {
       QTRY_VERIFY(errors.join(' ').contains("timed out"));
       pv.writeTimeoutMs = 30000;

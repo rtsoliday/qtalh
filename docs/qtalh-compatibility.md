@@ -814,7 +814,9 @@ fields. Global acknowledgement of a `pva://` channel is therefore kept in the
 running instance by applying `recGblResetAlarms`, `putAcks`, and `putAckt`
 rules. It is not shared with other instances or with CA clients of the record.
 PVA has no access-rights events, so the synthetic read/write-access
-states are not produced for these channels.
+states are not produced for these channels. Writes continue while the server
+rejects them; a repeated identical failure is reported once per outage, ending
+at the next successful write or reconnect.
 `test-ioc` covers monitoring, enumerated values, writes, missing PVs, IOC restart, runtime
 acknowledgement with ACKT, descriptions, mixed CA/PVA field reads, Force PVs,
 and passive mode against softIocPVA.
