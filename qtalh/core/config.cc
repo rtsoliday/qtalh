@@ -23,6 +23,15 @@ bool forceCalcInput(const QString& name) {
   static const QRegularExpression input("^FORCEPV_CALC_[A-F]$");
   return input.match(name).hasMatch();
 }
+// QFile drops a read error that follows a short read, so one readAll() can
+// return a valid prefix with no error. Read until no data remains; a failed
+// read then sets QFile::error(). ALH omits ferror() and accepts the prefix.
+bool readFile(QFile& f, QByteArray& data) {
+  data = f.readAll();
+  for (QByteArray more; !(more = f.readAll()).isEmpty();)
+    data += more;
+  return f.error() == QFileDevice::NoError;
+}
 class Parser {
 public:
   Document doc;
@@ -117,10 +126,12 @@ public:
           fail("Cannot open include: " + path);
         stack.insert(canonical);
         // ALH resolves every INCLUDE against the configured directory.
-        // Possible inherited ALH bug, deferred: readAll() can return a valid
-        // prefix after an I/O error. Check QFile::error() in a future change so
-        // a partial include cannot silently remove alarms during reload.
-        read(QString::fromLocal8Bit(f.readAll()), base, parent, depth + 1);
+        // A read error rejects the whole configuration so a partial include
+        // cannot silently remove alarms during startup or reload.
+        QByteArray text;
+        if (!readFile(f, text))
+          fail("Cannot read include: " + path + ": " + f.errorString());
+        read(QString::fromLocal8Bit(text), base, parent, depth + 1);
         stack.remove(canonical);
         current = parent;
       } else if (key.startsWith('$')) {
@@ -370,11 +381,12 @@ Document loadConfig(const QString& path, const QString& configDir) {
     throw ParseError("Cannot open " + path + ": " + f.errorString());
   Parser p;
   p.stack.insert(QFileInfo(path).canonicalFilePath());
-  // Possible inherited ALH bug, deferred: a read failure after a complete
-  // declaration can be accepted as a smaller valid configuration. ALH also
-  // omits its final ferror() check. Later, reject QFile::error() after readAll()
-  // and preserve the running document; leave the existing behavior unchanged now.
-  p.read(QString::fromLocal8Bit(f.readAll()),
+  // Reject a read error instead of accepting a valid prefix as a smaller
+  // configuration; callers keep the running document on ParseError.
+  QByteArray text;
+  if (!readFile(f, text))
+    throw ParseError("Cannot read " + path + ": " + f.errorString());
+  p.read(QString::fromLocal8Bit(text),
          configDir.isEmpty() ? QFileInfo(path).absolutePath() : configDir);
   p.validate();
   p.doc.filename = QFileInfo(path).absoluteFilePath();

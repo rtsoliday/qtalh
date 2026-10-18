@@ -138,6 +138,10 @@ are combined in order, preserving blank lines through display, editing and savin
 All relative INCLUDE paths use the configured directory (`-f` or `ALARMHANDLER`),
 including nested includes, GUI open/insert, and broadcast reload. Without an
 explicit directory, the `loadConfig` library API uses the top-level file's directory.
+ALH does not check `ferror()`, so a read error could leave a shorter valid
+configuration. QtALH rejects a read error in the configuration or any include;
+`--validate` fails and GUI open/insert and broadcast reload keep the running
+configuration.
 
 Startup ACKT writes also apply to cancelled channels through connections without
 alarm subscriptions. A completed startup setting is tracked per PV and is not

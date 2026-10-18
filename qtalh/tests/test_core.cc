@@ -16,6 +16,34 @@
 #ifndef Q_OS_WIN
 #include <sys/msg.h>
 #endif
+#if defined(Q_OS_LINUX) && !defined(_FORTIFY_SOURCE)
+#define QTALH_SHORT_READ 1
+#include <algorithm>
+#include <atomic>
+#include <cerrno>
+#include <cstdio>
+#include <sys/syscall.h>
+#include <unistd.h>
+// Simulates an NFS-style failure in this binary: while shortReadPath is set,
+// the first read of that file returns a prefix and later reads fail with EIO.
+static std::atomic<const char*> shortReadPath{nullptr};
+static std::atomic<int> shortReadCalls{0};
+extern "C" ssize_t read(int fd, void* buf, size_t n) {
+  if (const char* path = shortReadPath.load()) {
+    char link[64], target[4096];
+    snprintf(link, sizeof link, "/proc/self/fd/%d", fd);
+    const ssize_t size = readlink(link, target, sizeof target - 1);
+    if (size > 0 && (target[size] = 0, strcmp(target, path) == 0)) {
+      if (shortReadCalls++ > 0) {
+        errno = EIO;
+        return -1;
+      }
+      n = std::min<size_t>(n, 16);
+    }
+  }
+  return syscall(SYS_read, fd, buf, n);
+}
+#endif
 using namespace alh;
 struct FakePv : PvService {
   struct Write {
@@ -2136,6 +2164,60 @@ $GUIDANCE https://example.invalid/guide
     f.close();
     QVERIFY_THROWS_EXCEPTION(ParseError,
                              parseConfig("GROUP NULL root\nINCLUDE root child", temp.path()));
+  }
+  void readErrorsRejectConfiguration() {
+#ifndef Q_OS_LINUX
+    QSKIP("Needs a file that opens but fails to read");
+#else
+    // /proc/self/mem opens, but reading offset 0 fails with EIO. A read error
+    // must not be accepted as an empty include or a shorter configuration.
+    const QString unreadable = "/proc/self/mem";
+    QFile probe(unreadable);
+    if (!probe.open(QIODevice::ReadOnly))
+      QSKIP("/proc/self/mem is not readable here");
+    probe.readAll();
+    if (probe.error() == QFileDevice::NoError)
+      QSKIP("/proc/self/mem read did not fail");
+    QTemporaryDir dir;
+    QFile f(dir.filePath("main"));
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write("GROUP NULL root\nINCLUDE root " + unreadable.toUtf8() + "\nCHANNEL root pv\n");
+    f.close();
+    QVERIFY_THROWS_EXCEPTION(ParseError, loadConfig(f.fileName()));
+    QVERIFY_THROWS_EXCEPTION(
+        ParseError, parseConfig("GROUP NULL root\nINCLUDE root " + unreadable + "\n", dir.path()));
+    try {
+      loadConfig(unreadable);
+      QFAIL("Unreadable configuration was accepted");
+    } catch (const ParseError& e) {
+      QVERIFY2(QString(e.what()).startsWith("Cannot read " + unreadable), e.what());
+    }
+#endif
+  }
+  void shortReadErrorsRejectConfiguration() {
+#ifndef QTALH_SHORT_READ
+    QSKIP("Needs read() interposition on Linux");
+#else
+    QTemporaryDir dir;
+    QFile f(dir.filePath("part"));
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    // The first 16 bytes, "GROUP NULL root\n", are themselves a valid file.
+    f.write("GROUP NULL root\nCHANNEL root a\nCHANNEL root b\n");
+    f.close();
+    const QByteArray path = QFileInfo(f.fileName()).canonicalFilePath().toLocal8Bit();
+    const QString top = "GROUP NULL top\nINCLUDE top part\nCHANNEL top after\n";
+    QCOMPARE(loadConfig(f.fileName()).channels().size(), 2);
+    QCOMPARE(parseConfig(top, dir.path()).channels().size(), 3);
+    auto restore = qScopeGuard([] { shortReadPath = nullptr; });
+    shortReadPath = path.constData();
+    QVERIFY(f.open(QIODevice::ReadOnly));
+    QCOMPARE(f.readAll().size(), 16); // The simulated failure is active.
+    f.close();
+    shortReadCalls = 0;
+    QVERIFY_THROWS_EXCEPTION(ParseError, loadConfig(f.fileName()));
+    shortReadCalls = 0;
+    QVERIFY_THROWS_EXCEPTION(ParseError, parseConfig(top, dir.path()));
+#endif
   }
   void nestedIncludesUseConfiguredDirectory() {
     QTemporaryDir dir;

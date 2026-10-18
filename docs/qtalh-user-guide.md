@@ -334,7 +334,8 @@ Every relative include, including nested includes, resolves against `-f` or
 use `qtalh -f /path/to/configs main.alhConfig`. Absolute paths are accepted.
 Within an included file, each `GROUP NULL` attaches beneath the current group,
 matching ALH; after a channel, that means its parent group. Include cycles and
-excessive nesting are errors. The C++ `loadConfig` API uses
+excessive nesting are errors, as are read errors in the configuration or an
+include. The C++ `loadConfig` API uses
 the top-level file's directory when no configuration directory is supplied.
 
 Directives normally apply to the preceding group/channel:
