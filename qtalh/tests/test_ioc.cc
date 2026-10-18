@@ -543,6 +543,9 @@ private slots:
       return errors.count("PV not connected or not writable: " + name);
     };
     toggle(chatter, 5);
+    // Reported once, when the never-connected output misses its connection deadline.
+    QTRY_COMPARE(unavailable(missing), 1);
+    toggle(chatter, 2);
     QCOMPARE(unavailable(missing), 1);
     // Lost write access: one diagnostic, then a new one after recovery.
     for (int outage = 1; outage <= 2; ++outage) {
@@ -738,6 +741,33 @@ private slots:
     QTest::addColumn<bool>("disconnect");
     QTest::newRow("disconnect") << true;
     QTest::newRow("access-rights") << false;
+  }
+  void severityOutputConnectingAtStartIsNotReported() {
+    // The first $SEVRPV write for a new configuration can precede the
+    // output's connection. Like ALH, do not report it: the value is replayed
+    // on connection. A missing output is reported once, at its connection
+    // deadline (one second), not at the first alarm event.
+    const auto name = prefix + "alarm";
+    for (const bool missing : {false, true}) {
+      const auto output = prefix + (missing ? "missingSeverity" : "severity");
+      auto d = parseConfig("GROUP NULL root\nCHANNEL root " + name + "\n$SEVRPV " + output + "\n");
+      ChannelAccess ca({true}); Engine e(d, {true}, &ca); auto n = d.channels()[0];
+      QElapsedTimer started;
+      QVector<qint64> reports;
+      ca.error = [&](const QString& s) {
+        if (s == "PV not connected or not writable: " + output) reports << started.elapsed();
+      };
+      started.start();
+      e.start();
+      QTRY_VERIFY(e.state(n).initialized);
+      QTest::qWait(1500);
+      if (!missing) {
+        QVERIFY(reports.isEmpty());
+        continue;
+      }
+      QCOMPARE(reports.size(), 1);
+      QVERIFY2(reports[0] >= 900, qPrintable(QString::number(reports[0])));
+    }
   }
   void freshAlarmCallbackCanDestroyService() {
     // Fresh monitor updates must call a copy of the callback, as the

@@ -1167,7 +1167,10 @@ private slots:
     pv.clear();
     pv.prepare("pva://output");
     QVERIFY(!pv.put("pva://output", 1, WriteKind::Severity));
-    QCOMPARE(unavailable(), 3);
+    // A severity written while the new channel's first connection is pending
+    // is reported only if it misses the connection deadline.
+    QCOMPARE(unavailable(), 2);
+    QTRY_COMPARE_WITH_TIMEOUT(unavailable(), 3, 5000);
   }
   void unavailableSeverityOutputEngineOncePerOutage() {
     // At engine level: global active mode writes $SEVRPV on every channel
@@ -1191,8 +1194,34 @@ private slots:
     };
     post(0);
     for (int i = 0; i < 5; ++i) { post(2); post(0); }
-    const int unavailable = errors.count("PV not connected or not writable: pva://out");
-    QCOMPARE(unavailable, 1);
+    const auto unavailable = [&] { return errors.count("PV not connected or not writable: pva://out"); };
+    QTRY_COMPARE_WITH_TIMEOUT(unavailable(), 1, 5000); // At the connection deadline.
+    for (int i = 0; i < 3; ++i) { post(2); post(0); }
+    QCOMPARE(unavailable(), 1);
+  }
+  void severityOutputConnectingIsNotReported() {
+    // The first $SEVRPV writes after a load can precede the output's
+    // connection. Like ALH, report nothing then: the value is replayed when
+    // the output connects.
+    provider->connectOnCreate = false;
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pva://alarm\n$SEVRPV pva://out\n");
+    PvAccess pv({true});
+    Engine e(d, {true}, &pv);
+    QStringList errors;
+    pv.error = [&](const QString& s) { errors << s; };
+    e.start();
+    auto n = d.channels()[0];
+    auto alarm = provider->channel("alarm"), out = provider->channel("out");
+    QVERIFY(alarm && alarm->monitor && out);
+    alarm->state(pva::Channel::CONNECTED);
+    alarm->monitor->post(2, 2);
+    QTRY_COMPARE(e.state(n).severity, 2);
+    out->state(pva::Channel::CONNECTED);
+    QTRY_VERIFY(out->writer);
+    out->writer->ready();
+    QTRY_COMPARE(out->writer->submitted, QVector<double>{2});
+    QTest::qWait(1200); // Past the connection deadline.
+    QVERIFY2(errors.isEmpty(), qPrintable(errors.join('\n')));
   }
   void destructionWhileServerThreadPosts() {
     auto pv = std::make_unique<PvAccess>();

@@ -704,8 +704,14 @@ bool PvAccess::put(const QString& n, double v, WriteKind kind) {
   debugLog(options.debug, "PVA", "write unavailable: " + n);
   // As ChannelAccess::put: automatic SEVRPV writes repeat on every alarm
   // transition, so report each outage once. It ends when a channel with this
-  // name connects or a write to it completes.
-  if (!writeUnavailable.contains(n)) {
+  // name connects or a write to it completes. A severity written before the
+  // output's first connection attempt resolves is replayed on connection;
+  // checkDeadlines() reports it if the PV does not connect.
+  const auto named = channelsByName.value(n);
+  const bool connecting = kind == WriteKind::Severity &&
+      std::any_of(named.cbegin(), named.cend(),
+                  [](const Channel* c) { return !c->cancelled && c->connectionDeadline; });
+  if (!connecting && !writeUnavailable.contains(n)) {
     writeUnavailable.insert(n);
     report("PV not connected or not writable: " + n);
   }
@@ -818,6 +824,13 @@ void PvAccess::checkDeadlines() {
       if ((c = channelsById.value(id)))
         numericUnavailable(c, "PV not connected");
       if (!self) return;
+      // A severity output still waiting for its first connection (see put()).
+      if ((c = channelsById.value(id)) && pendingSeverity.contains(c->name) &&
+          !writeUnavailable.contains(c->name)) {
+        writeUnavailable.insert(c->name);
+        report("PV not connected or not writable: " + c->name);
+        if (!self) return;
+      }
     }
   for (auto& c : channels)
     noteDeadline(c.get());

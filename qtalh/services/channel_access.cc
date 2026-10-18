@@ -538,8 +538,15 @@ bool ChannelAccess::put(const QString& n, double v, WriteKind kind) {
   debugLog(options.debug, "CA", "write unavailable: " + n);
   // Each report adds an operation-log record and popup text. Automatic SEVRPV
   // writes repeat on every alarm transition, so report each outage once; it
-  // ends when the PV becomes writable or a write to it succeeds.
-  if (error && !writeUnavailable.contains(n)) {
+  // ends when the PV becomes writable or a write to it succeeds. A severity
+  // written before the output's first connection attempt resolves (startup,
+  // reload, File > Open) is replayed on connection, as ALH skips it silently;
+  // poll() reports it at the connection deadline if the PV does not connect.
+  const auto named = channelsByName.value(n);
+  const bool connecting = kind == WriteKind::Severity &&
+      std::any_of(named.cbegin(), named.cend(),
+                  [](const Channel* c) { return !c->cancelled && c->connectionDeadline; });
+  if (error && !connecting && !writeUnavailable.contains(n)) {
     writeUnavailable.insert(n);
     error("PV not connected or not writable: " + n);
   }
@@ -691,6 +698,17 @@ void ChannelAccess::poll() {
       if (!self) {
         dispatching = false;
         return;
+      }
+      // A severity output still waiting for its first connection (see put()).
+      if ((c = channelsBySerial.value(serial)) && pendingSeverity.contains(c->name) &&
+          !writeUnavailable.contains(c->name)) {
+        writeUnavailable.insert(c->name);
+        if (const auto callback = error)
+          callback("PV not connected or not writable: " + c->name);
+        if (!self) {
+          dispatching = false;
+          return;
+        }
       }
     }
     for (auto& c : channels)

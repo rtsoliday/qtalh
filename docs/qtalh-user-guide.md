@@ -439,7 +439,9 @@ Other Channel Access writes to an unavailable PV, such as `$SEVRPV` updates on
 each alarm change, also report "PV not connected or not writable" once per
 outage, until the PV becomes writable or a write to it succeeds. A `pva://`
 output reports it once per outage too, until the PV connects or a write to it
-completes.
+completes. After startup, a reload or File > Open, a `$SEVRPV` update made
+before its output has connected is written when the output connects; it is
+reported only if the output is still unconnected after one second.
 A failed Channel Access alarm read displays `READ / ERROR` and marks the
 observation unavailable until a fresh valid alarm sample arrives. Like a
 disconnection, it is logged and runs ERROR severity commands; it also runs a
