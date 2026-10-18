@@ -439,6 +439,9 @@ void PvAccess::createChannel(Channel* c) {
       c->ops->channelRequester = std::make_shared<ChannelRequester>(inbox, c->id);
       c->ops->channel = provider->createChannel(name.mid(6).toStdString(), c->ops->channelRequester,
                                                 pva::ChannelProvider::PRIORITY_DEFAULT);
+      // A provider may report a creation failure by returning no channel.
+      if (!c->ops->channel)
+        report("Create " + name + ": pvAccess provider did not create the channel");
     } catch (const std::exception& e) {
       report("Create " + name + ": " + e.what());
     }
@@ -915,6 +918,8 @@ void PvAccess::readStrings(const QStringList& names,
         ops->channelRequester = std::make_shared<ChannelRequester>(inbox, ops->id);
         ops->channel = provider->createChannel(name.mid(6).toStdString(), ops->channelRequester,
                                                pva::ChannelProvider::PRIORITY_DEFAULT);
+        if (!ops->channel)
+          continue; // A provider may report a creation failure by returning no channel.
         ops->getRequester = std::make_shared<GetRequester>(inbox, ops->id);
         ops->get = ops->channel->createChannelGet(ops->getRequester,
                                                   request("field(value,display.precision)"));

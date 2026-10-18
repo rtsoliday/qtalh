@@ -178,6 +178,7 @@ struct TestChannel final : pva::Channel, std::enable_shared_from_this<TestChanne
 struct TestProvider final : pva::ChannelProvider, std::enable_shared_from_this<TestProvider> {
   std::vector<std::shared_ptr<TestChannel>> channels;
   bool connectOnCreate = true; // false: a server that never answers the search.
+  std::string refuse; // createChannel returns no channel for this name.
   std::shared_ptr<TestChannel> channel(const std::string& name) const {
     for (auto it = channels.rbegin(); it != channels.rend(); ++it)
       if ((*it)->name == name) return *it;
@@ -189,6 +190,8 @@ struct TestProvider final : pva::ChannelProvider, std::enable_shared_from_this<T
                                              const pva::ChannelFindRequester::shared_pointer&) override { return {}; }
   pva::Channel::shared_pointer createChannel(const std::string& name,
       const pva::ChannelRequester::shared_pointer& requester, short, const std::string&) override {
+    if (name == refuse)
+      return {};
     auto channel = std::make_shared<TestChannel>();
     channel->provider = shared_from_this();
     channel->requester = requester;
@@ -995,6 +998,35 @@ private slots:
       QTest::qWait(20);
       QCOMPARE(calls, 0);
     }
+  }
+  void providerReturnsNoChannel() {
+    // A provider may report a creation failure by returning no channel.
+    provider->refuse = "missing";
+    PvAccess pv;
+    QStringList errors;
+    pv.error = [&](const QString& m) { errors << m; };
+    int calls = 0;
+    QHash<QString, QString> result{{"stale", "x"}};
+    pv.readStrings({"pva://missing", "pva://text"}, [&](QHash<QString, QString> v) {
+      ++calls;
+      result = v;
+    }, 60000);
+    auto text = provider->channel("text")->reader;
+    QVERIFY(text);
+    text->ready();
+    QTRY_COMPARE(text->requests, 1);
+    auto open = create(scalarType(pvd::pvString));
+    open->getSubField<pvd::PVString>("value")->put("open");
+    text->answer(open);
+    QTRY_COMPARE(calls, 1); // The refused name does not hold the read open.
+    QCOMPARE(result.size(), 1);
+    QCOMPARE(result.value("pva://text"), QString("open"));
+    Event alarm;
+    alarm.severity = -1;
+    pv.monitor("pva://missing", [&](Event e) { alarm = e; });
+    QVERIFY(errors.join(' ').contains(
+        "Create pva://missing: pvAccess provider did not create the channel"));
+    QTRY_COMPARE_WITH_TIMEOUT(alarm.severity, 4, 3000);
   }
   void destructionWhileServerThreadPosts() {
     auto pv = std::make_unique<PvAccess>();
