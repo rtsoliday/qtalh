@@ -1600,9 +1600,10 @@ private slots:
 #endif
 
   void analyticsWorkflow() {
+    qint64 now = 0;
     auto w = std::make_unique<Window>(sample(), options(false), false); w->show();
     auto service = w->alarmAnalytics(); QVERIFY(service);
-    qint64 now = 0; service->monotonicNow = [&] { return now; };
+    service->monotonicNow = [&] { return now; };
     service->utcNow = [&] { return 1700000000000 + now; }; service->reset();
     auto& engine = w->alarmEngine(); const auto nodes = w->document().channels();
     for (auto n : nodes) engine.event(n, {0,0,0,1,"0"});
@@ -1657,10 +1658,10 @@ private slots:
   void analyticsPreservesScrollOnRefresh() {
     QString config = "GROUP NULL scroll\n";
     for (int i = 0; i < 100; ++i) config += QString("CHANNEL scroll pv%1\n").arg(i);
+    qint64 now = 0;
     auto w = std::make_unique<Window>(parseConfig(config), options(false), false);
     w->show();
     auto service = w->alarmAnalytics();
-    qint64 now = 0;
     service->monotonicNow = [&] { return now; };
     service->utcNow = [&] { return 1700000000000LL + now; };
     service->reset();
@@ -1832,6 +1833,7 @@ private slots:
       QVERIFY(action->text() != "Notifications...");
   }
   void placeholdersInNamesAreLiteral() {
+    qint64 now = 0;
     QTemporaryDir dir;
     auto document = parseConfig("GROUP NULL top%3\nCHANNEL top%3 pv%2\n");
     document.filename = dir.filePath("alarms.alh");
@@ -1856,7 +1858,7 @@ private slots:
     store.save(NotificationSettings{});
     QCOMPARE(rule, QString("Pumps%1 — 2 stages"));
     auto service = w->alarmAnalytics(); QVERIFY(service);
-    qint64 now = 0; service->monotonicNow = [&] { return now; };
+    service->monotonicNow = [&] { return now; };
     service->utcNow = [&] { return 1700000000000 + now; }; service->reset();
     auto channel = w->document().channels()[0];
     w->alarmEngine().event(channel, {0, 0, 0, 1, "0"});

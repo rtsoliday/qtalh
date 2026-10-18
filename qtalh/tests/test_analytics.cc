@@ -510,9 +510,10 @@ private slots:
     QTemporaryDir dir;
     auto doc = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
     Engine e(doc);
+    // AnalyticsService closes its observation gap using these clocks at teardown.
+    qint64 now = 0;
     AnalyticsService service;
     NotificationService notifications(nullptr, dir.filePath("settings.json"));
-    qint64 now = 0;
     service.monotonicNow = [&] { return now; };
     service.utcNow = [&] { return 1700000000000 + now; };
     service.attach(&e, "/test.alh");
