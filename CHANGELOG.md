@@ -48,7 +48,9 @@ Additional 1.0.0 audit decisions and corrections:
   long descriptions are truncated, long commands and display URLs are kept
   as guidance text, and long guidance lines are wrapped, each with a note.
   Display URLs containing shell quoting characters are also kept as guidance
-  text, because ALH opens guidance URLs through the shell.
+  text, because ALH opens guidance URLs through the shell. An import fails if
+  a group or channel line would still be too long, if an XInclude target is
+  not a regular file, or if a file cannot be read completely.
 - Shared Channel Access wakeups remain active when closing one of several windows.
 - A rejected ACKPV submission after ACKS is submitted now reports partial
   submission. Runtime Overrides offers explicit **Retry ACKPV**, without
@@ -57,16 +59,33 @@ Additional 1.0.0 audit decisions and corrections:
   record setting, so a stale row cannot discard the newer request. Only a
   request that changes NoAckT (Modify Mask NoAckT, the T box in Force Mask, or a
   Force PV) does this; Add, Disable, NoAck, NoLog, the NoAck timer and Reset
-  never write a stale row's NoAckT to ACKT.
+  never write a stale row's NoAckT to ACKT. A later change confirmed by a row,
+  such as another client or an IOC reboot, takes precedence over an earlier
+  accepted request.
 - FORCEPV rejects NaN, infinity and numeric overflow in force/reset values.
   Finite values, legacy parsing defaults and `NE` remain supported.
 - Enabling local NoAckT leaves an existing cleared transient awaiting
   acknowledgement until it is acknowledged or a later alarm transition, which
   uses the new setting, replaces it.
-- Failed CA alarm reads invalidate the observation until fresh data arrives.
-  Known connection/access errors retain their more specific status.
-- Send Message rejects reserved reload/stop-logging control prefixes. Explicit
-  controls and the legacy broadcast wire format remain supported.
+- A failed Channel Access alarm monitor update raises `READ`/`ERROR`, or the
+  more specific connection/access status when that loss is known, until fresh
+  data arrives. Like a disconnection, it writes an alarm-log record, runs
+  `ERROR` `$SEVRCOMMAND` commands and any `$STATCOMMAND READ` command, and in
+  global active mode writes `$SEVRPV` 4. ALH reported the error but kept the
+  previous alarm state.
+- Send Message rejects reserved reload/stop-logging control prefixes,
+  including the looser forms legacy ALH receivers act on. Explicit controls and
+  the legacy broadcast wire format remain supported. Broadcast text is sent as
+  one line: pasted line breaks and other control characters become spaces.
+- Unavailable `pva://` outputs are reported once per outage, as Channel Access
+  outputs are. A `$SEVRPV` written before its output first connects after a
+  load is written on connection and reported only if the output does not
+  connect within one second or connects without write access.
+- As in ALH, a NUL byte in a configuration file ends only its own line.
+- With `-T`, or `-L` with an explicit `-m`, an existing alarm log holding more
+  records than the limit is rewritten at the first alarm to keep only its
+  newest records (ALH appends). Copy the file first, or use `-m 0`, when
+  switching from ALH.
 - With `-xml`, operation records escape `&`, `<`, `>` and `"` in facility
   labels, names and messages, in the operation log and in database queue
   records. ALH wrote this text unchanged; text-format logs are unchanged.
