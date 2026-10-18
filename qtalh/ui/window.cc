@@ -2978,7 +2978,7 @@ void Window::exitApplication() {
   exitPopup->show();
 }
 bool Window::eventFilter(QObject* object, QEvent* event) {
-  if (object == runtime && event->type() == QEvent::Close) {
+  if (object == runtime && event->type() == QEvent::Close && !quitting) {
     exitApplication();
     event->ignore();
     return true;
@@ -3018,7 +3018,9 @@ void Window::closeEvent(QCloseEvent* event) {
     }
   }
   if (runtime)
-    runtime->hide();
+    // Close the visible compact window so Qt can emit lastWindowClosed even
+    // when the main display was never shown. Hiding it leaves app.exec running.
+    runtime->close();
   // Hiding the main display, cancelling, or deferring exit is not an exit.
   logging->operation(nullptr, "Setup---Exit");
   event->accept();

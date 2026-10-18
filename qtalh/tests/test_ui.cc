@@ -2746,18 +2746,24 @@ private slots:
   void interruptMatchesLegacy_data() {
     QTest::addColumn<int>("number"); QTest::addColumn<bool>("broadcast");
     QTest::addColumn<bool>("handled");
-    QTest::newRow("-B SIGINT") << int(SIGINT) << true << true;
-    QTest::newRow("SIGINT") << int(SIGINT) << false << false;
-    QTest::newRow("-B SIGTERM") << int(SIGTERM) << true << false;
+    QTest::addColumn<bool>("mainWindow");
+    for (bool mainWindow : {false, true}) {
+      const auto mode = mainWindow ? "main" : "compact";
+      QTest::newRow(qPrintable(QString("%1 -B SIGINT").arg(mode))) << int(SIGINT) << true << true << mainWindow;
+      QTest::newRow(qPrintable(QString("%1 SIGINT").arg(mode))) << int(SIGINT) << false << false << mainWindow;
+      QTest::newRow(qPrintable(QString("%1 -B SIGTERM").arg(mode))) << int(SIGTERM) << true << false << mainWindow;
+    }
   }
   void interruptMatchesLegacy() {
     // ALH installs broadcastMess_exit_quit for SIGINT only with -B; that exit
     // logs Setup---Exit and releases its locks. Other cases keep the default.
     QFETCH(int, number); QFETCH(bool, broadcast); QFETCH(bool, handled);
+    QFETCH(bool, mainWindow);
     QTemporaryDir dir; const auto config = dir.filePath("signal.alhConfig"), ops = dir.filePath("ops");
     saveConfig(parseConfig("GROUP NULL root\nCHANNEL root signal:never:connects\n"), config);
     QStringList args{"-platform", "offscreen", "-s", "-a", dir.filePath("alarm"), "-o", ops, config};
     if (broadcast) args.insert(3, "-B");
+    if (mainWindow) args.insert(3, "-mainwindow");
     QProcess process;
     const auto previous = std::signal(number, SIG_DFL); // Inherited by the child.
     process.start(QDir(QCoreApplication::applicationDirPath()).filePath("qtalh"), args);
