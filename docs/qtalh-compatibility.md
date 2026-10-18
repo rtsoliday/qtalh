@@ -123,8 +123,15 @@ in global active mode, including channels that are also cancelled. Startup ACKT
 settings wait for write access, and are not replayed after a successful write.
 ALH wrote them only to channels connected after its startup connection wait and
 did not retry; Qt also writes when an IOC connects or grants write access later.
-Numeric and case-insensitive severity-command triggers are
-normalized to the legacy uppercase names when parsed and saved.
+Numeric and case-insensitive severity-command triggers (for example `UP_2` or
+`DOWN_minor`) are normalized to the uppercase names when parsed and saved, and
+then match only that severity. Legacy ALH compares these names case-sensitively
+and treats an unrecognized severity as `ANY`, so ALH runs such a command on every
+change in that direction. `$BEEPSEVERITY` and `$BEEPSEVR` also accept numeric or
+lowercase severities, which ALH ignores. `$STATCOMMAND` triggers must match a
+status name exactly; ALH's prefix match runs `READ_ACCESS` and `WRITE_ACCESS`
+commands on `READ` and `WRITE` status instead. Use the uppercase severity and
+status names in configurations shared with ALH.
 
 Failed severity-output writes retain only the latest requested value for each PV.
 They retry when the PV connects or regains write access, and are discarded when

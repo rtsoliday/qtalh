@@ -400,7 +400,9 @@ channels participate. Qt sends the final setting once per PV when writable.
 
 Severities are `NO_ALARM`, `MINOR`, `MAJOR`, `INVALID`, and `ERROR` (0–4).
 Severity values also accept numbers and case-insensitive names; command direction
-prefixes `UP_` and `DOWN_` are uppercase. Heartbeat intervals must be finite,
+prefixes `UP_` and `DOWN_` are uppercase. Legacy ALH reads only the uppercase
+names, so use them in files that ALH must also load (see the
+[compatibility inventory](qtalh-compatibility.md)). Heartbeat intervals must be finite,
 positive, and no greater than 2147483.647 seconds; scheduling rounds to milliseconds
 with a 1 ms minimum. Event-loop delays can delay a beat; missed beats are skipped.
 Heartbeat writes and the precise timer pause while the PV is disconnected or
