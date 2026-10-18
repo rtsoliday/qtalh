@@ -2,6 +2,11 @@
 
 QtALH reads and writes the alarm configuration XML used by the Phoebus alarm
 server and NALMS, so a facility can move between systems or run both.
+For QtALH 1.0.0, these conversions preserve the settings each format supports.
+Keep the original `.alhConfig` as the authoritative configuration: exporting
+to XML and importing it again can lose ALH-only settings, including Force PVs,
+beep thresholds, and group aliases. Review the conversion notes before using
+the converted configuration.
 
 ## In the application
 
