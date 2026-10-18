@@ -292,8 +292,11 @@ void NotificationPolicy::configure(const NotificationSettings& s, const QString&
       it = current.erase(it);
     else
       ++it;
+  // Repeat suppression outlives edits; only removed subscriptions release it.
+  QSet<QString> subscriptions;
+  for (const auto& r : s.subscriptions) subscriptions.insert(r.id);
   for (auto it = cooldown.begin(); it != cooldown.end();)
-    if (!keep.contains(it.key())) it = cooldown.erase(it);
+    if (!subscriptions.contains(it.key())) it = cooldown.erase(it);
     else ++it;
   QSet<QString> destinations;
   for (const auto& d : s.destinations) destinations.insert(d.id);

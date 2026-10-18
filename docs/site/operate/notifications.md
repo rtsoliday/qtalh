@@ -61,7 +61,10 @@ started before delivery or a retry.
 Repeat suppression is tracked separately for each subscription, channel, stage,
 and destination, starting with the first submission attempt. A recurring episode
 must satisfy both its stage delay and this cooldown. Pausing clears pending work
-and episodes but retains cooldowns until the runtime closes.
+and episodes but retains cooldowns until the runtime closes. Editing or disabling
+a subscription or destination also retains them. Removing a subscription releases
+its cooldowns, and loading a configuration in which a channel is missing or
+ambiguous releases that channel's cooldowns.
 
 ## Delivery and limits
 

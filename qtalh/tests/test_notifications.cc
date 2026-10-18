@@ -357,6 +357,50 @@ private slots:
     QVERIFY(p.take(e, 170000));
     QCOMPARE(e.subscriptionName, QString("Edited"));
   }
+  void editsAndConfigurationSwitchKeepCooldown() {
+    NotificationPolicy p;
+    configure(p);
+    auto a = alarm();
+    p.observe(a, 0);
+    p.tick(60000);
+    p.tick(70000);
+    NotificationEnvelope e;
+    QVERIFY(p.take(e, 70000));
+    e.attempts = 1;
+    p.attempted(e, 70000); // Initial stage is suppressed until 1870000.
+    p.completed(e, true);
+    auto s = settings();
+    s.subscriptions[0].name = "Edited";
+    p.configure(s, notificationConfiguration("/test.alh"));
+    p.observe(a, 100000); // Edited subscriptions restart their episodes...
+    p.tick(160000);
+    p.tick(170000);
+    QVERIFY(!p.take(e, 170000)); // ...but keep repeat suppression.
+    s.destinations[0].name = "Operators (edited)";
+    p.configure(s, notificationConfiguration("/test.alh"));
+    p.observe(a, 200000);
+    p.tick(260000);
+    p.tick(270000);
+    QVERIFY(!p.take(e, 270000));
+    p.enable(false);
+    p.configure(s, notificationConfiguration("/other.alh"));
+    p.configure(s, notificationConfiguration("/test.alh"));
+    p.enable(true);
+    p.observe(a, 300000);
+    p.tick(360000);
+    p.tick(370000);
+    QVERIFY(!p.take(e, 370000));
+    p.tick(900000);
+    p.tick(910000);
+    QVERIFY(p.take(e, 910000)); // Other stages are not suppressed.
+    QCOMPARE(e.stage, QString("escalate"));
+    p.completed(e, true);
+    p.tick(1870000);
+    p.tick(1880000);
+    QVERIFY(p.take(e, 1880000));
+    QCOMPARE(e.stage, QString("initial"));
+    QCOMPARE(e.subscriptionName, QString("Edited"));
+  }
   void pvWildcards_data() {
     QTest::addColumn<QString>("pattern");
     QTest::addColumn<QString>("pv");
