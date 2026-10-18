@@ -2459,6 +2459,27 @@ private slots:
     QTRY_VERIFY(log.isMaster());
   }
 #ifndef Q_OS_WIN
+  void lockFilesHonorUmask_data() {
+    QTest::addColumn<int>("mask"); QTest::addColumn<int>("mode");
+    QTest::newRow("002") << 002 << 0664; QTest::newRow("022") << 022 << 0644;
+    QTest::newRow("077") << 077 << 0600;
+  }
+  void lockFilesHonorUmask() {
+    // Legacy ALH creates .LOCK and .MESSLOCK with fopen("a"), so accounts that
+    // share a group can take over mastership or broadcast under umask 002.
+    QFETCH(int, mask); QFETCH(int, mode);
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    Options o; o.lock = true; o.broadcast = true; o.noLog = true;
+    o.config = dir.filePath("config");
+    const mode_t previous = ::umask(mode_t(mask));
+    { Logging log(o, "root"); }
+    ::umask(previous);
+    for (const char* suffix : {".LOCK", ".MESSLOCK"}) {
+      struct stat info{};
+      QCOMPARE(::stat(QFile::encodeName(o.config + suffix).constData(), &info), 0);
+      QCOMPARE(suffix + QString::number(info.st_mode & 0777, 8), suffix + QString::number(mode, 8));
+    }
+  }
   void lockOpenRecoveryWithCompetitor() {
     QTemporaryDir dir; QVERIFY(dir.isValid());
     Options o; o.lock = true; o.noLog = true; o.lockFile = dir.filePath("missing/lock");

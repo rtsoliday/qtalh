@@ -593,7 +593,9 @@ int acquireLock(const QString& name, QString* failure = nullptr) {
         ++it->users;
         return it.key();
       }
-  int fd = ::open(path.constData(), O_CREAT | O_RDWR, 0644);
+  // Like legacy fopen("a"), let the umask decide whether other operator
+  // accounts in the group may open the lock for writing and take it over.
+  int fd = ::open(path.constData(), O_CREAT | O_RDWR, 0666);
   if (fd < 0) {
     if (failure) *failure = QString::fromLocal8Bit(strerror(errno));
     return -1;
