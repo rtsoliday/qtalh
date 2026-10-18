@@ -87,17 +87,21 @@ ChannelAccess::~ChannelAccess() {
   qDeleteAll(sockets);
 }
 void ChannelAccess::report(int status, const QString& context) {
-  if (status != ECA_NORMAL && error)
-    error(context + ": " + ca_message(status));
+  if (status != ECA_NORMAL)
+    if (const auto callback = error)
+      callback(context + ": " + ca_message(status));
 }
 void ChannelAccess::numericUnavailable(Channel* c, const QString& reason) {
   if (!c->numeric)
     return;
   const auto serial = c->serial;
+  QPointer<ChannelAccess> self(this);
   if (c->numericError != reason) {
     c->numericError = reason;
-    if (error)
-      error(reason + ": " + c->name);
+    if (const auto callback = error)
+      callback(reason + ": " + c->name);
+    if (!self)
+      return;
   }
   // A diagnostic can remove this input; revalidate it, as PvAccess does.
   // CALC inputs must become unavailable, while scalar force masks retain the
@@ -120,12 +124,16 @@ ChannelAccess::Channel* ChannelAccess::add(const QString& name) {
   channelsByName[name].push_back(c);
   channelsBySerial.insert(c->serial, c);
   noteDeadline(c);
+  const auto serial = c->serial;
+  QPointer<ChannelAccess> self(this);
   report(
       ca_create_channel(name.toLocal8Bit().constData(), connection, c, CA_PRIORITY_DEFAULT, &c->id),
       "Create " + name);
+  if (!self || !(c = channelsBySerial.value(serial)))
+    return nullptr;
   if (c->id)
     report(ca_replace_access_rights_event(c->id, access), "Access callback " + name);
-  return c;
+  return self ? channelsBySerial.value(serial) : nullptr;
 }
 void ChannelAccess::monitor(const QString& n, std::function<void(Event)> callback,
                             const void* tag) {
@@ -143,6 +151,8 @@ void ChannelAccess::monitor(const QString& n, std::function<void(Event)> callbac
       }
   if (!c)
     c = add(n);
+  if (!c)
+    return;
   // Access callbacks are ignored during Cancel and CA need not repeat them on
   // Add. Defer the check until poll(): an inline alarm here would re-enter
   // Engine::applyMask before it has updated the parent group counts.
@@ -161,6 +171,8 @@ void ChannelAccess::monitor(const QString& n, std::function<void(Event)> callbac
 }
 void ChannelAccess::text(const QString& name, std::function<void(QString)> callback) {
   auto c = add(name);
+  if (!c)
+    return;
   c->text = std::move(callback);
   subscribe(c);
   ca_flush_io();
@@ -168,6 +180,8 @@ void ChannelAccess::text(const QString& name, std::function<void(QString)> callb
 void ChannelAccess::number(const QString& n, std::function<void(double)> callback,
                            const void* tag) {
   auto c = add(n);
+  if (!c)
+    return;
   c->numeric = std::move(callback);
   c->tag = tag;
   c->numericError.clear();
@@ -183,7 +197,10 @@ void ChannelAccess::prepare(const QString& n) {
       c->prepared = true;
       return;
     }
-  add(n)->prepared = true;
+  auto c = add(n);
+  if (!c)
+    return;
+  c->prepared = true;
   ca_flush_io();
 }
 void ChannelAccess::setInitialAckT(const QString& n, bool v) {
@@ -319,9 +336,12 @@ void ChannelAccess::connected(Channel* c, long op) {
   } else if (op == CA_OP_CONN_DOWN) {
     c->haveLast = false; // Recovery must wait for a fresh subscription event.
     const auto serial = c->serial;
+    QPointer<ChannelAccess> self(this);
     // Call a copy: the alarm callback may cancel or remove this channel.
     if (const auto callback = c->alarm)
       callback({ALARM_NSTATUS, 4, 0, -1, "0"});
+    if (!self)
+      return;
     if ((c = channelsBySerial.value(serial)))
       numericUnavailable(c, "PV not connected");
   }
@@ -331,6 +351,7 @@ void ChannelAccess::rightsChanged(Channel* c) {
     return;
   const auto a = c->id;
   const auto serial = c->serial;
+  QPointer<ChannelAccess> self(this);
   c->recheckAccess = false;
   if (options.debug)
     debugLog(true, "CA", QString("%1 access read=%2 write=%3").arg(c->name)
@@ -340,6 +361,8 @@ void ChannelAccess::rightsChanged(Channel* c) {
     // dispatch false commands/outputs before the IOC's current event arrives.
     c->haveLast = false;
     numericUnavailable(c, "No read access for PV");
+    if (!self)
+      return;
     if (!(c = channelsBySerial.value(serial)))
       return;
   }
@@ -351,6 +374,8 @@ void ChannelAccess::rightsChanged(Channel* c) {
       callback({ALARM_NSTATUS + 2, 4, 0, -1, "0"});
     else if (c->haveLast)
       callback(c->last);
+    if (!self)
+      return;
     if (!(c = channelsBySerial.value(serial)))
       return;
   }
@@ -369,6 +394,8 @@ void ChannelAccess::rightsChanged(Channel* c) {
     if (c->owner->put(c->name, c->owner->initialAckT[record], WriteKind::AckTransient))
       c->owner->initialAckWritten.insert(record);
   }
+  if (!self || !(c = channelsBySerial.value(serial)))
+    return;
   // Connection-up also dispatches this path. Coalesce failed severity writes
   // by PV name, and replay only when connection and write access are available.
   // Possible inherited ALH bug, deferred: successful severity writes are no

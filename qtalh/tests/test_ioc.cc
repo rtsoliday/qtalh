@@ -14,6 +14,7 @@ namespace alh {
 // IOC-specific failure trigger. Inject its arguments privately, then use the
 // normal copied callback queue and dispatch path; no production injection API.
 struct ChannelAccessTestAccess {
+  static int channelCount(const ChannelAccess& ca) { return int(ca.channels.size()); }
   static bool failAlarm(ChannelAccess& ca, const QString& name, int status) {
     for (auto c : ca.channelsByName.value(name))
       if (c->alarm && !c->cancelled) {
@@ -33,6 +34,18 @@ struct ChannelAccessTestAccess {
     for (auto c : ca.channelsByName.value(name))
       if (c->alarm && !c->cancelled) {
         ca.rightsChanged(c);
+        return true;
+      }
+    return false;
+  }
+  static bool disconnect(ChannelAccess& ca, const QString& name) {
+    for (auto c : ca.channelsByName.value(name))
+      if (c->alarm && !c->cancelled) {
+        connection_handler_args args{};
+        args.chid = c->id;
+        args.op = CA_OP_CONN_DOWN;
+        ChannelAccess::connection(args);
+        ca.dispatch();
         return true;
       }
     return false;
@@ -629,6 +642,79 @@ private slots:
     QCOMPARE(replacementErrors, 0);
     QTest::qWait(100);
     QCOMPARE(replacementErrors, 0);
+  }
+  void numericDiagnosticCanDestroyService() {
+    auto ca = std::make_unique<ChannelAccess>();
+    qint64 elapsed = 1000;
+    ca->monotonicNow = [&] { return elapsed; };
+    int diagnostics = 0, numbers = 0;
+    ca->number(prefix + "missing_destroy_numeric", [&](double) { ++numbers; });
+    ca->error = [&](const QString&) {
+      ++diagnostics;
+      ca.reset();
+    };
+    elapsed += 1001;
+    ca->poll();
+    QVERIFY(!ca);
+    QCOMPARE(diagnostics, 1);
+    QCOMPARE(numbers, 0);
+    QTest::qWait(100);
+    QCOMPARE(numbers, 0);
+  }
+  void creationDiagnosticCanRemoveOwner_data() {
+    QTest::addColumn<QString>("kind");
+    QTest::addColumn<bool>("destroy");
+    for (const auto& kind : {"alarm", "numeric", "text", "prepared"})
+      for (bool destroy : {false, true})
+        QTest::newRow(qPrintable(QString("%1-%2").arg(kind, destroy ? "destroy" : "clear")))
+            << QString(kind) << destroy;
+  }
+  void creationDiagnosticCanRemoveOwner() {
+    QFETCH(QString, kind); QFETCH(bool, destroy);
+    auto ca = std::make_unique<ChannelAccess>();
+    int diagnostics = 0, callbacks = 0;
+    ca->error = [&](const QString&) {
+      ++diagnostics;
+      if (destroy) ca.reset();
+      else ca->clear();
+    };
+    // CA rejects an empty name synchronously, before it can search the network.
+    if (kind == "alarm") ca->monitor({}, [&](Event) { ++callbacks; });
+    else if (kind == "numeric") ca->number({}, [&](double) { ++callbacks; });
+    else if (kind == "text") ca->text({}, [&](QString) { ++callbacks; });
+    else ca->prepare({});
+    QCOMPARE(diagnostics, 1);
+    if (destroy) QVERIFY(!ca);
+    else QCOMPARE(ChannelAccessTestAccess::channelCount(*ca), 0);
+    QTest::qWait(20);
+    QCOMPARE(callbacks, 0);
+  }
+  void alarmCallbackCanDestroyService_data() {
+    QTest::addColumn<bool>("disconnect");
+    QTest::newRow("disconnect") << true;
+    QTest::newRow("access-rights") << false;
+  }
+  void alarmCallbackCanDestroyService() {
+    QFETCH(bool, disconnect);
+    const auto name = prefix + "alarm";
+    auto ca = std::make_unique<ChannelAccess>();
+    int events = 0;
+    bool destroy = false;
+    ca->monitor(name, [&](Event) {
+      ++events;
+      if (destroy) ca.reset();
+    });
+    QTRY_VERIFY(events > 0);
+    QTest::qWait(100);
+    const auto before = events;
+    destroy = true;
+    // Exercise copied CA callback dispatch without disrupting the owned IOC.
+    QVERIFY(disconnect ? ChannelAccessTestAccess::disconnect(*ca, name)
+                       : ChannelAccessTestAccess::recheckRights(*ca, name));
+    QVERIFY(!ca);
+    QCOMPARE(events, before + 1);
+    QTest::qWait(100);
+    QCOMPARE(events, before + 1);
   }
   void readAccessRecoveryRequiresFreshAlarm_data() {
     QTest::addColumn<bool>("global");
