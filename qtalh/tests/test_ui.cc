@@ -2924,6 +2924,42 @@ private slots:
     });
     QVERIFY(chooseFile(nullptr, "Cancel", dir.path(), "All files (*)").isEmpty());
   }
+#ifndef Q_OS_WIN
+  void fileSelectionKeepsLocks() {
+    // File > Open starts in the configuration directory beside .LOCK and
+    // .MESSLOCK. Listing it (the modern dialog sniffs MIME content) must not
+    // release this process's master or pending broadcast lock.
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    auto o = options(false); o.lock = true; o.broadcast = true;
+    o.configDir = dir.path(); o.config = dir.filePath("test.alhConfig");
+    saveConfig(parseConfig("GROUP NULL root\nCHANNEL root pv\n"), o.config);
+    Logging log(o, "root");
+    QVERIFY(log.isMaster());
+    QVERIFY(log.sendBroadcast("pending"));
+    auto held = [](const QString& path) {
+      QProcess probe;
+      probe.start("python3", {"-c", "import fcntl,sys; f=open(sys.argv[1],'a+'); "
+                              "fcntl.lockf(f,fcntl.LOCK_EX|fcntl.LOCK_NB)", path});
+      return probe.waitForFinished() && probe.exitStatus() == QProcess::NormalExit &&
+             probe.exitCode() == 1;
+    };
+    QVERIFY(held(o.config + ".LOCK"));
+    QVERIFY(held(o.config + ".MESSLOCK"));
+    QTimer::singleShot(0, [&] {
+      auto dialog = qobject_cast<QDialog*>(qApp->activeModalWidget());
+      QVERIFY(dialog);
+      if (auto model = dialog->findChild<QFileSystemModel*>())
+        QTRY_VERIFY(!model->type(model->index(o.config)).isEmpty());
+      QTest::qWait(500); // Let every directory entry's details be gathered.
+      dialog->reject();
+    });
+    QVERIFY(chooseFile(nullptr, "Alarm Configuration File", o.configDir,
+                       "Alarm configurations (*.alhConfig);;All files (*)").isEmpty());
+    QVERIFY(log.isMaster());
+    QVERIFY(held(o.config + ".LOCK"));
+    QVERIFY(held(o.config + ".MESSLOCK"));
+  }
+#endif
   void forceDialogActions() {
     auto d = parseConfig("GROUP NULL root\n$FORCEPV gate -D--- 1 NE\nCHANNEL root pv\n");
     auto w = std::make_unique<Window>(d, options(false), false);

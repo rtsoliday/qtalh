@@ -548,8 +548,11 @@ between windows in the same process. Attempts to overwrite a pending broadcast
 return a busy error. Message IDs include a monotonic millisecond value and process
 ID within the legacy reader's buffer, so successive sends remain distinguishable.
 
-On Linux/macOS, log lock files use POSIX `lockf` and the legacy `.LOCK` basename;
-broadcasts use
+On Linux/macOS, log lock files use the legacy `.LOCK` basename. Linux takes open
+file description locks (`F_OFD_SETLK`), which conflict with legacy ALH's POSIX
+`lockf` locks but, unlike them, survive other code in the process (such as a Qt 6
+file dialog sniffing file types) opening and closing the lock file; macOS uses
+POSIX `lockf`. Lock descriptors are not inherited by commands. Broadcasts use
 `.MESS`/`.MESSLOCK` and the legacy four-line record. Native POSIX lock handoff
 and closing a second window are tested. Application windows on Unix share lock
 descriptors and

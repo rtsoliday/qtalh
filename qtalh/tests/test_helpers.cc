@@ -5,6 +5,7 @@
 #include <QCryptographicHash>
 #include <QtEndian>
 #include <QLocale>
+#include <QMimeDatabase>
 #include <QProcess>
 #include <QTcpServer>
 #include <QTcpSocket>
@@ -34,9 +35,9 @@
 #endif
 using namespace alh;
 #ifndef Q_OS_WIN
-// Link-time seam: logging.o resolves lockf() to this definition, so a test can
-// emulate a lock directory whose filesystem rejects POSIX locks (for example,
-// NFS without lockd returns ENOLCK). Zero passes every call through to libc.
+// Link-time seam: logging.o resolves lockf() and fcntl() to these definitions,
+// so a test can emulate a lock directory whose filesystem rejects locks (for
+// example, NFS without lockd returns ENOLCK). Zero passes every call to libc.
 static int lockfFailure = 0;
 extern "C" int lockf(int fd, int cmd, off_t len) {
   if (lockfFailure && cmd == F_TLOCK) {
@@ -46,6 +47,22 @@ extern "C" int lockf(int fd, int cmd, off_t len) {
   using Lockf = int (*)(int, int, off_t);
   static const auto real = reinterpret_cast<Lockf>(dlsym(RTLD_NEXT, "lockf"));
   return real(fd, cmd, len);
+}
+// Linux takes open file description locks first; fail those acquisitions alike.
+extern "C" int fcntl(int fd, int cmd, ...) {
+  va_list args;
+  va_start(args, cmd);
+  void* argument = va_arg(args, void*);
+  va_end(args);
+#ifdef F_OFD_SETLK
+  if (lockfFailure && cmd == F_OFD_SETLK && static_cast<struct flock*>(argument)->l_type == F_WRLCK) {
+    errno = lockfFailure;
+    return -1;
+  }
+#endif
+  using Fcntl = int (*)(int, int, ...);
+  static const auto real = reinterpret_cast<Fcntl>(dlsym(RTLD_NEXT, "fcntl"));
+  return real(fd, cmd, argument);
 }
 #endif
 static QString checkpointFor(const QString& path) {
@@ -2720,6 +2737,37 @@ private slots:
     QVERIFY(probe() > 0); // Closing a peer must not release the recovered lock.
     log.reset();
     QCOMPARE(probe(), 0);
+  }
+  void lockSurvivesForeignDescriptor() {
+    // Code outside the lock registry (QFileDialog's MIME sniffing, a viewer,
+    // a plugin) may open and close a lock file. Ownership must not change.
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    Options o; o.lock = true; o.broadcast = true; o.noLog = true;
+    o.config = dir.filePath("config");
+    auto log = std::make_unique<Logging>(o, "root");
+    QVERIFY(log->isMaster());
+    QVERIFY(log->sendBroadcast("pending"));
+    auto probe = [](const QString& path) {
+      QProcess process;
+      process.start("python3", {"-c", "import fcntl,sys; f=open(sys.argv[1],'a+'); "
+          "fcntl.lockf(f,fcntl.LOCK_EX|fcntl.LOCK_NB)", path});
+      if (!process.waitForFinished()) return -1;
+      return process.exitCode();
+    };
+    for (const QString suffix : {".LOCK", ".MESSLOCK"}) {
+      const auto path = o.config + suffix;
+      QCOMPARE(probe(path), 1);
+      { QFile peek(path); QVERIFY(peek.open(QIODevice::ReadOnly)); }
+      QVERIFY2(probe(path) == 1, qPrintable(suffix + " released by a closed descriptor"));
+      QMimeDatabase().mimeTypeForFile(QFileInfo(path)); // Content sniffing.
+      QVERIFY2(probe(path) == 1, qPrintable(suffix + " released by MIME sniffing"));
+    }
+    // A command started while master must not inherit and prolong ownership.
+    Child command;
+    command.start("sleep", {"30"});
+    QVERIFY(command.waitForStarted());
+    log.reset();
+    QCOMPARE(probe(o.config + ".LOCK"), 0);
   }
 #endif
 

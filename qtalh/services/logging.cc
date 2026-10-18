@@ -641,6 +641,22 @@ bool setLock(int fd, bool acquire, QString* failure = nullptr) {
     it->locked = acquire;
   return ok;
 #else
+#ifdef F_OFD_SETLK
+  // lockf() locks belong to the process: any other open and close of the file
+  // in this process (Qt 6 file dialogs sniff MIME content) silently releases
+  // them. Open file description locks belong to this descriptor only, and
+  // still conflict with lockf()/fcntl() locks held by other processes (ALH).
+  struct flock range{};
+  range.l_type = acquire ? F_WRLCK : F_UNLCK;
+  range.l_whence = SEEK_SET;
+  if (::fcntl(fd, F_OFD_SETLK, &range) == 0) return true;
+  // Kernels before Linux 3.15 lack open file description locks.
+  if (errno != EINVAL) {
+    if (failure && errno != EAGAIN && errno != EACCES)
+      *failure = QString::fromLocal8Bit(strerror(errno));
+    return false;
+  }
+#endif
   if (lockf(fd, acquire ? F_TLOCK : F_ULOCK, 0) == 0) return true;
   // As in ALH, only EAGAIN/EACCES mean that another process holds the lock.
   if (failure && errno != EAGAIN && errno != EACCES)
