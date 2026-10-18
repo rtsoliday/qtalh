@@ -53,6 +53,10 @@ QtALH builds as a native x64 Windows application using MSVC, following the
 QtEDM build setup. Install Visual Studio 2022 with the x64 C++ tools, GNU Make
 (Strawberry Perl or Cygwin), Cygwin shell utilities, Qt for MSVC including
 **Multimedia**, and a built EPICS 7 Base for `windows-x64` (including pvAccess).
+The `clean` and `rebuild` targets also need Python 3 as `python` on `PATH`
+(or the `PYTHON` environment variable set to its path) to remove generated
+documentation; the launcher does not check for it, and without it `clean`
+stops before removing any objects.
 
 From PowerShell or Command Prompt:
 
@@ -103,8 +107,8 @@ Unix-only queue/RPC, POSIX locking, symlink and resource
 limit cases are excluded. Motif/X11 visual comparisons require Linux/macOS.
 Test reports are saved under `qtalh/O.Windows-x86_64-qt6/test-artifacts/`
 (or the corresponding Qt 5 directory) and printed after each suite.
-`build-windows.bat clean` removes Windows objects without requiring Qt, EPICS
-or Visual Studio.
+`build-windows.bat clean` removes Windows objects and generated documentation
+without requiring Qt, EPICS or Visual Studio; it does require Python 3.
 
 ### Linux and macOS
 
