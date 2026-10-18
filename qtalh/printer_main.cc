@@ -108,5 +108,10 @@ int main(int argc, char** argv) {
       QTimer::singleShot(0, &app, sendNext);
   });
   timer.start();
-  return app.exec();
+  const int rc = app.exec();
+  // Handlers capture locals declared after the socket; detach them before
+  // those locals are destroyed, since ~QAbstractSocket may emit disconnected.
+  QObject::disconnect(&socket, nullptr, nullptr, nullptr);
+  socket.abort();
+  return rc;
 }
