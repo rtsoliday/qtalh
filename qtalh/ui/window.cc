@@ -2476,8 +2476,9 @@ void Window::masks(bool forced) {
       grid->addWidget(new QLabel(labels[bit]), bit, 0);
       // Modern rows show the active setting as a selected segment.
       auto segments = legacyAppearance() ? nullptr : new QButtonGroup(dialog);
-      auto pair = new QHBoxLayout;
-      pair->setSpacing(0);
+      // Only modern rows place their segments in a layout; the grid owns it.
+      auto pair = segments ? new QHBoxLayout : nullptr;
+      if (pair) pair->setSpacing(0);
       for (int choice = 0; choice < 3; ++choice) {
         const QString text = choice == 0 ? off[bit] : choice == 1 ? on[bit] : QString("Reset");
         auto button = segments && choice < 2 ? segmentButton(text, choice == 0, choice == 1)
