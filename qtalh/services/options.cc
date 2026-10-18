@@ -107,8 +107,12 @@ Options parseOptions(const QStringList& args) {
     } else if (a == "-platform")
       o.platform = need(i);
     else if (a == "--") {
-      if (++i < args.size())
+      if (++i < args.size()) {
+        // "a -- b" names two configurations, like "a b" and "-- a b".
+        if (!o.config.isEmpty())
+          throw ParseError("Only one configuration filename is accepted");
         o.config = args[i];
+      }
       if (i + 1 < args.size())
         throw ParseError("Only one configuration filename is accepted");
     } else if (a.startsWith('-'))

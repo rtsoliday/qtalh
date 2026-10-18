@@ -3717,6 +3717,9 @@ $GUIDANCE https://example.invalid/guide
     auto terminated = parseOptions({"qtalh", "--", "-style=fusion"});
     QVERIFY(terminated.style.isEmpty());
     QVERIFY(terminated.config.endsWith("-style=fusion"));
+    // "--" ends options; it does not replace a configuration already named.
+    QVERIFY_THROWS_EXCEPTION(ParseError, parseOptions({"qtalh", "a.alhConfig", "--", "b.alhConfig"}));
+    QVERIFY(parseOptions({"qtalh", "a.alhConfig", "--"}).config.endsWith("a.alhConfig"));
     QVERIFY_THROWS_EXCEPTION(ParseError, parseOptions({"qtalh", "-style"}));
     QVERIFY_THROWS_EXCEPTION(ParseError, parseOptions({"qtalh", "-style="}));
     QVERIFY_THROWS_EXCEPTION(ParseError, parseOptions({"qtalh", "-style", ""}));
