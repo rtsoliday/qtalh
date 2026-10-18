@@ -79,12 +79,39 @@ The PVA-enabled run includes 13 deterministic pvAccess checks and six live
 pvAccess IOC cases, including reconnection, writes, local acknowledgements,
 descriptions, force inputs, passive mode, and duplicate observers.
 
-No revision after 93ac87b has been verified on Windows. Unverified changes
-include the test-owned `caRepeater` (3407d78), the shared `Makefile.rules`
-and `Makefile.build` (9a35e8d, b61454b), the bounded-memory changes to
-pvAccess, analytics, notifications, log identity and editor undo (a7dabfb),
-and their new test cases. No continuous integration job builds or tests the
-application; the repository workflow builds only the documentation.
+### Windows verification (2026-10-18)
+
+The pre-release audit started from 39e17ce and verified candidate 4fef1fa,
+including the Phoebus alias-spacing correction. A clean native application
+build passed in 60.906 seconds with no compiler warnings or errors, using
+MSVC 2022, Qt 6.11.2 and EPICS Base 7.0.10.1-DEV. The complete required
+suite ran in a scratch source copy with loopback-only CA/PVA settings and
+passed 1,386 checks with no failures and 17 skips:
+
+| Suite | Passed | Skipped |
+| --- | ---: | ---: |
+| Core | 435 | 14 |
+| Modern UI | 258 | 2 |
+| Classic UI | 259 | 1 |
+| Loopback IOC | 147 | 0 |
+| pvAccess | 77 | 0 |
+| Portable helpers | 124 | 0 |
+| Notifications | 57 | 0 |
+| Analytics | 29 | 0 |
+
+The optional Fusion suite passed 259 checks with one skip. Separate offscreen
+dialog-gallery runs passed three checks each, producing 46 modern and 32
+classic PNG captures. The combined required, Fusion and gallery run
+completed in 218.969 seconds. These checks include
+the test-owned `caRepeater`, shared Makefiles, bounded-memory behavior and
+the regression cases that were unverified in the earlier report.
+
+Qt 5 was not installed on this Windows host. The current candidate's Linux
+and macOS builds, Motif/X11 visual comparison, Unix helper interoperability,
+and clean-machine distribution installation remain **NOT VERIFIED** by
+this audit. Native print panels and physical audio/printer output were not
+tested. No continuous integration job builds or tests the application;
+the repository workflow builds only the documentation.
 
 ## macOS verification (2026-10-15)
 
