@@ -379,9 +379,25 @@ Supported legacy switches: `-c`, `-global`, `-S`, `-D`, `-s`, `-B`, `-L`,
 `-v`, `-version`. Help/version work without a GUI connection. Qt-specific
 `-platform` and `-style` are accepted. The modern appearance is the default;
 `-style motif` selects the classic Motif-influenced appearance, and `-style
-fusion` or another Qt style applies that style to the modern layouts. `-style=name` is also accepted. `--help`, `--version`, `--validate`, and
-`--` are additional conveniences. Unknown switches, including arbitrary Xt
-resource overrides, fail with a diagnostic.
+fusion` or another Qt style applies that style to the modern layouts. `-style=name` is also accepted. `--help`, `--version`, `--validate`,
+`--to-phoebus`, `--from-phoebus`, and `--` are additional conveniences. Unknown
+switches, including arbitrary Xt resource overrides, fail with a diagnostic.
+
+Other command-line differences from ALH:
+
+- Help and version text go to stdout with exit status 0; ALH writes them to
+  stderr and exits with status 1. The version line is
+  `QtALH (ALH 1.2.35) Qt <version> <EPICS version>` rather than
+  `ALH Version 1.2.35  (<EPICS version>)`.
+- Option values may begin with `-`, so a missing value takes the next switch
+  as its value (for example, `-a -L` uses `-L` as the alarm filename and does
+  not enable locking). ALH rejects such values for its file, directory, count,
+  and key options; `-geometry` and `-fn` accept them in both.
+- `-P` and `-O` do not require `-L`; ALH refuses them without it. Without `-L`
+  every instance forwards its alarm records, so several unlocked consoles send
+  duplicate printer and database records.
+- `-fn` and `-font` take precedence over `ALHMAINFONT`; in ALH, `ALHMAINFONT`
+  wins.
 
 `ALARMHANDLER` sets the configuration directory and `ALHMAINFONT` the runtime
 button font. Unless `-l` is supplied, the log directory follows the configuration

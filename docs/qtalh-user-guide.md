@@ -190,8 +190,8 @@ INCLUDE paths retain their separate configuration-directory rule.
 | `-L` | Coordinate master/slave alarm logging with a lock. Alarm retention defaults to unlimited unless `-m` is supplied. |
 | `-Lfile basename` | Override the lock basename; requires `-L` to enable locking. Default: resolved configuration filename. |
 | `-B` | Enable file-based message, reload, and temporary stop-logging broadcasts. |
-| `-P key` | Send alarm records to a printer System V queue; positive decimal integer, Linux/macOS only. |
-| `-O key` | Send database records to a System V queue; positive decimal integer, Linux/macOS only. |
+| `-P key` | Send alarm records to a printer System V queue; positive decimal integer, Linux/macOS only. Unlike ALH, `-L` is not required; without it every instance sends its alarm records. |
+| `-O key` | Send database records to a System V queue; positive decimal integer, Linux/macOS only. Unlike ALH, `-L` is not required; without it every instance sends its alarm records. |
 | `-filter no\|active\|unack` | Initial display filter; default `no`. Active includes active or unacknowledged alarms. Filtering does not stop monitoring. |
 | `-mainwindow` | Open the main runtime window at startup. |
 | `-maskcolor` | Color the mask controls. |
