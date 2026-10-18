@@ -2615,7 +2615,12 @@ private slots:
       if (widget->objectName() == "exitConfirmation" && widget->isVisible())
         dialog = qobject_cast<QMessageBox*>(widget);
     QVERIFY(dialog);
+#ifdef Q_OS_MACOS
+    // QMessageBox ignores window titles on macOS, including offscreen.
+    QCOMPARE(dialog->windowTitle(), QString());
+#else
     QCOMPARE(dialog->windowTitle(), QString("Alarm Configuration Tool"));
+#endif
     QCOMPARE(dialog->text(), QString("Exit Alarm Configuration Tool?"));
     QVERIFY2(!dialog->informativeText().contains("monitoring"), qPrintable(dialog->informativeText()));
     QTest::mouseClick(dialog->button(QMessageBox::Cancel), Qt::LeftButton);
