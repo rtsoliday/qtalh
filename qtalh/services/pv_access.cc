@@ -50,7 +50,21 @@ struct PvAccess::Inbox {
     return sizeof(Update) + 2 * (size_t(u.message.capacity()) + size_t(u.sample.text.capacity()) +
                                 size_t(u.sample.alarmMessage.capacity()));
   }
+  // A server resends its current value to every fresh subscription, so one
+  // update larger than the whole budget would overflow again after each
+  // recovery. Bound each string, as Channel Access bounds DBR_STRING.
+  static void clip(QString& s) {
+    if (s.size() <= MaximumUpdateTextLength)
+      return;
+    int n = MaximumUpdateTextLength;
+    if (s.at(n - 1).isHighSurrogate())
+      --n;
+    s = s.left(n); // A copy: truncate() would keep the large capacity.
+  }
   void post(Update u) {
+    clip(u.message);
+    clip(u.sample.text);
+    clip(u.sample.alarmMessage);
     std::lock_guard<std::mutex> guard(lock);
     if (!owner)
       return;

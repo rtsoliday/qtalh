@@ -470,7 +470,8 @@ is the PVA alarm severity. The status is the alarm condition named in
 `alarm.message`, as an IOC's PVA server (QSRV) reports it (for example `HIHI`).
 Other messages map to `UDF` or `COMM` for undefined or driver alarms, and to
 `SOFT` otherwise. Values display with `display.precision`; enumerated values
-display their state names, and writes set the enumeration index. Descriptions
+display their state names, and writes set the enumeration index. Value text and
+alarm messages longer than 4,096 characters are truncated. Descriptions
 (`-desc_field`) read `pva://record.DESC`, and the alarm-limit tools read record fields
 the same way, so they need an EPICS IOC behind the name.
 

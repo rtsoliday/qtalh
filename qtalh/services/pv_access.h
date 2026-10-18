@@ -40,6 +40,8 @@ public:
   void configureInitialAckT(const Document&);
   static constexpr size_t MaximumPendingUpdates = 4096;
   static constexpr size_t MaximumPendingUpdateBytes = 4 * 1024 * 1024;
+  // Longer value text, alarm messages and diagnostics are truncated.
+  static constexpr int MaximumUpdateTextLength = 4096;
   static constexpr size_t MaximumPendingWrites = 128;
   int writeTimeoutMs = 30000;
   size_t pendingUpdateCount() const;

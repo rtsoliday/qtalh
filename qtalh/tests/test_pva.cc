@@ -31,6 +31,14 @@ pvd::StructureConstPtr scalarType() {
         ->add("message", pvd::pvString)->endNested()
       ->createStructure();
 }
+pvd::StructureConstPtr stringType() {
+  return pvd::getFieldCreate()->createFieldBuilder()
+      ->add("value", pvd::pvString)
+      ->addNestedStructure("alarm")
+        ->add("severity", pvd::pvInt)->add("status", pvd::pvInt)
+        ->add("message", pvd::pvString)->endNested()
+      ->createStructure();
+}
 struct TestMonitor final : pva::Monitor, std::enable_shared_from_this<TestMonitor> {
   pva::MonitorRequester::shared_pointer requester;
   std::deque<pva::MonitorElementPtr> queue;
@@ -51,6 +59,15 @@ struct TestMonitor final : pva::Monitor, std::enable_shared_from_this<TestMonito
     data->getSubField<pvd::PVDouble>("value")->put(value);
     data->getSubField<pvd::PVInt>("alarm.severity")->put(severity);
     data->getSubField<pvd::PVString>("alarm.message")->put(message);
+    auto element = std::make_shared<pva::MonitorElement>(data);
+    element->changedBitSet->set(0);
+    queue.push_back(element);
+    requester->monitorEvent(shared_from_this());
+  }
+  void postText(const std::string& value, int severity = 0) {
+    auto data = pvd::getPVDataCreate()->createPVStructure(stringType());
+    data->getSubField<pvd::PVString>("value")->put(value);
+    data->getSubField<pvd::PVInt>("alarm.severity")->put(severity);
     auto element = std::make_shared<pva::MonitorElement>(data);
     element->changedBitSet->set(0);
     queue.push_back(element);
@@ -392,7 +409,9 @@ private slots:
     QTest::addColumn<int>("count");
     QTest::addColumn<int>("messageBytes");
     QTest::newRow("count") << int(PvAccess::MaximumPendingUpdates + 10) << 0;
-    QTest::newRow("bytes") << 1 << int(PvAccess::MaximumPendingUpdateBytes / 2 + 100);
+    // Under the count limit, but twice the byte budget.
+    QTest::newRow("bytes") << int(PvAccess::MaximumPendingUpdates / 2)
+                           << int(2 * PvAccess::MaximumPendingUpdateBytes / PvAccess::MaximumPendingUpdates);
   }
   void inboxOverflow() {
     QFETCH(int, count); QFETCH(int, messageBytes);
@@ -416,6 +435,39 @@ private slots:
     fresh->post(7, 1);
     QTRY_COMPARE(last.value, QString("7"));
     QCOMPARE(last.severity, 1);
+  }
+  void oversizedUpdate_data() {
+    QTest::addColumn<bool>("value");
+    QTest::newRow("alarm message") << false;
+    QTest::newRow("value") << true;
+  }
+  void oversizedUpdate() {
+    QFETCH(bool, value);
+    PvAccess pv;
+    int overflows = 0;
+    pv.error = [&](const QString& s) { if (s.contains("buffer overflow")) ++overflows; };
+    Event last;
+    pv.monitor("pva://big", [&](Event e) { last = e; });
+    const std::string big(PvAccess::MaximumPendingUpdateBytes / 2 + 100, 'x');
+    // A server sends its current value to every fresh subscription. One
+    // update larger than the whole budget must not start overflow recovery,
+    // which would resubscribe and overflow again without end.
+    for (int round = 0; round < 3; ++round) {
+      auto monitor = provider->channels.back()->monitor;
+      if (value) monitor->postText(big, 2);
+      else monitor->post(round, 2, big);
+      QTest::qWait(250); // Recovery resubscribes after 100 ms.
+    }
+    QCOMPARE(overflows, 0);
+    QCOMPARE(provider->channels.size(), size_t(1));
+    QCOMPARE(last.severity, 2);
+    if (value) {
+      QVERIFY(!last.value.isEmpty() && last.value.size() < int(big.size()));
+      QVERIFY(QString::fromStdString(big).startsWith(last.value));
+    } else {
+      QCOMPARE(last.value, QString("2"));
+    }
+    QCOMPARE(pv.pendingUpdateBytes(), size_t(0));
   }
   void largeConfigurationRecoversFromInboxOverflow() {
     PvAccess pv;
