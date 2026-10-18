@@ -764,6 +764,47 @@ private slots:
     p.tick(100000);
     QVERIFY(!p.take(e, 100000));
   }
+  void staleAlarmRetryKeepsQueuedResolution() {
+    auto s = settings();
+    s.subscriptions[0].resolution = true;
+    NotificationPolicy p;
+    configure(p, s);
+    auto a = alarm();
+    p.observe(a, 0);
+    p.tick(60000);
+    p.tick(70000);
+    NotificationEnvelope e;
+    QVERIFY(p.take(e, 70000));
+    e.attempts = 1;
+    p.attempted(e, 70000);
+    p.completed(e, true);
+    p.tick(600000);
+    p.tick(610000);
+    NotificationEnvelope escalation;
+    QVERIFY(p.take(escalation, 610000));
+    QCOMPARE(escalation.stage, QString("escalate"));
+    escalation.attempts = 1;
+    p.attempted(escalation, 610000); // Still in flight when the alarm is acknowledged.
+    a.unack = 0;
+    p.observe(a, 611000);
+    p.tick(611000);
+    p.tick(621000);
+    NotificationEnvelope resolution;
+    QVERIFY(p.take(resolution, 621000));
+    QCOMPARE(resolution.kind, QString("resolution"));
+    resolution.attempts = 1;
+    p.attempted(resolution, 621000); // Also in flight.
+    // A retryable escalation failure revalidates (now stale) and completes.
+    QVERIFY(!p.revalidate(escalation));
+    p.completed(escalation, false);
+    p.tick(622000);
+    p.tick(632000);
+    QVERIFY(!p.take(e, 632000)); // No second resolution with a new message id.
+    p.completed(resolution, true);
+    p.tick(642000);
+    QVERIFY(!p.take(e, 642000));
+    QCOMPARE(p.pending(), 0);
+  }
   void transportConcurrencyAndShutdown() {
     QTemporaryDir dir;
     Receiver receiver;

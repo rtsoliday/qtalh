@@ -519,8 +519,12 @@ bool NotificationPolicy::revalidate(NotificationEnvelope& e) {
              : it->active);
     if (!valid) {
       if (it != episodes.end()) {
-        it->queued.remove(token(e.stage, e.destination));
-        it->resolutionQueued.remove(e.destination);
+        // Release only this envelope's own entry; a stale alarm envelope must
+        // not cancel the episode's queued or in-flight resolution.
+        if (e.kind == "resolution")
+          it->resolutionQueued.remove(e.destination);
+        else
+          it->queued.remove(token(e.stage, e.destination));
       }
       e.alarms.removeAt(i);
     } else {
