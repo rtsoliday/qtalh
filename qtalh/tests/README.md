@@ -22,13 +22,13 @@ Individual targets allow testing the Qt core/UI/CA/PVA without Motif:
 | Target (use `make -C qtalh TARGET`) | Coverage and extra prerequisites |
 | --- | --- |
 | `test-core` | Parser, options, alarm state, masks, fake clocks/PV callbacks, and queue encoding. No live IOC or display required. |
-| `test-ui` | Models, editor, dialogs, lifecycle, and muted audio playback in the default modern appearance, including style startup errors, font-size shortcuts across windows/dialogs, large-font geometry, and dark-palette indicators. Help coverage includes bundled topics and links, navigation and scrolling, highlighted search and keyboard wrapping, context Help/F1, modal ownership, reuse, About's email link and Open help button, and Beeper's idle motion, drill sequence, mouse/keyboard activation, and timer lifecycle. Uses `QT_QPA_PLATFORM=offscreen`; needs a functioning Qt media backend. On macOS the audio cases start native Cocoa children. |
+| `test-ui` | Models, editor, dialogs, lifecycle, and muted audio playback in the default modern appearance, including style startup errors, font-size shortcuts across windows/dialogs, large-font geometry, and dark-palette indicators. Help coverage includes bundled topics and links, navigation and scrolling, highlighted search and keyboard wrapping, context Help/F1, modal ownership, reuse, About's email link and Open help button, and Beeper's idle motion, drill sequence, mouse/keyboard activation, and timer lifecycle. Uses `QT_QPA_PLATFORM=offscreen`; needs a functioning Qt media backend. The heartbeat case starts a private `caRepeater` and `softIoc` from Base's `bin/<EPICS_HOST_ARCH>` on loopback. On macOS the audio cases start native Cocoa children. |
 | `test-ui-motif` | The same UI suite with the classic Motif appearance (`QTALH_TEST_STYLE=motif`), including its bevels, row heights and width slider. Part of `make -C qtalh test`. |
 | `test-ui-fusion` | The same UI suite in a fresh Fusion process (`QTALH_TEST_STYLE=fusion`). Builds the GUI executable. |
 | `test-gallery` | Separate modern (`dialogs/`) and classic (`dialogs-motif/`) galleries, including every Properties tab and the Force PV scroll area; no Motif, IOC, or X11 dependency. Also available with the Windows Makefile. |
 | `test-ioc` | Real CA and pvAccess events, acknowledgements, outputs, reconnection, and access rights. Requires the built Base's `bin/<EPICS_HOST_ARCH>/softIocPVA`, which serves the test records over both protocols on loopback. |
-| `test-pva` | Deterministic pvAccess callback tests for failed/ended monitors, stale data and write completions after disconnect, shared alarm subscriptions, acknowledgement changes, and callback cancellation. Uses a test provider without network sockets or an IOC. |
-| `test-helpers` | Log rotation/recovery, broadcasts, locks, and Unix queue/TCP/RPC compatibility. On Linux/macOS, requires `alh_printer`, `alh_DB`, and local rpcbind in addition to the Qt helpers built by this target. |
+| `test-pva` | Deterministic pvAccess callback tests for failed/ended monitors, stale data and write completions after disconnect, shared alarm subscriptions, acknowledgement changes, callback cancellation, the bounded update inbox and overflow recovery, per-output write limits, latest-value state writes, and write timeouts. Uses a test provider without network sockets or an IOC. |
+| `test-helpers` | Log rotation/recovery, broadcasts, locks, and Unix queue/TCP/RPC compatibility. On Linux/macOS, requires `alh_printer`, `alh_DB`, local rpcbind, and `python3` (POSIX lock competitors) in addition to the Qt helpers built by this target. |
 | `test-visual` | Motif/Qt screenshots, dialog gallery, and an ordered alarm-log comparison. Requires a built `alh`, `softIoc`, an X11 display, and `xwininfo`. Does not build the legacy application. |
 
 Prepare legacy prerequisites with `make alh` before Unix helper/visual suites.
@@ -136,11 +136,16 @@ private loopback ones, so a shell set up for a site gateway is not contacted.
 Unix helper tests use owned System V queues, local TCP
 capture servers, and a temporary RPC registration, which they clean up.
 An absent prerequisite fails the relevant test rather than silently skipping it.
+A few UI cases instead report a skip when the host cannot exercise them: the
+renamed-log and hard-link checkpoint rows when the temporary directory's
+filesystem keeps no extended attributes, and the comma-decimal locale case when
+no such locale is installed.
 
 Qt objects and tests live in `qtalh/O.<OS>-<ARCH>-qt<major>/`. Screenshots and
 IOC artifacts go in its `test-artifacts/` directory. Unix suites print Qt Test
 results to stdout; Windows additionally writes and prints `core.txt`, `ui.txt`,
-`ioc.txt`, and `helpers.txt` there. Tests use temporary directories for most log
+`ui-motif.txt`, `ioc.txt`, `pva.txt`, `helpers.txt`, `notifications.txt`, and
+`analytics.txt` there (`ui-fusion.txt` for `test-ui-fusion`). Tests use temporary directories for most log
 fixtures; those fixtures are removed after the test. Visual captures are review
 artifacts, not an automated assertion of pixel equivalence.
 

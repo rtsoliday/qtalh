@@ -99,8 +99,9 @@ code in C++17 mode. Keep `/permissive-` for Qt; only the pvAccess implementation
 and its test use `/Zc:twoPhase-` for EPICS header compatibility. The build defines
 `EPICS_CALL_DLL` to import EPICS DLL functions and static data.
 
-The Windows test target runs the core, pvAccess, offscreen UI/audio, loopback IOC and
-portable helper tests, including logging rotation/recovery, broadcasts and
+The Windows test target runs the core, notification, analytics, pvAccess,
+offscreen modern and classic UI/audio, loopback IOC and portable helper tests,
+including logging rotation/recovery, broadcasts and
 native lock lifetime. The IOC suite requires `softIocPVA.exe` in Base's selected
 `bin/<EPICS_HOST_ARCH>` directory and tests both CA and PVA on loopback.
 Unix-only queue/RPC, POSIX locking, symlink and resource
@@ -231,7 +232,9 @@ embedded library search path. `CC`, `CXX`, `CPPFLAGS`, `CFLAGS`, `CXXFLAGS`,
 can be overridden. Legacy
 `MOTIF_INC`, `MOTIF_LIB`, `X11_INC`, and `X11_LIB` overrides remain available.
 Run `make clean` when changing dependency locations or compiler flags.
-`make distclean` also removes the six installed binaries. Cleanup needs no
+`make distclean` also removes the six binaries copied to `bin/<OS>-<ARCH>/` (only
+`qtalh.exe` on Windows); copies installed in an extensions tree are left in
+place. Cleanup needs no
 installed EPICS or Qt development packages. At the repository root, cleanup also
 uses Python 3 to remove generated documentation; `distclean` additionally removes
 `docs/site/node_modules`. Authored documentation is preserved. Use `make docs-clean`
