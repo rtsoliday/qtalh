@@ -2894,11 +2894,15 @@ void Window::exitApplication() {
     return;
   }
   auto parent = isVisible() ? static_cast<QWidget*>(this) : runtime;
+  // The configuration tool does not monitor alarms; legacy ACT asks
+  // "Exit Alarm Configuration Tool?" (awAct.c MENU_FILE_QUIT).
+  const QString tool = options.editor ? "Alarm Configuration Tool" : "Alarm Handler";
   exitPopup = new QMessageBox(legacyAppearance() ? QMessageBox::Warning : QMessageBox::Question,
-                              "Alarm Handler", "Exit Alarm Handler?",
+                              tool, "Exit " + tool + "?",
                               QMessageBox::Ok | QMessageBox::Cancel, parent);
   if (!legacyAppearance()) {
-    exitPopup->setInformativeText("Alarm monitoring and logging for " + doc.root->label() + " will stop.");
+    if (!options.editor)
+      exitPopup->setInformativeText("Alarm monitoring and logging for " + doc.root->label() + " will stop.");
     exitPopup->button(QMessageBox::Ok)->setText("Exit");
   }
   exitPopup->setObjectName("exitConfirmation");

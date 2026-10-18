@@ -2548,6 +2548,25 @@ private slots:
     QVERIFY(w->findChild<QLabel*>("silenceForever")->text().startsWith("Silence Forever: "));
     QVERIFY(w->findChild<QLabel*>("beepSeverity")->text().startsWith("ALH Beep Severity: "));
   }
+  void editorExitConfirmation() {
+    // The configuration tool monitors nothing; it asks as legacy ACT does.
+    auto w = std::make_unique<Window>(sample(), options(true), false);
+    w->setAttribute(Qt::WA_DeleteOnClose, false);
+    w->show();
+    for (auto action : w->findChildren<QAction*>())
+      if (QString(action->text()).remove('&') == "Exit")
+        action->trigger();
+    QMessageBox* dialog = nullptr;
+    for (auto widget : QApplication::topLevelWidgets())
+      if (widget->objectName() == "exitConfirmation" && widget->isVisible())
+        dialog = qobject_cast<QMessageBox*>(widget);
+    QVERIFY(dialog);
+    QCOMPARE(dialog->windowTitle(), QString("Alarm Configuration Tool"));
+    QCOMPARE(dialog->text(), QString("Exit Alarm Configuration Tool?"));
+    QVERIFY2(!dialog->informativeText().contains("monitoring"), qPrintable(dialog->informativeText()));
+    QTest::mouseClick(dialog->button(QMessageBox::Cancel), Qt::LeftButton);
+    QVERIFY(w->isVisible());
+  }
   void exitConfirmation_data() {
     QTest::addColumn<QString>("entry");
     QTest::newRow("menu-exit") << "Exit";

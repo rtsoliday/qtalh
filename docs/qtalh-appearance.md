@@ -67,6 +67,7 @@ Dialogs keep their names, fields and buttons, with clearer layouts:
 - Send Message, Stop Alarm Logging and Reload Facility have task-specific
   titles, prompts and buttons (Send, Stop Logging, Reload).
 - Exit asks "Exit Alarm Handler?" and names the facility whose monitoring stops.
+  In the configuration tool (`-c`), it asks "Exit Alarm Configuration Tool?".
 - **Help Topics** opens a modeless guide with grouped topics, a resizable sidebar,
   formatted text, and search with highlighted matches and a match counter, following
   pvDataReview's Help window. Scrolling and search keep the selected topic in sync.
