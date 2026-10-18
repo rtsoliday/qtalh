@@ -11,6 +11,7 @@
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QXmlStreamReader>
 #include <QtTest>
 #include <algorithm>
 #include <cerrno>
@@ -767,6 +768,47 @@ private slots:
     }
     alarm.seek(0);
     QCOMPARE(alarm.readAll(), text);
+  }
+  void xmlOperationEscapingPreservesAlarmMarkup() {
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    Options o; o.xml = true; o.maxRecords = 0;
+    o.alarmFile = dir.filePath("alarm"); o.opmodFile = dir.filePath("opmod");
+    const QString facility = "RF & vacuum <sector> \"A\" 'B'";
+    const QString action = "Reset <mask> & \"quoted\" 'literal'\nsecond line";
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv&<tag>\n");
+    State state; state.severity = 2; state.status = 3;
+    state.value = "value & <tag> \"quoted\" 'literal'";
+    {
+      Logging log(o, facility);
+      log.operation(nullptr, action);
+      log.alarm(d.channels()[0], state, QDateTime::currentMSecsSinceEpoch());
+    }
+    QFile operations(o.opmodFile); QVERIFY(operations.open(QIODevice::ReadOnly));
+    QXmlStreamReader xml("<log>" + operations.readAll() + "</log>");
+    QStringList elements; QString decoded;
+    while (!xml.atEnd()) {
+      xml.readNext();
+      if (xml.isStartElement()) elements << xml.name().toString();
+      else if (xml.isCharacters()) decoded += xml.text();
+    }
+    QVERIFY2(!xml.hasError(), qPrintable(xml.errorString()));
+    QCOMPARE(elements, QStringList({"log", "entry", "date", "time"}));
+    QVERIFY(decoded.endsWith(facility + ": :  " + action + '\n'));
+
+    QFile alarm(o.alarmFile); QVERIFY(alarm.open(QIODevice::ReadOnly));
+    xml.clear(); xml.addData("<log>" + alarm.readAll() + "</log>");
+    QHash<QString, QString> fields;
+    while (!xml.atEnd()) {
+      xml.readNext();
+      if (xml.isStartElement() && (xml.name() == QLatin1String("pv") ||
+                                  xml.name() == QLatin1String("value"))) {
+        const auto name = xml.name().toString();
+        fields.insert(name, xml.readElementText());
+      }
+    }
+    QVERIFY2(!xml.hasError(), qPrintable(xml.errorString()));
+    QCOMPARE(fields.value("pv"), d.channels()[0]->name);
+    QCOMPARE(fields.value("value"), state.value);
   }
   // As in ALH (fopen "w+" unless -T or -L), opening an alarm log at startup or
   // through Setup -> New Alarm Log File empties it; -T and -L keep its records.

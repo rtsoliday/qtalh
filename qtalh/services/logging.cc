@@ -921,11 +921,10 @@ void Logging::operation(Node* n, const QString& s, OperationKind kind) {
          clock.wall(), code);
 }
 void Logging::record(bool alarm, const QString& rawBody, qint64 time, int code) {
-  // TODO: Possible inherited ALH bug, deferred for a later change: operation
-  // labels, names and messages are plain text, but XML entries embed them without
-  // escaping '&' or '<'. For example, "RF & vacuum" produces malformed XML.
-  // Escape operation text separately from the alarm body's existing XML markup.
-  const auto body = singleLine(rawBody, options.xml);
+  // Alarm bodies already contain escaped XML fields. Operation labels, names
+  // and messages are plain text and must not introduce markup into the entry.
+  const auto body = singleLine(options.xml && !alarm ? rawBody.toHtmlEscaped() : rawBody,
+                               options.xml);
   if (alarm && (options.editor || (options.lock && !master) || !commandsAllowed()))
     return;
   if ((!options.editor && alarmPath() != openedAlarmPath) || opmodPath() != opmodFile->fileName() ||

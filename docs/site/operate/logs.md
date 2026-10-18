@@ -60,4 +60,8 @@ The default alarm file holds 2000 records unless `-L` is used, which defaults to
 
 PV values and descriptions containing line breaks appear as `\n` and `\r` in text logs, or `&#10;` and `&#13;` in XML logs. Each new alarm remains one physical line. Bounded-log recovery also repairs older multiline records when their record boundaries can be recognized.
 
+XML operation logs escape special characters in facility labels, names, and
+messages, so text such as `RF & vacuum` remains valid XML. Alarm records retain
+their structured XML fields; plain text logs keep the original text.
+
 For retention limits, dated files, checkpoints, destination changes, and multiple writers, see [Logging & shared operation](/configure/logging).
