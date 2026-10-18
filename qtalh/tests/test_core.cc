@@ -2664,6 +2664,48 @@ $GUIDANCE https://example.invalid/guide
     QVERIFY_THROWS_EXCEPTION(ParseError, parseConfig(top, dir.path()));
 #endif
   }
+  void shortReadErrorsRejectPhoebusXml() {
+#ifndef QTALH_SHORT_READ
+    QSKIP("Needs read() interposition on Linux");
+#else
+    QTemporaryDir dir;
+    for (const bool include : {false, true}) {
+      QFile file(dir.filePath(include ? "part.xml" : "root.xml"));
+      QVERIFY(file.open(QIODevice::WriteOnly));
+      // Each first 16-byte read is a complete XML element. The unread tail
+      // makes the full document invalid; a subsequent EIO must not accept
+      // that prefix as a successful top-level load or XInclude.
+      const QByteArray prefix = include ? QByteArray("<pv name=\"ok\"/> ")
+                                        : QByteArray("<config/>       ");
+      QCOMPARE(prefix.size(), 16);
+      QCOMPARE(file.write(prefix), qint64(prefix.size()));
+      file.close();
+      auto parse = [&] {
+        return include
+            ? parsePhoebusXml("<config name=\"root\" xmlns:xi=\"http://www.w3.org/2001/XInclude\">"
+                              "<xi:include href=\"part.xml\"/></config>", dir.path())
+            : loadPhoebusXml(file.fileName());
+      };
+      QCOMPARE(parse().channels().size(), include ? size_t(1) : size_t(0));
+      QVERIFY(file.open(QIODevice::Append));
+      const QByteArray tail = "<trailing-invalid";
+      QCOMPARE(file.write(tail), qint64(tail.size()));
+      file.close();
+      QVERIFY_THROWS_EXCEPTION(ParseError, parse()); // The full XML is invalid.
+      const QByteArray path = QFileInfo(file.fileName()).canonicalFilePath().toLocal8Bit();
+      auto restore = qScopeGuard([] { shortReadPath = nullptr; });
+      shortReadCalls = 0;
+      shortReadPath = path.constData();
+      try {
+        parse();
+        QFAIL("XML read error was accepted as a complete configuration");
+      } catch (const ParseError& e) {
+        QVERIFY2(QString::fromStdString(e.what()).startsWith("Cannot read " +
+            QFileInfo(file.fileName()).canonicalFilePath() + ": "), e.what());
+      }
+    }
+#endif
+  }
   void includePreambleDirectives_data() {
     QTest::addColumn<QString>("preamble");
     QTest::newRow("SEVRPV") << "$SEVRPV out:sevr\n";

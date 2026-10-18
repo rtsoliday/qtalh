@@ -61,6 +61,8 @@ date imports as Disable; use [timed shelving](/operate/shelving) instead.
 XInclude files are expanded, including shorthand ID selectors in `xpointer`.
 Include targets must be regular files; symbolic links to regular files are
 accepted. Devices, FIFOs, and directories are rejected before opening them.
+A read error in the XML file or any XInclude rejects the import, even if the
+bytes read so far form a complete XML element.
 Unresolved or unsupported selectors fail the import. Commands containing ALH
 menu delimiters (`!`) or line breaks are retained as guidance text with a
 conversion note. Guidance lines whose first non-blank character is `$` are

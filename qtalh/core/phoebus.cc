@@ -15,6 +15,17 @@
 #include <limits>
 namespace alh {
 namespace {
+QByteArray readXmlFile(QFile& file) {
+  // A positive short read does not prove EOF. QFile can return a valid XML
+  // prefix while dropping the following read error; probe again before
+  // accepting the configuration, as the ALH text loader does.
+  QByteArray bytes = file.readAll();
+  for (QByteArray more; !(more = file.readAll()).isEmpty();)
+    bytes += more;
+  if (file.error() != QFileDevice::NoError)
+    throw ParseError("Cannot read " + file.fileName() + ": " + file.errorString());
+  return bytes;
+}
 QString path(const Node* n) {
   QStringList parts;
   for (; n; n = n->parent) parts.prepend(n->name);
@@ -196,7 +207,7 @@ Element readElement(QXmlStreamReader& xml, const QString& base, QSet<QString>& s
       QFile f(canonical);
       if (!f.open(QIODevice::ReadOnly)) throw ParseError("Cannot open Phoebus include: " + href);
       stack.insert(canonical);
-      auto included = readRoot(f.readAll(), file.absolutePath(), stack, depth + 1);
+      auto included = readRoot(readXmlFile(f), file.absolutePath(), stack, depth + 1);
       if (!pointer.isEmpty()) {
         // Phoebus uses XInclude shorthand ID pointers to select a component
         // from an included <config>. Never silently ignore an unsupported or
@@ -401,6 +412,6 @@ Document parsePhoebusXml(const QByteArray& bytes, const QString& baseDir, QStrin
 Document loadPhoebusXml(const QString& path, QStringList* notes) {
   QFile f(path);
   if (!f.open(QIODevice::ReadOnly)) throw ParseError("Cannot open " + path + ": " + f.errorString());
-  return parsePhoebusXml(f.readAll(), QFileInfo(path).absolutePath(), notes);
+  return parsePhoebusXml(readXmlFile(f), QFileInfo(path).absolutePath(), notes);
 }
 } // namespace alh
