@@ -28,6 +28,17 @@ Changes that operators and site maintainers should review before deployment:
 - Commands starting with `medm` launch `qtedm` from `PATH` instead.
 - New `--help`, `--version` and `--validate` conveniences. Unknown switches
   and Xt resource overrides are errors.
+- A directive before an INCLUDE file's first `GROUP` or `CHANNEL` is an error.
+  ALH ignored it with "Logic error: glink is NULL"; `$BEEPSEVERITY` and
+  `$HEARTBEATPV` are still accepted there.
+- Configuration files that are not valid in the locale encoding are read as
+  ISO-8859-1 and saved without changing their non-ASCII text.
+- As in ALH, runtime File → Open replaces the monitored configuration, and with
+  `-B` SIGINT (Ctrl-C) exits without confirmation once this instance's
+  broadcast has been delivered.
+- The build ignores a `qmake6` found only through `PATH`, refuses Qt from an
+  active Conda environment unless `QTALH_ALLOW_CONDA=1`, and refuses Qt
+  modules mixed from different installations.
 
 Requirements: EPICS 7 Base with its pvAccess and pvData libraries, and Qt 5.15
 or newer or Qt 6 with Widgets, Network, PrintSupport and Multimedia.
