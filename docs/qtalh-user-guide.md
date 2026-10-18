@@ -456,7 +456,8 @@ a failure and does not write ACKPV or acknowledgement-success records. QtALH doe
 not wait for the IOC to accept a sent ACKS write. If the IOC rejects it, for example
 because the record's `DISP` field is 1 or access security changed, ACKPV is still
 written and the acknowledgement is still logged, as in ALH. The alarm stays
-unacknowledged, and the rejection is reported only on standard error. ACKPV
+unacknowledged, and the rejection is reported asynchronously as a "Channel
+Access Exception" (see Troubleshooting). ACKPV
 therefore does not confirm that the IOC accepted the acknowledgement.
 
 If ACKS is submitted but the separate `$ACKPV` submission fails, QtALH reports

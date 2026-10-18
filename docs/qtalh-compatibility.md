@@ -806,7 +806,8 @@ client library) emit a failure operation rather than acknowledgement-success rec
 or ACKPV writes. Group acknowledgement continues with other channels. A sent write is
 not confirmed by the IOC before these side effects. If the IOC rejects it (for example
 `DISP=1` or an access-security change), ACKPV and the success records still occur, as
-in ALH, and the rejection appears only on standard error. The alarm stays
+in ALH, and the rejection is reported as a Channel Access exception in the
+message area and operation log (and a popup unless `-noerrorpopup`). The alarm stays
 unacknowledged until the IOC monitor reports ACKS cleared.
 
 If ACKS is submitted but the separate ACKPV submission is rejected, QtALH now
