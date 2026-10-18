@@ -830,7 +830,10 @@ uses the existing shared descriptor registry and preserves delivery ownership.
 
 New log records escape embedded LF/CR as `\n`/`\r` in text and `&#10;`/`&#13;` in
 XML, including the records sent to printer/database queues. Ordinary single-line
-records keep their existing format. On bounded-log recovery, older multiline
+records keep their existing format. XML alarm records also escape `&`, `<`, `>`
+and `"` in the PV name, description and value as `&amp;`, `&lt;`, `&gt;` and
+`&quot;`; ALH inserts these strings unchanged, so a value `a"b` is logged as
+`a&quot;b`. Operation records are not escaped. On bounded-log recovery, older multiline
 records are joined at recognizable timestamp/entry headers before checkpoint
 validation and retention. Surviving records are rewritten with escaped line
 breaks. A matching original checkpoint still determines order, including equal

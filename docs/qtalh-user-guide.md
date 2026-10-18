@@ -546,6 +546,8 @@ across renames on filesystems supporting extended attributes or NTFS streams;
 keep the checkpoint at that location. Existing `.qtalh-position` files remain
 readable and are upgraded on the next write. If it is missing or does not match, recovery
 uses timestamps, which cannot reliably order ties or out-of-order records.
+Shell globs such as `ALH-default.alhAlarm.*` also match these binary checkpoint
+files; exclude `*.qtalh-position*` when concatenating or searching logs.
 Records are flushed before checkpoint updates; the two files are separate writes
 and are not an atomic transaction or a per-record durable fsync. New alarms arriving
 during a large recovery scan are spooled in order. If the snapshot changes or
