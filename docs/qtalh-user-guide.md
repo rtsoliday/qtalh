@@ -489,6 +489,17 @@ are reported when the server rejects them. Heartbeat and output writes continue
 during a rejection, but a repeated identical failure is reported once until a
 write succeeds or the PV reconnects.
 
+QtALH buffers at most 4,096 pvAccess updates (or 4 MiB) that it has not yet
+processed. If that buffer overflows, for example when many `pva://` PVs update
+quickly while the window is busy, QtALH reports `PVA update buffer overflow:
+observations lost` and reconnects every `pva://` PV to obtain its current state.
+Until each reconnects, every `pva://` channel is shown as `NOT_CONNECTED` with
+severity `ERROR`, as after a disconnect: severity commands run, the change is
+logged, `$SEVRPV` outputs can receive `ERROR` in global mode, and queued or
+in-flight writes to `pva://` PVs are cancelled and reported. Alarm transitions
+that began and ended during the gap are not observed, so they are not logged
+and do not reach the acknowledgement state.
+
 ## Logging and shared operation
 
 Create a writable log directory and select it explicitly when desired:
