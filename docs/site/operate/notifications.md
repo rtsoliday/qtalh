@@ -77,6 +77,10 @@ There is at most one attempt per destination every 10 seconds, four simultaneous
 attempts per runtime, and 1,000 queued envelopes. Due work remains pending when
 capacity is exhausted, with throttling shown in Activity. A stalled event loop
 resumes overdue stages through the same batching and throttling rules.
+The queue is shared by all destinations. While it is full, each freed slot goes
+to the first pending batch in internal subscription order (earlier stages first),
+so a large backlog for one destination can delay other destinations and later
+escalation stages until that backlog has been queued.
 
 Email uses an asynchronous local process, with separate executable and argument
 fields (default arguments `-i` and `-t`). No shell is used. Messages use UTF-8 MIME
