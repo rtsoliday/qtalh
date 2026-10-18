@@ -24,8 +24,11 @@ acknowledgement, highest severity first and then most recent change:
 Click a heading to sort by that column. Type in the filter to match channel,
 status, value or group text; check **Unacknowledged only** to hide acknowledged
 alarms. Select rows and click **Acknowledge**, or use **Guidance**,
-**Details…** and **Show in Tree** for one row. Double-click a row to select it
-in the main window. Rows update as alarms change and keep your selection; a
+**Details…** and **Show in Tree** for one row. When the main window's display
+filter hides that row's channel (for example, an acknowledged alarm under
+**Unacknowledged Alarms Only**), both report this in the message area
+instead of selecting it, and Details… opens nothing. Double-click a row to
+select it in the main window. Rows update as alarms change and keep your selection; a
 facility reload closes the window.
 Shelved alarms are counted below the table but not listed; see
 [timed shelving](/operate/shelving).

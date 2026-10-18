@@ -4245,6 +4245,49 @@ private slots:
     QCOMPARE(table->model()->rowCount(), 1);
     QCOMPARE(table->model()->index(0, 3).data().toString(), QString("Pressure gauge"));
   }
+  void activeAlarmDetailsSkipHiddenChannel() {
+    auto o = options(false); o.filter = 2; // Unacknowledged Alarms Only
+    auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root first\nCHANNEL root second\n"), o, false);
+    w->show();
+    auto& engine = w->alarmEngine();
+    const auto channels = w->document().channels();
+    for (auto n : channels) engine.event(n, {3, 2, 2, 1, "12"});
+    engine.acknowledge(channels[0]); // Still in alarm, so listed, but hidden in the main window.
+    auto group = w->findChild<QTreeView*>("groupContents");
+    QTRY_COMPARE(group->model()->rowCount(), 1);
+    group->setCurrentIndex(group->model()->index(0, 2));
+    QCOMPARE(group->currentIndex().data().toString(), QString("second"));
+    w->findChild<QAction*>("Active Alarms...")->trigger();
+    auto dialog = w->findChild<QDialog*>("activeAlarmsDialog");
+    auto table = dialog->findChild<QTableView*>("activeAlarmsTable");
+    QTRY_COMPARE(table->model()->rowCount(), 2);
+    auto chooseRow = [&](const QString& name) {
+      for (int row = 0; row < table->model()->rowCount(); ++row)
+        if (table->model()->index(row, 3).data().toString() == name) table->selectRow(row);
+    };
+    QPushButton* details = nullptr;
+    for (auto button : dialog->findChildren<QPushButton*>()) if (button->text() == "Details...") details = button;
+    QVERIFY(details);
+    chooseRow("first");
+    QVERIFY(details->isEnabled());
+    details->click();
+    QCoreApplication::processEvents();
+    auto detailsDialog = w->findChild<QDialog*>("alarmDetailsDialog");
+    const auto shown = detailsDialog ? detailsDialog->findChild<QLabel*>("detailsPath")->text() : QString();
+    QVERIFY2(!detailsDialog, qPrintable("Details opened for " + shown));
+    bool reported = false;
+    for (auto label : w->findChildren<QLabel*>())
+      reported |= label->text().contains("/root/first is hidden by the display filter");
+    QVERIFY(reported);
+    // A visible channel still opens its own details.
+    auto tree = w->findChild<QTreeView*>("alarmTree");
+    tree->setCurrentIndex(tree->model()->index(0, 2));
+    chooseRow("second");
+    details->click();
+    detailsDialog = w->findChild<QDialog*>("alarmDetailsDialog");
+    QVERIFY(detailsDialog);
+    QCOMPARE(detailsDialog->findChild<QLabel*>("detailsPath")->text(), QString("/root/second"));
+  }
   void findAlarmInTree() {
     auto w = std::make_unique<Window>(sample(), options(true), false);
     w->show();

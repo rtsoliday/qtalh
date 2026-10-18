@@ -391,7 +391,8 @@ void Window::showActiveAlarms() {
     const auto nodes = selectedNodes(table);
     if (nodes.size() != 1) return;
     reveal(nodes.front());
-    alarmDetails();
+    // A channel hidden by the display filter cannot be selected; never describe another node.
+    if (selection == nodes.front()) alarmDetails();
   });
   connect(showButton, &QPushButton::clicked, dialog, [=] {
     const auto nodes = selectedNodes(table);
