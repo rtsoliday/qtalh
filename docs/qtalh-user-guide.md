@@ -437,7 +437,9 @@ unwritable. One diagnostic is reported per outage. The ordinary refresh checks
 availability and resumes the timer within about 200 ms after CA reports recovery.
 Other Channel Access writes to an unavailable PV, such as `$SEVRPV` updates on
 each alarm change, also report "PV not connected or not writable" once per
-outage, until the PV becomes writable or a write to it succeeds.
+outage, until the PV becomes writable or a write to it succeeds. A `pva://`
+output reports it once per outage too, until the PV connects or a write to it
+completes.
 A failed Channel Access alarm read displays `READ / ERROR` and marks the
 observation unavailable until a fresh valid alarm sample arrives.
 If connection or access loss is already known, its more specific ERROR status

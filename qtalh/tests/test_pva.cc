@@ -1,5 +1,7 @@
 // Exercise PVA callback ordering and failures without a network server.
 #include "services/pv_access.h"
+#include "core/model.h"
+#include "core/engine.h"
 #include <QtTest>
 #ifdef _MSC_VER
 // EPICS PVString intentionally inherits deserialize through virtual bases.
@@ -1104,6 +1106,68 @@ private slots:
     QVERIFY(errors.join(' ').contains(
         "Create pva://missing: pvAccess provider did not create the channel"));
     QTRY_COMPARE_WITH_TIMEOUT(alarm.severity, 4, 3000);
+  }
+  void unavailableOutputReportedOncePerOutage() {
+    // ChannelAccess reports an unavailable output once per outage
+    // (F-306). A pva:// output whose server is down must not report on every
+    // write attempt; the pending severity must still replay on connection.
+    provider->connectOnCreate = false;
+    PvAccess pv({true});
+    QStringList errors;
+    pv.error = [&](const QString& s) { errors << s; };
+    pv.prepare("pva://output");
+    const auto unavailable = [&] {
+      return errors.count("PV not connected or not writable: pva://output");
+    };
+    for (int i = 1; i <= 5; ++i)
+      QVERIFY(!pv.put("pva://output", i % 3, WriteKind::Severity));
+    QVERIFY(!pv.put("pva://output", 1, WriteKind::Acknowledge));
+    QVERIFY(!pv.put("pva://output", 7));
+    QCOMPARE(unavailable(), 1);
+    // The outage ends on connection; the latest severity is replayed.
+    auto channel = provider->channel("output");
+    channel->state(pva::Channel::CONNECTED);
+    QTRY_VERIFY(channel->writer);
+    channel->writer->ready();
+    QTRY_COMPARE(channel->writer->submitted, QVector<double>{2});
+    channel->writer->done();
+    QCoreApplication::processEvents();
+    // A second outage is reported once more.
+    channel->state(pva::Channel::DISCONNECTED);
+    QCoreApplication::processEvents();
+    for (int i = 0; i < 4; ++i)
+      QVERIFY(!pv.put("pva://output", i % 2, WriteKind::Severity));
+    QCOMPARE(unavailable(), 2);
+    // clear() (reload/close) forgets the outage, as it forgets pendingSeverity.
+    pv.clear();
+    pv.prepare("pva://output");
+    QVERIFY(!pv.put("pva://output", 1, WriteKind::Severity));
+    QCOMPARE(unavailable(), 3);
+  }
+  void unavailableSeverityOutputEngineOncePerOutage() {
+    // At engine level: global active mode writes $SEVRPV on every channel
+    // and group severity change. With the pva:// output down, 5 alarm cycles
+    // must produce one diagnostic, as the CA test in test_ioc asserts.
+    provider->connectOnCreate = false;
+    auto d = parseConfig("GROUP NULL root\n$SEVRPV pva://out\n"
+                         "CHANNEL root pva://alarm\n$SEVRPV pva://out\n");
+    PvAccess pv({true});
+    Engine e(d, {true}, &pv);
+    QStringList errors;
+    pv.error = [&](const QString& s) { errors << s; };
+    e.start();
+    auto n = d.channels()[0];
+    auto alarm = provider->channel("alarm");
+    QVERIFY(alarm && alarm->monitor);
+    alarm->state(pva::Channel::CONNECTED);
+    const auto post = [&](int severity) {
+      alarm->monitor->post(severity, severity);
+      QTRY_COMPARE(e.state(n).severity, severity);
+    };
+    post(0);
+    for (int i = 0; i < 5; ++i) { post(2); post(0); }
+    const int unavailable = errors.count("PV not connected or not writable: pva://out");
+    QCOMPARE(unavailable, 1);
   }
   void destructionWhileServerThreadPosts() {
     auto pv = std::make_unique<PvAccess>();

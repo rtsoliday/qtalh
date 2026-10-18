@@ -150,7 +150,9 @@ the service is cleared for a reload or close. Ordinary value writes, heartbeat
 writes, and acknowledgements are not queued for later replay. A Channel Access
 output that is not connected or not writable produces one "PV not connected or
 not writable" diagnostic per outage, not one per write attempt; the outage ends
-when the PV becomes writable or a write to it succeeds. Legacy ALH was silent
+when the PV becomes writable or a write to it succeeds. A `pva://` output that
+is not connected behaves the same way; its outage ends when the PV connects or a
+write to it completes. Legacy ALH was silent
 for a disconnected severity PV and logged every write refused for lack of
 access.
 

@@ -699,7 +699,13 @@ bool PvAccess::put(const QString& n, double v, WriteKind kind) {
     return true;
   }
   debugLog(options.debug, "PVA", "write unavailable: " + n);
-  report("PV not connected or not writable: " + n);
+  // As ChannelAccess::put: automatic SEVRPV writes repeat on every alarm
+  // transition, so report each outage once. It ends when a channel with this
+  // name connects or a write to it completes.
+  if (!writeUnavailable.contains(n)) {
+    writeUnavailable.insert(n);
+    report("PV not connected or not writable: " + n);
+  }
   return false;
 }
 void PvAccess::cancel(const QString& n, const void* tag) {
@@ -756,6 +762,7 @@ void PvAccess::clear() {
   channelsByName.clear();
   channels.clear();
   pendingSeverity.clear();
+  writeUnavailable.clear();
   changedRecords.clear();
   restarting.clear();
   {
@@ -842,6 +849,7 @@ void PvAccess::connected(Channel* c) {
   debugLog(options.debug, "PVA", c->name + " connected");
   c->connected = true;
   c->connectionDeadline = 0;
+  writeUnavailable.remove(c->name);
   const auto id = c->id;
   QPointer<PvAccess> self(this);
   if (c->prepared)
@@ -1129,6 +1137,7 @@ void PvAccess::drain() {
           break;
       } else {
         c->writeError.clear();
+        writeUnavailable.remove(c->name);
         if (c->sending.kind == WriteKind::Severity && pendingSeverity.contains(c->name) &&
             pendingSeverity.value(c->name) == c->sending.value)
           pendingSeverity.remove(c->name); // A newer requested severity stays pending.

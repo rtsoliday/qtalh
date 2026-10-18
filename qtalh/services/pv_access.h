@@ -105,6 +105,7 @@ private:
   QHash<QString, QVector<Channel*>> channelsByName;
   QHash<QString, Record> records; // Keyed by the full "pva://" name.
   QHash<QString, double> pendingSeverity;
+  QSet<QString> writeUnavailable; // Reported once until connected or a write completes.
   QSet<QString> changedRecords;
   std::vector<std::unique_ptr<Read>> reads;
   QHash<quint64, Read*> readsByItem;
