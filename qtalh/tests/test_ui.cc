@@ -4895,6 +4895,31 @@ private slots:
     QVERIFY2(!explanation.contains("value 0 is at or above"), qPrintable(explanation));
     QVERIFY(explanation.contains("count filter", Qt::CaseInsensitive));
   }
+  void alarmDetailsDescribeHeldDisconnect() {
+    // A held connection loss is an ERROR input with no reading, not "value 0".
+    auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root pv\n$ALARMCOUNTFILTER 2 10\n"), options(false), false);
+    auto& engine = w->alarmEngine(); auto n = w->document().channels()[0];
+    qint64 time = 1000; engine.now = engine.monotonicNow = [&] { return time; };
+    engine.event(n, {0, 0, 0, 1, "5.5"});
+    engine.event(n, {ALARM_NSTATUS, 4, 0, -1, "0"});
+    QCOMPARE(engine.state(n).severity, 0);
+    QVERIFY(engine.state(n).filterUntil);
+    w->findChild<QTreeView*>("groupContents")->setCurrentIndex(w->findChild<QTreeView*>("groupContents")->model()->index(0, 2));
+    w->findChild<QAction*>("Alarm Details...")->trigger();
+    auto dialog = w->findChild<QDialog*>("alarmDetailsDialog");
+    QVERIFY(dialog);
+    auto explanation = dialog->findChild<QLabel*>("alarmExplanation")->text();
+    QVERIFY2(explanation.contains("The latest input is ERROR (NOT_CONNECTED)."), qPrintable(explanation));
+    QVERIFY2(!explanation.contains("with value 0"), qPrintable(explanation));
+    // A held real reading keeps its value and names its condition.
+    engine.event(n, {0, 0, 0, 1, "5.5"});
+    time += 20000; engine.tick();
+    engine.event(n, {3, 2, 2, 1, "12"});
+    QCOMPARE(engine.state(n).severity, 0);
+    QTRY_VERIFY2(dialog->findChild<QLabel*>("alarmExplanation")->text().contains(
+                     "The latest input is MAJOR (HIHI) with value 12."),
+                 qPrintable(dialog->findChild<QLabel*>("alarmExplanation")->text()));
+  }
   void alarmDetailsFollowSelection() {
     auto w = std::make_unique<Window>(sample(), options(false), false);
     w->show();

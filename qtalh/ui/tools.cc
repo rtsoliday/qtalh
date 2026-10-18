@@ -221,10 +221,13 @@ QString explain(const State& s, const QHash<QString, QString>& limits) {
   if (!s.initialized) return "No value has been received from the IOC yet.";
   const auto status = statusName(s.status), severity = severityName(s.severity);
   QString text;
+  // ERROR inputs are synthetic connection/access events; their value is not a reading.
   if (s.filterUntil && s.pending.severity != s.severity)
-    text = QString("A count filter is holding the previous %1 alarm (%2). The latest input is %3 "
-                   "with value %4.")
-               .arg(severity, status, severityName(s.pending.severity), s.pending.value);
+    text = QString("A count filter is holding the previous %1 alarm (%2). The latest input is "
+                   "%3 (%4)%5.")
+               .arg(severity, status, severityName(s.pending.severity), statusName(s.pending.status),
+                    s.pending.severity == ErrorSeverity ? QString()
+                                                        : " with value " + s.pending.value);
   else if (!s.severity) text = "Not in alarm (value " + s.value + ").";
   else if (status == "HIHI" || status == "HIGH" || status == "LOW" || status == "LOLO") {
     static const QHash<QString, QString> severityField = {{"HIHI", "HHSV"}, {"HIGH", "HSV"},
