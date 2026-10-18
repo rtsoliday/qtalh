@@ -85,6 +85,18 @@ else
   fail "explicit QMAKE6 into the active Conda environment is refused" "$out"
 fi
 
+# conda activate keeps a symlinked prefix, while qmake6 reports canonical paths.
+ln -s "$STUB" "$STUB.alias"
+trap 'rm -rf "$STUB" "$STUB.alias"' EXIT
+out=$(PATH="$STUB/bin:$PATH" CONDA_PREFIX="$STUB.alias" \
+  "$MAKE" -s --no-print-directory -C "$QTALH_DIR" QT6_PKG_AVAILABLE= ${MAKE_ARGS[@]+"${MAKE_ARGS[@]}"} \
+  QMAKE6="$STUB.alias/bin/qmake6" --eval="$PRINT" print-qt-config 2>&1)
+if [ $? -ne 0 ] && echo "$out" | grep -qF "active Conda environment"; then
+  pass "a Conda environment named through a symbolic link is refused"
+else
+  fail "a Conda environment named through a symbolic link is refused" "$out"
+fi
+
 out=$(query QMAKE6="$STUB/bin/qmake6" QTALH_ALLOW_CONDA=1)
 if [ $? -eq 0 ] && echo "$out" | grep -qx 'QT_VERSION=6' &&
    echo "$out" | grep -qF -- "-L$STUB/lib -Wl,-rpath,$STUB/lib" &&

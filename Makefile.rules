@@ -1091,8 +1091,12 @@ endif
 # An active Conda environment must not silently supply Qt or link paths.
 # QTALH_ALLOW_CONDA=1 accepts a Conda Qt deliberately.
 qtalh_comma := ,
+# Compare canonical paths too: CONDA_PREFIX and the paths Qt reports can name
+# the same directory through different symbolic links.
 ifneq ($(and $(strip $(CONDA_PREFIX)),$(if $(filter 1,$(QTALH_ALLOW_CONDA)),,1)),)
-QT_CONDA_PATHS := $(sort $(filter $(CONDA_PREFIX)/%,$(patsubst -I%,%,$(patsubst -L%,%,$(subst $(qtalh_comma), ,$(QT_CFLAGS) $(QT_LIBS) $(CPPFLAGS) $(LDFLAGS)))) $(MOC) $(RCC)))
+QT_CONDA_ROOTS := $(addsuffix /%,$(sort $(CONDA_PREFIX) $(realpath $(CONDA_PREFIX))))
+QT_BUILD_PATHS := $(filter /%,$(patsubst -I%,%,$(patsubst -L%,%,$(subst $(qtalh_comma), ,$(QT_CFLAGS) $(QT_LIBS) $(CPPFLAGS) $(LDFLAGS)))) $(MOC) $(RCC))
+QT_CONDA_PATHS := $(sort $(foreach path,$(QT_BUILD_PATHS),$(if $(filter $(QT_CONDA_ROOTS),$(path) $(realpath $(path))),$(path))))
 ifneq ($(QT_CONDA_PATHS),)
 $(error Qt build paths point into the active Conda environment $(CONDA_PREFIX): $(QT_CONDA_PATHS). Deactivate Conda or pass QTALH_ALLOW_CONDA=1)
 endif
