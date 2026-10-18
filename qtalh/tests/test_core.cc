@@ -1527,6 +1527,23 @@ private slots:
     QCOMPARE(e.state(d.channels()[3]).unack, 2);
     QCOMPARE(e.state(d.channels()[4]).unack, 2);
   }
+  void globalGroupAcknowledgesSuppressedChannelsInVisitedSubgroups() {
+    // ALH's ackGroup visits every subgroup with an unmasked unacknowledged
+    // alarm and writes ACKS/ACKPV to its Disabled and NoAck channels as well.
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root a\nGROUP root sub\nCHANNEL sub b\n"
+                         "CHANNEL sub d -D---\n$ACKPV out 1\nCHANNEL sub n --A--\n"
+                         "CHANNEL sub s\nGROUP sub hidden\nCHANNEL hidden h -D---\n");
+    FakePv pv; Engine e(d, {true}, &pv);
+    for (auto c : d.channels()) e.event(c, {3, 2, 2, 1, "2"});
+    QCOMPARE(d.channels()[4]->name, QString("s"));
+    e.shelve(d.channels()[4], 10, "maintenance", "tester");
+    e.acknowledge(d.root.get());
+    QStringList acknowledged, actions;
+    for (const auto& write : pv.writes)
+      (write.kind == WriteKind::Acknowledge ? acknowledged : actions) << write.name;
+    QCOMPARE(acknowledged, QStringList({"a", "b", "d", "n"}));
+    QCOMPARE(actions, QStringList({"out"}));
+  }
   void silenceCurrentDownwardTransitions_data() {
     QTest::addColumn<bool>("global"); QTest::addColumn<bool>("shelved");
     QTest::newRow("local") << false << false;

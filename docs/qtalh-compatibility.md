@@ -137,9 +137,13 @@ explicit directory, the `loadConfig` library API uses the top-level file's direc
 Startup ACKT writes also apply to cancelled channels through connections without
 alarm subscriptions. A completed startup setting is tracked per PV and is not
 replayed when monitoring is later added. Global group acknowledgement follows
-ALH's group traversal and acknowledges outstanding ACKS on disabled/NoAck direct
-children; shelved channels remain excluded. Qualifying downward unacknowledged
-severity changes also reset Silence Current, matching ALH.
+ALH's group traversal. It enters the selected group and each descendant subgroup
+that still has an unacknowledged alarm on a channel that is neither Disabled nor
+NoAck. In every group it enters, it writes ACKS, and any `$ACKPV`, for each
+channel with an outstanding IOC acknowledgement, including Disabled and NoAck
+channels. A subgroup whose only outstanding alarms are on Disabled or NoAck
+channels is not entered; shelved channels remain excluded. Qualifying downward
+unacknowledged severity changes also reset Silence Current, matching ALH.
 
 Dated alarm records use the event's local date, including count-filter callbacks
 processed after midnight. Current log viewers and operation logs keep today's

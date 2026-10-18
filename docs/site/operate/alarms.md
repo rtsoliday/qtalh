@@ -83,6 +83,8 @@ An alarm can be **currently normal and still unacknowledged** after a transient.
 
 Passive mode prevents acknowledgement. In global mode, the IOC must allow the write; failed acknowledgements remain visible. Acknowledging an active alarm does not clear the underlying alarm condition.
 
+In global mode, a group acknowledgement also acknowledges Disabled and NoAck channels at the IOC, matching ALH. It writes their ACKS, and any configured `$ACKPV`, in the selected group and in each descendant subgroup that still has an unacknowledged alarm on a channel that is neither Disabled nor NoAck. The IOC acknowledgement is shared with other global clients. Shelved channels are skipped. To leave a masked channel's IOC acknowledgement unchanged, acknowledge the other channels individually.
+
 ## Open guidance or a related process
 
 - Hover over **G** to read the configured guidance text without opening a dialog.
