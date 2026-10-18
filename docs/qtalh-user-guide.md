@@ -510,7 +510,9 @@ explicit `-m`) already holds more records than the limit, the first alarm
 rewrites it with only the newest records and deletes the earlier ones; ALH
 appends to these files instead. To keep every existing record, for example when
 switching from ALH on a day it has already logged, copy the file first or use
-`-m 0`. Physical line order after wrapping is not chronological. Operation logs append without a record limit. Their facility prefix uses the
+`-m 0`. Physical line order after wrapping is not chronological. Operation logs append without a record limit. Mask, Force PV,
+and beep-severity operation texts differ from ALH's wording; the
+[compatibility inventory](qtalh-compatibility.md) lists them. Their facility prefix uses the
 root group's alias, or its name if no alias is set, and follows alias changes on
 reload. Database headers retain the underlying facility identifier. Dated logs
 route each alarm by its event's local date, so delayed alarms crossing midnight

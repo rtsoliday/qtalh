@@ -186,6 +186,23 @@ summary and per-channel code-8 `Group Mask ID ---` audit records; timed NoAck al
 emits these per-channel records when database logging is enabled. Free-text
 operation descriptions do not determine protocol codes.
 
+Acknowledgement, timed NoAck and silence operation texts match ALH. Mask, Force
+PV and beep-severity texts do not, so scripts that search operation logs or
+database records for ALH phrases need updating:
+
+| Action | QtALH text | ALH text |
+| --- | --- | --- |
+| Force Mask Apply | `Change Mask <mask>` | `OPER Channel Set Mask <name> [mask]` or `OPER Group Set Mask <name> [mask]` |
+| Force Mask Reset | `Reset Mask` | `OPER Channel Reset Mask <name> [mask]` or `OPER Group Reset Masks <name>` |
+| Automatic force | `Force Mask <mask>` | `Channel forcePV FORCE <mask> [value] [pv]` or `Group forcePV FORCE ...` |
+| Automatic reset | `Force PV Reset Mask` | `Channel forcePV RESET <mask> [value] [pv]` or `Group forcePV RESET ...` |
+| Modify Mask | `Modify Mask <bit> <Off\|On\|Reset>` | `Channel Mask [Enable / Disable] ON <mask>` or `Group Mask [...]` |
+| Force PV Apply | `Change Force PV <directive>`, `Disable Force PV`, or `Enable Force PV` | `Channel forcePV modified <mask> [value] [pv]` (group text has a leading space) |
+| Beep Severity | `Set beep severity <severity>` | `Beep Severity set to <severity>` |
+
+QtALH's automatic force and reset records omit the force value and PV name that
+ALH includes. Database codes 7–10 are the same in both.
+
 Disabled-channel startup callbacks update channel state without triggering group
 severity commands from siblings still awaiting connection. Groups containing only
 disabled or cancelled channels still publish their initial severity output.
