@@ -194,7 +194,12 @@ sequence of severity commands during Apply, Reset, and Modify Mask actions.
 Fixed-argument directives accept whitespace-separated trailing `#` comments;
 command, alias, and guidance text remains intact. CALC accepts trailing comments
 after a valid expression while preferring a valid full expression, so spaced
-expressions and the `#` not-equal operator remain supported. `$SEVRPV -`
+expressions and the `#` not-equal operator are both accepted. Spaced expressions
+are an intentional QtALH extension: legacy ALH reads only the first
+whitespace-delimited token of `$FORCEPV_CALC`, so it evaluates `A > B` and
+`A # B` as `A`. The same file can then apply a force mask in one program and
+not the other. QtALH saves the complete expression; write expressions without
+spaces, such as `A#B`, in files that legacy ALH must also read. `$SEVRPV -`
 is an unset placeholder: the first subsequent real PV takes precedence.
 
 ### Configuration errors and migration

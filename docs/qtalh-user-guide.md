@@ -372,7 +372,10 @@ whitespace-separated `#`, for example `$SEVRPV output # severity mirror`.
 Hashes within PV names remain part of the name. Commands, aliases, and guidance
 retain their complete text. `$FORCEPV_CALC A > 0 # beam inhibit` also accepts a
 trailing comment. A valid complete CALC expression takes precedence, preserving
-the `#` not-equal operator in expressions such as `A # B`.
+the `#` not-equal operator in expressions such as `A # B`. Legacy ALH reads
+only the first whitespace-delimited token of `$FORCEPV_CALC`, which is `A` in
+both examples, so omit spaces (for example `A#B`) in files that legacy ALH must
+also read.
 
 Scalar Force PV values compare at double precision; CALC force/reset values
 compare at float precision. For `NE` (or reset equal to force), Qt consistently
