@@ -114,7 +114,12 @@ normalized to the legacy uppercase names when parsed and saved.
 Failed severity-output writes retain only the latest requested value for each PV.
 They retry when the PV connects or regains write access, and are discarded when
 the service is cleared for a reload or close. Ordinary value writes, heartbeat
-writes, and acknowledgements are not queued for later replay.
+writes, and acknowledgements are not queued for later replay. A Channel Access
+output that is not connected or not writable produces one "PV not connected or
+not writable" diagnostic per outage, not one per write attempt; the outage ends
+when the PV becomes writable or a write to it succeeds. Legacy ALH was silent
+for a disconnected severity PV and logged every write refused for lack of
+access.
 
 Masks accept legacy short or reordered uppercase letters (for example `D`, `DA`,
 and `LATDC`) and save in canonical `CDATL` positions. Unknown mask characters

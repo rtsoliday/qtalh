@@ -67,6 +67,7 @@ private:
   QSet<QString> initialAckTargets; // Configured CA names, retaining their fields.
   QSet<QString> initialAckWritten;
   QHash<QString, double> pendingSeverity;
+  QSet<QString> writeUnavailable; // Reported once until writable or a write succeeds.
   QTimer timer;
   bool active = false, clearing = false;
   // poll() scans channels only for pending access rechecks or connection deadlines.

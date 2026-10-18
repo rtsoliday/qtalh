@@ -468,6 +468,55 @@ private slots:
     QVERIFY(ca.put(n->name, 0));
     QTRY_COMPARE(e.state(n).severity, 0);
   }
+  void unavailableSeverityOutputReportedOncePerOutage() {
+    // Each diagnostic adds an opmod record and a popup line. A chattering alarm
+    // must not repeat it for every SEVRPV write while the output is unavailable;
+    // ALH skips disconnected outputs and reports lost write access per event.
+    const auto missing = prefix + "missing_severity", output = prefix + "protected";
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root " + prefix + "alarm\n$SEVRPV " + missing +
+                         "\nCHANNEL root " + prefix + "typeAlarm\n$SEVRPV " + output + "\n");
+    ChannelAccess ca({true});
+    Engine e(d, {true}, &ca);
+    QStringList errors;
+    ca.error = [&](QString s) { errors << s; };
+    e.start();
+    auto chatter = d.channels()[0], guarded = d.channels()[1];
+    ChannelAccess driver({true});
+    driver.prepare(prefix + "permit");
+    double value = -9;
+    driver.number(output, [&](double v) { value = v; });
+    QTRY_VERIFY(e.state(chatter).initialized && e.state(guarded).initialized);
+    QTRY_COMPARE(value, 0.0);
+    const auto toggle = [&](Node* n, int cycles) {
+      for (int i = 0; i < cycles; ++i) {
+        QVERIFY(ca.put(n->name, 20));
+        QTRY_COMPARE(e.state(n).severity, 2);
+        QVERIFY(ca.put(n->name, 0));
+        QTRY_COMPARE(e.state(n).severity, 0);
+      }
+    };
+    const auto unavailable = [&](const QString& name) {
+      return errors.count("PV not connected or not writable: " + name);
+    };
+    toggle(chatter, 5);
+    QCOMPARE(unavailable(missing), 1);
+    // Lost write access: one diagnostic, then a new one after recovery.
+    for (int outage = 1; outage <= 2; ++outage) {
+      QTRY_VERIFY(driver.put(prefix + "permit", 0));
+      QTRY_VERIFY(!ca.canWrite(output));
+      toggle(guarded, 3);
+      QVERIFY(ca.put(guarded->name, 20));
+      QTRY_COMPARE(e.state(guarded).severity, 2);
+      QCOMPARE(unavailable(output), outage);
+      QCOMPARE(value, 0.0);
+      QVERIFY(driver.put(prefix + "permit", 1));
+      QTRY_COMPARE(value, 2.0); // The pending severity is still replayed.
+      QVERIFY(ca.put(guarded->name, 0));
+      QTRY_COMPARE(value, 0.0);
+    }
+    QCOMPARE(unavailable(missing), 1);
+    QCOMPARE(unavailable(output), 2);
+  }
   void accessRights() {
     auto d = parseConfig("GROUP NULL root\nCHANNEL root " + prefix + "readonly");
     ChannelAccess ca({true, false, false, false});

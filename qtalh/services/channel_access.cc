@@ -341,6 +341,9 @@ void ChannelAccess::rightsChanged(Channel* c) {
     else if (c->haveLast)
       c->alarm(c->last);
   }
+  // Write access ends an outage; a later unavailable write is reported again.
+  if (ca_write_access(a))
+    c->owner->writeUnavailable.remove(c->name);
   // Retry a startup setting when write access arrives after connection. Once
   // applied through any configured field, mark the whole record complete so
   // later field connections cannot overwrite operator/IOC changes. Keep using
@@ -447,14 +450,21 @@ bool ChannelAccess::put(const QString& n, double v, WriteKind kind) {
       }
       debugLog(options.debug, "CA", "write " + n + ": " + ca_message(status));
       report(status, "Write " + n);
+      if (status == ECA_NORMAL)
+        writeUnavailable.remove(n);
       if (kind == WriteKind::Severity && status == ECA_NORMAL)
         pendingSeverity.remove(n);
       ca_flush_io();
       return status == ECA_NORMAL;
     }
   debugLog(options.debug, "CA", "write unavailable: " + n);
-  if (error)
+  // Each report adds an operation-log record and popup text. Automatic SEVRPV
+  // writes repeat on every alarm transition, so report each outage once; it
+  // ends when the PV becomes writable or a write to it succeeds.
+  if (error && !writeUnavailable.contains(n)) {
+    writeUnavailable.insert(n);
     error("PV not connected or not writable: " + n);
+  }
   return false;
 }
 void ChannelAccess::cancel(const QString& n, const void* tag) {
@@ -531,6 +541,7 @@ void ChannelAccess::clear() {
   recheckPending = false;
   nextDeadline = 0;
   pendingSeverity.clear();
+  writeUnavailable.clear();
   initialAckWritten.clear();
   clearing = false;
 }
