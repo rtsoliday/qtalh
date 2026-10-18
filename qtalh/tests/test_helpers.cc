@@ -2928,6 +2928,56 @@ private slots:
   }
 #endif
 
+  void plainBroadcastReservesControlPrefixes_data() {
+    QTest::addColumn<QString>("text");
+    QTest::addColumn<QString>("control");
+    QTest::newRow("reload") << "RELOAD_FACILITY: maintenance" << "Reload Facility";
+    QTest::newRow("stop") << "1 MIN  ALH  WILL  NOT  SAVE ALARM LOG!!!! maintenance" << "Stop Alarm Logging";
+    QTest::newRow("stop-ten") << "10 MIN  ALH  WILL  NOT  SAVE ALARM LOG!!!!" << "Stop Alarm Logging";
+  }
+  void plainBroadcastReservesControlPrefixes() {
+    QFETCH(QString, text); QFETCH(QString, control);
+    QTemporaryDir dir;
+    Options o; o.broadcast = true; o.noLog = true;
+    o.config = dir.filePath("config");
+    Logging log(o, "root");
+    int messages = 0, reloads = 0;
+    QString reason;
+    log.message = [&](const QString&) { ++messages; };
+    log.reload = [&] { ++reloads; };
+    log.error = [&](const QString& error) { reason = error; };
+    QFile file(o.config + ".MESS");
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const QByteArray previous("previous payload");
+    QCOMPARE(file.write(previous), qint64(previous.size())); file.close();
+    QVERIFY(!log.sendBroadcast(text));
+    QVERIFY2(reason.contains(control), qPrintable(reason));
+    QVERIFY(reason.contains("Change its opening text"));
+    QCOMPARE(messages, 0); QCOMPARE(reloads, 0);
+    QVERIFY(log.commandsAllowed()); QVERIFY(!log.broadcastPending());
+    QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(), previous); file.close();
+    // Rejection leaves the existing payload and delivery lock untouched.
+    QVERIFY(log.sendBroadcast("Status: " + text));
+    QCOMPARE(messages, 1); QCOMPARE(reloads, 0);
+    QVERIFY(log.commandsAllowed());
+  }
+  void explicitBroadcastControlsRemainAvailable_data() {
+    QTest::addColumn<bool>("reload");
+    QTest::newRow("reload") << true;
+    QTest::newRow("stop") << false;
+  }
+  void explicitBroadcastControlsRemainAvailable() {
+    QFETCH(bool, reload);
+    QTemporaryDir dir;
+    Options o; o.broadcast = true; o.noLog = true; o.config = dir.filePath("config");
+    Logging log(o, "root");
+    int reloads = 0;
+    log.reload = [&] { ++reloads; };
+    QVERIFY(log.sendBroadcast("RELOAD_FACILITY: reason text", reload ? 0 : 1, reload));
+    QCOMPARE(reloads, reload ? 1 : 0);
+    QCOMPARE(log.commandsAllowed(), reload);
+    QVERIFY(log.broadcastPending());
+  }
   void broadcast() {
     QTemporaryDir dir;
     Options o;

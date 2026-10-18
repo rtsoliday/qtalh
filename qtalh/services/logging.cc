@@ -1115,11 +1115,8 @@ void Logging::tick(bool receiveBroadcast) {
   auto text = lines.mid(1).join('\n');
   if (message)
     message(text);
-  // Possible inherited ALH protocol bug, deferred: ordinary Send Message text
-  // uses the same body as control messages. A reserved RELOAD_FACILITY: or
-  // stop-logging prefix therefore executes that action, even when the sender
-  // requested only a message. Later reject/escape reserved prefixes for plain
-  // messages while retaining interoperability with legacy control messages.
+  // Retain the legacy control wire format, including messages from ALH peers.
+  // Our plain-message send path rejects these reserved prefixes.
   if (lines[1].startsWith("RELOAD_FACILITY:")) {
     if (reload)
       reload();
@@ -1180,11 +1177,28 @@ void Logging::finishBroadcast() {
   if (broadcastFd >= 0)
     setLock(broadcastFd, false);
 }
+QString Logging::plainBroadcastError(const QString& text) {
+  if (text.startsWith("RELOAD_FACILITY:"))
+    return "This message would be read as a Reload Facility command. "
+           "Change its opening text, or use Reload Facility.";
+  static const QRegularExpression stop("^\\d+ MIN  ALH  WILL  NOT  SAVE ALARM LOG!!!!");
+  if (stop.match(text).hasMatch())
+    return "This message would be read as a Stop Alarm Logging command. "
+           "Change its opening text, or use Stop Alarm Logging.";
+  return {};
+}
 bool Logging::sendBroadcast(const QString& text, int minutes, bool reloadFacility) {
   debugLog(options.debug, "broadcast", QString("send reload=%1 suppressMinutes=%2")
       .arg(reloadFacility).arg(minutes));
   if (!options.broadcast || minutes < 0 || minutes > 10)
     return false;
+  if (!minutes && !reloadFacility) {
+    const auto reason = plainBroadcastError(text);
+    if (!reason.isEmpty()) {
+      if (error) error(reason);
+      return false;
+    }
+  }
   if (!ensureBroadcastLock()) return false;
   auto& shared = sharedLocks[broadcastFd];
   // POSIX locks are process-wide: another window (or this same sender) can

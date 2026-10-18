@@ -27,6 +27,8 @@ public:
   // Normal runtime exit waits for the legacy delivery interval. Destruction
   // during window/application teardown still preserves the pending payload.
   bool broadcastPending() const { return broadcastUnlock && clock.monotonic() < broadcastUnlock; }
+  // Plain messages share ALH's wire format with explicit control broadcasts.
+  static QString plainBroadcastError(const QString&);
   bool sendBroadcast(const QString&, int suppressMinutes = 0, bool reloadFacility = false);
   void setAlarmFile(const QString&);
   void setOpmodFile(const QString&);

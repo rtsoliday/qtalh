@@ -624,6 +624,11 @@ installs its handlers. Messages are polled every two seconds, and senders hold d
 for 60 seconds; another send reports busy during that interval. Broadcast actions
 send a message, reload the named configuration, or suppress alarm logging and
 commands for 1–10 minutes. Monitoring continues. Reload preserves Silence Forever.
+**Send Message** rejects text beginning with the reserved `RELOAD_FACILITY:`
+or `<number> MIN  ALH  WILL  NOT  SAVE ALARM LOG!!!!` control prefixes.
+Change the opening text, or use **Reload Facility** or **Stop Alarm Logging**
+for those actions. Explicit controls and broadcasts from legacy ALH retain
+their existing wire format.
 As in ALH, on Linux/macOS a `-B` runtime handles SIGINT (Ctrl-C) as an Exit
 without confirmation. A sender refuses, with a warning, until its message has
 been delivered; send SIGINT again afterwards. Without `-B`, and for other

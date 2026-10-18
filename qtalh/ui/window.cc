@@ -2909,6 +2909,10 @@ void Window::broadcast(int mode) {
       "logging-and-shared-operation");
   if (!legacy) buttons->button(QDialogButtonBox::Ok)->setText(QStringList{"Send", "Stop Logging", "Reload"}.value(mode));
   connect(buttons, &QDialogButtonBox::accepted, dialog, [this, dialog, text, minutes, mode] {
+    if (mode == 0) {
+      const auto reason = Logging::plainBroadcastError(text->text());
+      if (!reason.isEmpty()) { error(reason); return; }
+    }
     if (logging->sendBroadcast(text->text(), mode == 1 ? minutes->value() : 0, mode == 2)) dialog->close();
     else error("Could not broadcast message");
   });

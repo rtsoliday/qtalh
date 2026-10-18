@@ -4938,6 +4938,29 @@ private slots:
     tiles[0]->click();
     QCOMPARE(w->findChild<QTreeView*>("alarmTree")->currentIndex().siblingAtColumn(2).data().toString(), QString("Replacement"));
   }
+  void plainBroadcastRejectsControlText_data() {
+    QTest::addColumn<QString>("text"); QTest::addColumn<QString>("control");
+    QTest::newRow("reload") << "RELOAD_FACILITY: test" << "Reload Facility";
+    QTest::newRow("stop") << "1 MIN  ALH  WILL  NOT  SAVE ALARM LOG!!!! test" << "Stop Alarm Logging";
+  }
+  void plainBroadcastRejectsControlText() {
+    QFETCH(QString, text); QFETCH(QString, control);
+    QTemporaryDir dir; auto o = options(false); o.broadcast = true;
+    o.config = dir.filePath("config");
+    auto w = std::make_unique<Window>(sample(), o, false); w->show();
+    w->findChild<QAction*>("Send Message...")->trigger();
+    auto dialog = w->findChild<QDialog*>("broadcastDialog"); QVERIFY(dialog);
+    dialog->findChild<QLineEdit*>("broadcastMessage")->setText(text);
+    auto buttons = dialog->findChild<QDialogButtonBox*>(); QVERIFY(buttons);
+    QTest::mouseClick(buttons->button(QDialogButtonBox::Ok), Qt::LeftButton);
+    QVERIFY(dialog->isVisible());
+    QVERIFY(!QFileInfo::exists(o.config + ".MESS"));
+    bool explained = false;
+    for (auto label : w->findChildren<QLabel*>())
+      explained |= label->text().contains("This message would be read as a " + control + " command");
+    QVERIFY(explained);
+    QTest::mouseClick(buttons->button(QDialogButtonBox::Cancel), Qt::LeftButton);
+  }
   void reloadBroadcastMessageStaysOpen() {
     // ALH shows the received reload reason and then reloads in place. The
     // reload must not close the message it was announced with.
