@@ -27,6 +27,13 @@ paths. A few changes are not reported:
 - Characters that XML 1.0 cannot hold, such as form feeds and other control
   characters, are left out on export.
 - Leading and trailing white space in each imported element's text is removed.
+- A single related-process command imports as a plain `$COMMAND`, which runs
+  when **P** is clicked without the one-item menu, and its title is not kept;
+  re-export names it "Related process". `$COMMAND !Plot!echo plot!` therefore
+  returns as `$COMMAND echo plot`.
+- Guidance titles are kept only when a node has several guidance entries, and
+  display titles are not kept. A second or later web display becomes another
+  `$GUIDANCE` URL, which QtALH and ALH do not open: both use only the first.
 
 Imported descriptions retain their internal spacing. Line breaks become spaces
 because an ALH alias occupies one line.
