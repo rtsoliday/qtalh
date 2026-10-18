@@ -405,6 +405,9 @@ only the first whitespace-delimited token of `$FORCEPV_CALC`, which is `A` in
 both examples, so omit spaces (for example `A#B`) in files that legacy ALH must
 also read.
 
+Force and reset values must be finite numbers; `NaN`, infinity, and numeric
+overflow are rejected when loading a configuration or applying editor changes.
+The reset value also accepts `NE`, which retains its existing meaning.
 Scalar Force PV values compare at double precision; CALC force/reset values
 compare at float precision. For `NE` (or reset equal to force), Qt consistently
 uses float precision to recognize the previous forced CALC value before resetting.

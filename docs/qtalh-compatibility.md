@@ -77,6 +77,9 @@ Mask parsing follows legacy `alSetMask`: only uppercase `C`, `D`, `A`, `T`,
 and `L` set bits; other characters are ignored. `$FORCEPV` retains the legacy
 PV/mask/force/reset order and numeric parsing defaults (force 1, reset 0).
 An invalid force value stops numeric parsing; an invalid reset value becomes 0.
+QtALH rejects nonfinite numeric results (`NaN`, infinity, and overflow), unlike
+ALH, because a nonfinite reset can leave a force mask applied indefinitely.
+Use a finite reset value or `NE`; valid finite values retain their existing behavior.
 Reset numbers use the complete token, extending ALH's nine-character reset field
 so decimal and scientific-notation values survive saving, reloading, and editor actions.
 Force and reset values are saved in their shortest exact form (`0.3`, `1e-05`), so

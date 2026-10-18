@@ -306,11 +306,14 @@ public:
           const bool ne = resetText.startsWith("NE") || resetText.startsWith("ne");
           if (!resetText.isEmpty() && !ne && std::sscanf(resetText.constData(), "%lf", &reset) != 1)
             reset = 0;
-          // Possible inherited ALH bug, deferred: sscanf accepts NaN/Inf and
-          // overflow, unlike the editor's finite-value checks. A NaN reset can
-          // leave a force mask applied indefinitely; a nonfinite scalar force
-          // value cannot match Qt's finite samples. Add load-time validation later;
-          // preserve the currently accepted configuration values for now.
+          // Preserve legacy defaults and numeric-prefix parsing, but reject
+          // nonfinite results, including overflow. NaN resets can otherwise
+          // leave a force mask applied indefinitely. The editor applies the
+          // same finite-value requirement to its separate numeric fields.
+          if (!std::isfinite(forced))
+            fail("FORCEPV force value must be finite");
+          if (!ne && !std::isfinite(reset))
+            fail("FORCEPV reset value must be finite or NE");
           value = args[0] + " " + Mask::parse(args.value(1)).text() + " " +
                   QString::number(forced, 'g', QLocale::FloatingPointShortest) + " " +
                   (ne ? QString("NE") : QString::number(reset, 'g', QLocale::FloatingPointShortest));

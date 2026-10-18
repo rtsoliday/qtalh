@@ -1433,6 +1433,50 @@ private slots:
     QVERIFY(reloaded.section(' ', 2, 2).toDouble() == value.toDouble());
     QVERIFY(reloaded.section(' ', 3, 3).toDouble() == value.toDouble());
   }
+  void forceValuesRequireFiniteNumbers_data() {
+    QTest::addColumn<QString>("number");
+    QTest::addColumn<bool>("reset");
+    for (const auto number : {"nan", "NaN", "+nan", "-nan", "inf", "-inf", "+infinity",
+                              "1e309", "-1e309"})
+      for (bool reset : {false, true})
+        QTest::newRow(qPrintable(QString("%1-%2").arg(reset ? "reset" : "force", number)))
+            << QString(number) << reset;
+  }
+  void forceValuesRequireFiniteNumbers() {
+    QFETCH(QString, number); QFETCH(bool, reset);
+    const QString expected = reset ? "FORCEPV reset value must be finite or NE"
+                                   : "FORCEPV force value must be finite";
+    for (bool group : {false, true}) for (const auto pv : {"gate", "CALC"}) {
+      const QString declaration = "GROUP NULL root\n" +
+          (group ? QString() : QString("CHANNEL root pv\n"));
+      const QString directive = QString(pv) + " D " + (reset ? "1 " + number : number + " 0");
+      const QString text = declaration + "$FORCEPV " + directive +
+          (QString(pv) == "CALC" ? "\n$FORCEPV_CALC 1\n" : "\n");
+      try {
+        parseConfig(text);
+        QFAIL("Nonfinite FORCEPV value was accepted");
+      } catch (const ParseError& error) {
+        const QString diagnostic = QString::fromLocal8Bit(error.what());
+        QVERIFY2(diagnostic.contains(expected), qPrintable(diagnostic));
+        QVERIFY2(diagnostic.contains(group ? "Line 2:" : "Line 3:"), qPrintable(diagnostic));
+        QVERIFY2(diagnostic.contains(number), qPrintable(diagnostic));
+      }
+      // Editor candidates are serialized and reparsed before replacing the
+      // current document; that path must reject the same invalid values.
+      auto candidate = parseConfig(declaration);
+      (group ? candidate.root.get() : candidate.channels()[0])->setOption("FORCEPV", directive);
+      QVERIFY_THROWS_EXCEPTION(ParseError, parseConfig(writeConfig(candidate)));
+    }
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    QFile file(dir.filePath("nonfinite.alhConfig"));
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const QByteArray bytes = ("GROUP NULL root\n$FORCEPV gate D " +
+        (reset ? "1 " + number : number + " NE") + "\n").toUtf8();
+    QCOMPARE(file.write(bytes), qint64(bytes.size()));
+    file.close();
+    QVERIFY_THROWS_EXCEPTION(ParseError, loadConfig(file.fileName()));
+  }
   void firstSuppressedMonitorUsesFilter_data() {
     QTest::addColumn<QString>("mask"); QTest::addColumn<bool>("global");
     QTest::addColumn<int>("count");
