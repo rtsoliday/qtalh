@@ -1424,6 +1424,61 @@ private slots:
     QTRY_COMPARE(output(), QByteArray("-x\n-attach\nmedm display.adl\n"));
     QCOMPARE(w->document().root->option("COMMAND"), command);
   }
+  // ALH process.c: with -L only the lock master spawns MASTER_ONLY commands.
+  void masterOnlyCommandGating_data() {
+    QTest::addColumn<bool>("lockHeld");
+    QTest::newRow("master") << false;
+    QTest::newRow("slave") << true;
+  }
+  void masterOnlyCommandGating() {
+    QFETCH(bool, lockHeld);
+    struct LockHolder : QProcess {
+      ~LockHolder() { if (state() != NotRunning) { kill(); waitForFinished(); } }
+    } holder;
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    auto o = options(false); o.lock = true; o.config = dir.filePath("config");
+    if (lockHeld) {
+      holder.start("python3", {"-c", "import fcntl,sys; f=open(sys.argv[1],'a+'); "
+          "fcntl.lockf(f,fcntl.LOCK_EX); print('locked',flush=True); sys.stdin.read()",
+          o.config + ".LOCK"});
+      QVERIFY(holder.waitForStarted()); QVERIFY(holder.waitForReadyRead());
+      QVERIFY(holder.readAllStandardOutput().contains("locked"));
+    }
+    auto w = std::make_unique<Window>(sample(), o, false);
+    auto status = w->findChild<QLabel*>("executionStatus"); QVERIFY(status);
+    QTRY_VERIFY(status->text().endsWith(lockHeld ? "Slave" : "Master"));
+    const auto masterOnly = dir.filePath("master-only"), everyone = dir.filePath("everyone");
+    w->alarmEngine().command("MASTER_ONLY touch '" + masterOnly + "'");
+    w->alarmEngine().command("touch '" + everyone + "'");
+    QTRY_VERIFY(QFileInfo::exists(everyone));
+    if (lockHeld) {
+      QTest::qWait(500);
+      QVERIFY(!QFileInfo::exists(masterOnly));
+    } else QTRY_VERIFY(QFileInfo::exists(masterOnly));
+  }
+  // ALH process.c: no related or severity command starts during Stop Logging.
+  void stopLoggingSuppressesCommands() {
+    QTemporaryDir dir; QVERIFY(dir.isValid());
+    auto o = options(false); o.broadcast = true; o.config = dir.filePath("config");
+    auto w = std::make_unique<Window>(sample(), o, false);
+    const auto before = dir.filePath("before");
+    w->alarmEngine().command("touch '" + before + "'");
+    QTRY_VERIFY(QFileInfo::exists(before));
+    Logging sender(o, "BOOSTER"); QVERIFY(sender.sendBroadcast("maintenance", 1));
+    QTRY_VERIFY(([&] {
+      for (auto dialog : w->findChildren<QDialog*>())
+        if (dialog->windowTitle() == "Broadcast Message")
+          for (auto text : dialog->findChildren<QPlainTextEdit*>())
+            if (text->toPlainText().contains("WILL  NOT  SAVE ALARM LOG")) return true;
+      return false;
+    })());
+    const auto plain = dir.filePath("plain"), masterOnly = dir.filePath("master-only");
+    w->alarmEngine().command("touch '" + plain + "'");
+    w->alarmEngine().command("MASTER_ONLY touch '" + masterOnly + "'");
+    QTest::qWait(500);
+    QVERIFY(!QFileInfo::exists(plain));
+    QVERIFY(!QFileInfo::exists(masterOnly));
+  }
 #endif
 
   void analyticsWorkflow() {
