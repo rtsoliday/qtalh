@@ -2828,6 +2828,31 @@ private slots:
     QCOMPARE(group->model()->rowCount(), 1);
     QCOMPARE(group->model()->index(0, 2).data().toString(), QString("test:power"));
   }
+  void treeMaskCellsKeepGroupPaneAfterReplace() {
+    // Mask and beep cells set the action target only; they must not switch the
+    // group pane, before or after an edit rebuilds the tree model.
+    auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nGROUP root GA\nCHANNEL GA a\n"
+                                                  "GROUP root GB\nCHANNEL GB b\n"),
+                                      options(true), false);
+    auto tree = w->findChild<QTreeView*>("alarmTree");
+    auto group = w->findChild<QTreeView*>("groupContents");
+    auto check = [&](const char* phase) {
+      const auto root = tree->model()->index(0, 0);
+      const auto ga = tree->model()->index(0, 0, root), gb = tree->model()->index(1, 0, root);
+      tree->setCurrentIndex(ga.siblingAtColumn(2));
+      QCOMPARE(group->model()->index(0, 2).data().toString(), QString("a"));
+      for (int column : {6, 7}) {
+        tree->setCurrentIndex(gb.siblingAtColumn(column));
+        QVERIFY2(group->model()->index(0, 2).data().toString() == "a", phase);
+      }
+      tree->setCurrentIndex(gb.siblingAtColumn(2)); // The name cell still navigates.
+      QCOMPARE(group->model()->index(0, 2).data().toString(), QString("b"));
+    };
+    check("fresh window");
+    w->addNode(false, "new:pv");
+    w->undoEdit();
+    check("after replace");
+  }
   void copyBetweenWindows() {
     auto from = std::make_unique<Window>(sample(), options(true), false);
     auto to = std::make_unique<Window>(parseConfig("GROUP NULL destination"), options(true), false);

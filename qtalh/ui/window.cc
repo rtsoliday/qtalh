@@ -1690,7 +1690,9 @@ void Window::replace(Document d, bool snapshot) {
   groupView->setModel(groupModel);
   connect(treeView->selectionModel(), &QItemSelectionModel::currentChanged, this,
           [this](QModelIndex i, QModelIndex) {
-            if (auto n = treeModel->node(i))
+            // Same filter as buildUi(): mask/beep cells set the action target only.
+            auto n = treeModel->node(i);
+            if (n && (i.column() == 0 || i.column() == 2))
               select(n);
           });
   connect(groupView->selectionModel(), &QItemSelectionModel::currentChanged, this,
