@@ -43,7 +43,7 @@ def verify(base="/"):
         if 'legacy' in path.relative_to(OUTPUT).parts:
             continue
         parser = Page()
-        parser.feed(path.read_text())
+        parser.feed(path.read_text(encoding='utf-8'))
         pages[path.resolve()] = parser
     issues = []
     links = 0
@@ -82,15 +82,15 @@ def verify(base="/"):
             if (dest.is_relative_to(pages_source) and not dest.is_relative_to(pages_source / 'public')
                     and dest.suffix == '.md'):
                 issues.append(f'{path.relative_to(OUTPUT)}: site page link downloads raw Markdown instead of routing to the page: {url}')
-    options = set(re.findall(r'a == "(-[^\"]+)"', (ROOT / 'qtalh/services/options.cc').read_text()))
-    reference = (SITE / 'reference/command-line.md').read_text()
+    options = set(re.findall(r'a == "(-[^\"]+)"', (ROOT / 'qtalh/services/options.cc').read_text(encoding='utf-8')))
+    reference = (SITE / 'reference/command-line.md').read_text(encoding='utf-8')
     for option in options:
         if option not in reference:
             issues.append(f'Undocumented command-line spelling: {option}')
-    config = (ROOT / 'qtalh/core/config.cc').read_text()
+    config = (ROOT / 'qtalh/core/config.cc').read_text(encoding='utf-8')
     supported = config.split('const QSet<QString> supported = {', 1)[1].split('};', 1)[0]
     directives = set(re.findall(r'"([A-Z_]+)"', supported)) | {'BEEPSEVERITY', 'END'}
-    reference = (SITE / 'reference/configuration.md').read_text()
+    reference = (SITE / 'reference/configuration.md').read_text(encoding='utf-8')
     for directive in directives:
         if '$' + directive not in reference:
             issues.append(f'Undocumented configuration directive: {directive}')
