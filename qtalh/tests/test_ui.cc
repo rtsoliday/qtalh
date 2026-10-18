@@ -4307,6 +4307,39 @@ private slots:
     QTRY_COMPARE(table->rowCount(), 0);
     QVERIFY(!restore->isEnabled());
   }
+  void passiveControlsOfferNoWrites() {
+    auto o = options(false); o.engine.passive = true;
+    auto w = std::make_unique<Window>(sample(), o, false);
+    auto& e = w->alarmEngine(); const auto channels = w->document().channels();
+    auto trigger = [&](const QString& name) {
+      for (auto a : w->findChildren<QAction*>()) if (a->text() == name) a->trigger();
+    };
+    for (auto n : channels) e.event(n, {0, 0, 0, 1, "0"});
+    e.event(channels[2], {3, 2, 2, 1, "12"}); QCOMPARE(e.state(channels[2]).unack, 2);
+    trigger("Active Alarms...");
+    auto active = w->findChild<QDialog*>("activeAlarmsDialog"); QVERIFY(active);
+    auto table = active->findChild<QTableView*>("activeAlarmsTable");
+    QTRY_COMPARE(table->model()->rowCount(), 1);
+    table->selectRow(0);
+    QVERIFY(active->findChild<QPushButton*>("activeShowInTree")->isEnabled());
+    QVERIFY(!active->findChild<QPushButton*>("activeAcknowledge")->isEnabled());
+    e.setBeep(channels[0], 2);
+    trigger("Runtime Overrides...");
+    auto overrides = w->findChild<QDialog*>("runtimeOverridesDialog"); QVERIFY(overrides);
+    overrides->findChild<QTableWidget*>("runtimeOverridesTable")->selectRow(0);
+    QVERIFY(!overrides->findChild<QPushButton*>("restoreOverrides")->isEnabled());
+    // Local mask bits stay available; ACKT is an IOC write.
+    trigger("Force Mask...");
+    auto forced = w->findChild<QDialog*>("forceMaskDialog"); QVERIFY(forced);
+    for (int bit = 0; bit < 5; ++bit)
+      QCOMPARE(forced->findChild<QCheckBox*>("maskBit" + QString::number(bit))->isEnabled(), bit != AckT);
+    trigger("Modify Mask Settings...");
+    auto modify = w->findChild<QDialog*>("modifyMaskDialog"); QVERIFY(modify);
+    for (int bit = 0; bit < 5; ++bit)
+      for (int choice = 0; choice < 3; ++choice)
+        QCOMPARE(modify->findChild<QPushButton*>(QString("maskAction%1_%2").arg(bit).arg(choice))
+                     ->isEnabled(), bit != AckT);
+  }
   void facilityBeepOverrideCanBeRestored() {
     auto w = std::make_unique<Window>(sample(), options(false), false);
     // This is the same setting changed by Setup -> ALH Beep Severity.

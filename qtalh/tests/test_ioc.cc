@@ -1386,6 +1386,89 @@ private slots:
     QCOMPARE(errors.size(), 26);
     QVERIFY2(errors.last().contains("Too many exceptions"), qPrintable(errors.last()));
   }
+  void passiveWritesAllKinds_data() {
+    QTest::addColumn<bool>("pva"); QTest::addColumn<int>("kind"); QTest::addColumn<QString>("record");
+    const QStringList kinds = {"value", "acknowledge", "ackt", "severity", "heartbeat", "ackpv"};
+    const QStringList records = {"alarm", "alarm", "alarm", "severity", "heartbeat", "ack"};
+    for (bool pva : {false, true})
+      for (int kind = 0; kind < kinds.size(); ++kind)
+        QTest::newRow(qPrintable(QString(pva ? "pva-" : "ca-") + kinds[kind])) << pva << kind << records[kind];
+  }
+  void passiveWritesAllKinds() {
+    // The passive services refuse every write kind themselves, independent of Engine.
+    QFETCH(bool, pva); QFETCH(int, kind); QFETCH(QString, record);
+    const auto write = WriteKind(kind);
+    const auto target = prefix + record, name = (pva ? "pva://" : "") + target;
+    ChannelAccess observer; // A writable client of the IOC record itself.
+    Event ioc; ioc.severity = -1; double value = NAN;
+    observer.monitor(target, [&](Event e) { ioc = e; });
+    observer.number(target, [&](double v) { value = v; });
+    observer.prepare(target);
+    QTRY_VERIFY(ioc.severity >= 0 && !std::isnan(value) && observer.canWrite(target));
+    if (write == WriteKind::Acknowledge) { QVERIFY(observer.put(target, 20)); QTRY_COMPARE(ioc.acks, 2); }
+    PvRouter passive({true, true, true, false});
+    Event seen; seen.severity = -1;
+    passive.monitor(name, [&](Event e) { seen = e; });
+    QTRY_VERIFY(seen.severity >= 0 && (write != WriteKind::Acknowledge || seen.acks == 2));
+    const auto seenBefore = seen, iocBefore = ioc; const double valueBefore = value;
+    const double v = write == WriteKind::Acknowledge ? 2 : write == WriteKind::AckTransient ? !seen.ackt
+                   : value == 3 ? 4 : 3;
+    const bool writable = passive.canWrite(name), written = passive.put(name, v, write);
+    QTest::qWait(200);
+    const auto seenAfter = seen, iocAfter = ioc; const double valueAfter = value;
+    if (record == "alarm") { // Leave the shared record quiet and acknowledged.
+      QVERIFY(observer.put(target, 0));
+      QVERIFY(observer.put(target, iocBefore.ackt, WriteKind::AckTransient));
+      QVERIFY(observer.put(target, 3, WriteKind::Acknowledge));
+      QTRY_VERIFY(ioc.severity == 0 && ioc.acks == 0 && ioc.ackt == iocBefore.ackt);
+    }
+    QVERIFY(!writable); QVERIFY(!written);
+    QCOMPARE(valueAfter, valueBefore);
+    QCOMPARE(iocAfter.acks, iocBefore.acks); QCOMPARE(iocAfter.ackt, iocBefore.ackt);
+    // pva:// acknowledgement state is local to the passive runtime.
+    QCOMPARE(seenAfter.acks, seenBefore.acks); QCOMPARE(seenAfter.ackt, seenBefore.ackt);
+  }
+  void passiveRuntimeLeavesIocUnchanged() {
+    // Passive counterpart of alarmAndWrites, with startup and runtime ACKT settings.
+    auto d = parseConfig("GROUP NULL passive\n$HEARTBEATPV " + prefix + "heartbeat 0.1 7\n"
+                         "CHANNEL passive " + prefix + "alarm ---T-\n$ACKPV " + prefix + "ack 3\n"
+                         "$SEVRPV " + prefix + "severity\n");
+    ChannelAccess observer;
+    Event record; record.severity = -1;
+    QMap<QString, double> outputs;
+    observer.monitor(prefix + "alarm", [&](Event e) { record = e; });
+    observer.prepare(prefix + "alarm");
+    for (const QString output : {"ack", "severity", "heartbeat"}) {
+      observer.number(prefix + output, [&outputs, output](double v) { outputs[output] = v; });
+      observer.prepare(prefix + output);
+      QTRY_VERIFY(observer.canWrite(prefix + output));
+      QVERIFY(observer.put(prefix + output, -5));
+      QTRY_COMPARE(outputs.value(output), -5.0);
+    }
+    QTRY_VERIFY(record.severity == 0 && observer.canWrite(prefix + "alarm"));
+    QVERIFY(observer.put(prefix + "alarm", 1, WriteKind::AckTransient)); QTRY_COMPARE(record.ackt, 1);
+    EngineOptions options{true, true, true, false};
+    PvRouter pv(options); pv.configureInitialAckT(d);
+    Engine e(d, options, &pv); auto n = d.channels()[0];
+    QStringList errors; e.error = [&](const QString& s) { errors << s; };
+    e.start(); QTRY_VERIFY(e.state(n).initialized);
+    QVERIFY(observer.put(prefix + "alarm", 20));
+    QTRY_COMPARE(e.state(n).unack, 2); QTRY_COMPARE(record.acks, 2);
+    e.acknowledge(n);
+    e.setMask(n, Mask::parse("-----")); e.setMask(n, Mask::parse("---T-"));
+    QTest::qWait(150); e.tick(); e.tickHeartbeat(); QTest::qWait(200);
+    const auto after = record; const auto written = outputs; const int unack = e.state(n).unack;
+    QVERIFY(observer.put(prefix + "alarm", 0));
+    QVERIFY(observer.put(prefix + "alarm", 1, WriteKind::AckTransient));
+    QVERIFY(observer.put(prefix + "alarm", 3, WriteKind::Acknowledge));
+    for (const QString output : {"ack", "severity", "heartbeat"}) QVERIFY(observer.put(prefix + output, 0));
+    QTRY_VERIFY(record.severity == 0 && record.acks == 0 && record.ackt == 1);
+    QCOMPARE(after.acks, 2); QCOMPARE(after.ackt, 1);
+    QCOMPARE(written.value("ack"), -5.0); QCOMPARE(written.value("severity"), -5.0);
+    QCOMPARE(written.value("heartbeat"), -5.0);
+    QCOMPARE(unack, 2);
+    QVERIFY(errors.contains("You can't acknowledge alarms in passive mode."));
+  }
   void pvaMonitorAndWrites() {
     PvAccess pva;
     QStringList errors;
