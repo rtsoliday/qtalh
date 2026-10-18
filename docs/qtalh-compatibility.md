@@ -935,7 +935,13 @@ build and requires EPICS 7 Base with pvAccess and pvData.
 
 Alarm status comes from the condition QSRV places in `alarm.message`, and
 values follow `display.precision`, as `DBR_STSACK_STRING` reports them through
-CA. Missing PVs report `NOT_CONNECTED` after one second, as with CA. Force
+CA. When the record has a non-empty `AMSG`, QSRV sends that text instead of the
+condition name (`pva2pva` `mapStatus`), so QtALH falls back on the PVA alarm
+status: `DRIVER` (which QSRV also uses for `UDF` and `TIMEOUT`) gives `COMM`,
+`UNDEFINED` gives `UDF`, and others give `SOFT`. Displayed and logged status
+and `$STATCOMMAND` then differ from CA; for example, `LINK` with `AMSG`
+`field INP` becomes `SOFT`. Missing PVs report `NOT_CONNECTED` after one
+second, as with CA. Force
 inputs ignore updates that the server marks as alarm-only and updates that
 repeat the previous value. QSRV marks the value as changed on every alarm
 event, however. With a record deadband (MDEL > 0), an alarm transition can

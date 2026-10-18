@@ -468,8 +468,14 @@ $SEVRPV pva://example:vacuumSeverity
 An alarm channel reads `value` and `alarm` from a normative-type PV. Severity
 is the PVA alarm severity. The status is the alarm condition named in
 `alarm.message`, as an IOC's PVA server (QSRV) reports it (for example `HIHI`).
-Other messages map to `UDF` or `COMM` for undefined or driver alarms, and to
-`SOFT` otherwise. Values display with `display.precision`; enumerated values
+Other messages map to `COMM` for PVA driver alarms, `UDF` for PVA undefined
+alarms, and `SOFT` otherwise. When a record sets an alarm message (`AMSG`,
+EPICS 7.0.6 and later), QSRV sends that text instead of the condition name, so
+only this coarse mapping is available: for example, a failed input link
+(`LINK`, `AMSG` `field INP`) shows `SOFT`, and an `mbboDirect` or `getenv`
+`UDF` alarm shows `COMM`. `$STATCOMMAND` triggers and logs use the mapped
+status; configure the Channel Access name when exact status names matter.
+Values display with `display.precision`; enumerated values
 display their state names, and writes set the enumeration index. Value text and
 alarm messages longer than 4,096 characters are truncated. Descriptions
 (`-desc_field`) read `pva://record.DESC`, and the alarm-limit tools read record fields
