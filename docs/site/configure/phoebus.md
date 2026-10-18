@@ -61,6 +61,15 @@ written as `\$`, because ALH ends a guidance block at any such line and reads th
 rest as configuration. Delay and count must be nonnegative integers; counts are limited
 to ALH's maximum of 1,000,000.
 
+Command text is copied unchanged, but the two systems run it differently.
+Phoebus starts the program directly, without a shell: it replaces `$(macro)`
+references from its `macros` preference, splits the text at spaces (honoring
+double quotes only), and runs it in its `command_directory`. QtALH, like ALH,
+runs the text with `/bin/sh -c` (`cmd.exe` on Windows) in its own working
+directory, so shell characters such as `>`, `;`, `|`, `'` and `$(...)` take
+effect. Conversions do not flag such commands; review commands that contain
+shell characters, `$(...)` macros, or relative paths after import or export.
+
 Count filters with a positive count use the same delay and count parameters,
 but ALH also delays clearing; Phoebus delays only alarm onset. Conversions report
 this difference for review.
