@@ -83,6 +83,7 @@ private:
   QHash<QString, ChannelUpdate> channels;
   QHash<QString, Episode> episodes;
   QHash<QString, QString> current;
+  QHash<QString, QSet<QString>> resolvedEnded; // Identity to ended episodes that may resolve.
   QHash<QString, QHash<QPair<QString, QString>, qint64>> cooldown; // Subscription, then channel/stage+destination.
   QHash<QString, qint64> batchDeadline, destinationNext;
   qint64 nextExpiry = 0;
@@ -91,6 +92,7 @@ private:
   const NotificationSubscription* subscription(const QString&) const;
   bool match(const NotificationSubscription&, const ChannelUpdate&) const;
   void end(Episode&, bool resolved);
+  void forget(const Episode&);
   void collect();
   void pruneDeadlines(qint64);
 };

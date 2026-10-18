@@ -498,6 +498,65 @@ private slots:
     qInfo() << "10,000 notification channels, ms:" << timer.elapsed();
     QVERIFY(timer.elapsed() < 10000);
   }
+  void bulkSuppressionDuringStorm_data() {
+    QTest::addColumn<bool>("resolution");
+    QTest::addColumn<bool>("cleared");
+    QTest::newRow("active") << false << false;
+    QTest::newRow("active-resolution") << true << false;
+    QTest::newRow("cleared-resolution") << true << true;
+  }
+  void bulkSuppressionDuringStorm() {
+    // Disabling, cancelling or shelving a large group during an alarm storm
+    // publishes one suppression per channel; each must not scan every episode.
+    QFETCH(bool, resolution);
+    QFETCH(bool, cleared);
+    auto s = settings();
+    s.subscriptions[0].stages.resize(1);
+    s.subscriptions[0].resolution = resolution;
+    NotificationPolicy p;
+    configure(p, s);
+    const int n = 20000;
+    QVector<ChannelUpdate> storm;
+    for (int i = 0; i < n; ++i)
+      storm << alarm(QString("pv%1").arg(i));
+    for (const auto& a : storm)
+      p.observe(a, 0);
+    p.tick(60000);
+    p.tick(70000);
+    NotificationEnvelope e;
+    int delivered = 0;
+    while (p.take(e, 70000)) {
+      delivered += e.alarms.size();
+      p.completed(e, true);
+    }
+    QCOMPARE(delivered, n);
+    if (cleared)
+      for (auto a : storm) {
+        a.unack = 0; // Ended episodes now await resolution delivery.
+        p.observe(a, 70001);
+      }
+    QCOMPARE(p.activeChannels().size(), cleared ? 0 : n);
+    QElapsedTimer timer;
+    timer.start();
+    for (auto a : storm) {
+      if (cleared)
+        a.unack = 0;
+      a.suppressed = true;
+      p.observe(a, 70002);
+    }
+    const auto elapsed = timer.elapsed();
+    qInfo() << n << "suppressed notification channels, ms:" << elapsed;
+    QVERIFY(p.activeChannels().isEmpty());
+    QVERIFY2(elapsed < 2000, qPrintable(QString("%1 ms").arg(elapsed)));
+    // Suppression clears before the transport pump runs; nothing is resolved.
+    for (auto a : storm) {
+      a.unack = 0;
+      p.observe(a, 70003);
+    }
+    p.tick(70004);
+    p.tick(80004);
+    QVERIFY(!p.take(e, 80004));
+  }
   void queuePressureRetainsDueWork() {
     NotificationPolicy p;
     auto s = settings();

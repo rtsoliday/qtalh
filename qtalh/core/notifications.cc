@@ -283,9 +283,10 @@ void NotificationPolicy::configure(const NotificationSettings& s, const QString&
       if (configuration_ == configuration && signature(*old, settings_) == signature(r, s))
         keep << r.id;
   for (auto it = episodes.begin(); it != episodes.end();)
-    if (!keep.contains(it->subscription))
+    if (!keep.contains(it->subscription)) {
+      forget(*it);
       it = episodes.erase(it);
-    else
+    } else
       ++it;
   for (auto it = current.begin(); it != current.end();)
     if (!episodes.contains(it.value()))
@@ -316,6 +317,7 @@ void NotificationPolicy::enable(bool on) {
   if (!on) {
     episodes.clear();
     current.clear();
+    resolvedEnded.clear();
     queue.clear();
     throttled_ = false;
     batchDeadline.clear();
@@ -324,15 +326,27 @@ void NotificationPolicy::enable(bool on) {
 void NotificationPolicy::end(Episode& e, bool resolved) {
   e.active = false;
   e.resolved = resolved;
+  if (resolved)
+    resolvedEnded[e.state.identity] << e.id;
   current.remove(token(e.subscription, e.state.identity));
+}
+void NotificationPolicy::forget(const Episode& e) {
+  auto it = resolvedEnded.find(e.state.identity);
+  if (it == resolvedEnded.end())
+    return;
+  it->remove(e.id);
+  if (it->isEmpty())
+    resolvedEnded.erase(it);
 }
 void NotificationPolicy::observe(const ChannelUpdate& s, qint64 now) {
   // Ended episodes are absent from current. Cancel their resolutions when
   // suppression arrives, even if it clears before the transport pump can run.
   if (s.suppressed && !channels.value(s.identity).suppressed)
-    for (auto& episode : episodes)
-      if (!episode.active && episode.state.identity == s.identity)
-        episode.resolved = false;
+    for (const auto& id : resolvedEnded.take(s.identity)) {
+      auto it = episodes.find(id);
+      if (it != episodes.end() && !it->active)
+        it->resolved = false;
+    }
   channels[s.identity] = s;
   if (!enabled_)
     return;
@@ -626,9 +640,10 @@ void NotificationPolicy::collect() {
     auto r = subscription(it->subscription);
     bool resolution =
         it->resolved && r && r->resolution && (it->accepted - it->resolutionDone).size();
-    if (!it->active && it->queued.isEmpty() && it->resolutionQueued.isEmpty() && !resolution)
+    if (!it->active && it->queued.isEmpty() && it->resolutionQueued.isEmpty() && !resolution) {
+      forget(*it);
       it = episodes.erase(it);
-    else
+    } else
       ++it;
   }
 }
