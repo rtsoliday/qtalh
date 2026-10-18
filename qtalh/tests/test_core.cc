@@ -770,6 +770,29 @@ private slots:
     e.setMask(b, Mask::parse("-")); QCOMPARE(pv.writes.size(), 3);
     QCOMPARE(pv.writes.last().value, 1.0); // Explicit retry still reverses the accepted request.
   }
+  void delayedDuplicateAckTFeedbackCannotEraseAcceptedIntent() {
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root shared\nCHANNEL root shared.VAL\n");
+    FakePv pv; Engine e(d, {true}, &pv); auto a = d.channels()[0], b = d.channels()[1];
+    e.event(a, {}); e.event(b, {});
+    e.setMask(a, Mask::parse("T"));
+    e.event(a, {0, 0, 0, 0, "normal"}); // First row confirms the accepted request.
+    e.event(b, {}); // An older second-row observation arrives afterward.
+    e.setMask(b, Mask::parse("-"));
+    QCOMPARE(pv.writes.size(), 2);
+    QCOMPARE(pv.writes.last().value, 1.0);
+    QCOMPARE(pv.writes.last().kind, WriteKind::AckTransient);
+  }
+  void externalAckTChangeCannotBeHiddenByAcceptedIntent() {
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
+    FakePv pv; Engine e(d, {true}, &pv); auto n = d.channels()[0];
+    e.event(n, {}); e.setMask(n, Mask::parse("T"));
+    e.event(n, {0, 0, 0, 0, "normal"});
+    e.event(n, {}); // Another client changes ACKT after our request was confirmed.
+    e.setMask(n, Mask::parse("T"));
+    QCOMPARE(pv.writes.size(), 2);
+    QCOMPARE(pv.writes.last().value, 0.0);
+    QCOMPARE(pv.writes.last().kind, WriteKind::AckTransient);
+  }
   void enablingLocalNoAckTPreservesExistingLatch() {
     auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
     Engine e(d); auto n = d.channels()[0];

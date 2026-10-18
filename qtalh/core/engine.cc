@@ -416,9 +416,6 @@ void Engine::process(Node* n, Event e, qint64 time, int monitorSeverity) {
       s.mask[AckT] = !e.ackt;
       const auto record = acknowledgementIdentity(n->name);
       observedRecordAckT.insert(record, !e.ackt);
-      const auto accepted = acceptedAckT.constFind(record);
-      if (accepted != acceptedAckT.cend() && accepted.value() == !e.ackt)
-        acceptedAckT.remove(record);
     }
     // Fix an ALH bug: synthetic connection/access errors carry ACKS=0, which
     // used to silence ERROR and hide it in the unacknowledged filter. Latch
@@ -812,11 +809,17 @@ bool Engine::applyMask(Node* n, Mask requested, bool automatic, Node* forceSourc
     // Before an IOC monitor arrives, the configured bit is only a placeholder.
     // An automatic force must write (or defer) even if that bit already matches.
     const auto record = acknowledgementIdentity(c->name);
-    const bool priorAckT = acceptedAckT.value(record, observedRecordAckT.value(record, old.mask[AckT]));
+    const bool accepted = acceptedAckT.value(record, observedRecordAckT.value(record, old.mask[AckT]));
+    const bool observed = observedRecordAckT.value(record, accepted);
+    // One row's confirmation must not discard accepted intent: another row
+    // may still deliver an older observation. Conversely, retaining intent
+    // must not hide a later external change. Suppress only when both agree.
     if (options.global && !options.passive &&
-        (mask[AckT] != priorAckT || (automatic && old.observedAckT < 0))) {
+        (mask[AckT] != accepted || mask[AckT] != observed ||
+         (automatic && old.observedAckT < 0))) {
       if (pv && pv->put(c->name, !mask[AckT], WriteKind::AckTransient)) {
         acceptedAckT.insert(record, mask[AckT]);
+        observedRecordAckT.remove(record); // Wait for feedback after this submission.
       } else {
         if (automatic)
           pendingForceAckT.insert(record, {forceSource, c, mask[AckT], request});
@@ -867,6 +870,7 @@ void Engine::retryForceWrites() {
       continue;
     pendingForceAckT.remove(acknowledgementIdentity(c->name));
     acceptedAckT.insert(acknowledgementIdentity(c->name), pending.mask);
+    observedRecordAckT.remove(acknowledgementIdentity(c->name));
     State before = states[c];
     // Preserve per-row display behavior: update the requesting row here; other
     // monitored rows learn the shared ACKT value from their IOC confirmations.
