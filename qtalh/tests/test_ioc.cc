@@ -746,11 +746,15 @@ private slots:
     // The first $SEVRPV write for a new configuration can precede the
     // output's connection. Like ALH, do not report it: the value is replayed
     // on connection. A missing output is reported once, at its connection
-    // deadline (one second), not at the first alarm event.
+    // deadline (one second), not at the first alarm event; an output that
+    // connects without write access is reported once when it connects.
     const auto name = prefix + "alarm";
-    for (const bool missing : {false, true}) {
-      const auto output = prefix + (missing ? "missingSeverity" : "severity");
-      auto d = parseConfig("GROUP NULL root\nCHANNEL root " + name + "\n$SEVRPV " + output + "\n");
+    for (const QString kind : {"writable", "missing", "readonly"}) {
+      const bool missing = kind == "missing";
+      const auto output = prefix + (missing ? "missingSeverity" : kind == "readonly" ? "readonly" : "severity");
+      // A disabled channel writes $SEVRPV -1 in start(), before any output connects.
+      const QString mask = kind == "readonly" ? " -D---" : "";
+      auto d = parseConfig("GROUP NULL root\nCHANNEL root " + name + mask + "\n$SEVRPV " + output + "\n");
       ChannelAccess ca({true}); Engine e(d, {true}, &ca); auto n = d.channels()[0];
       QElapsedTimer started;
       QVector<qint64> reports;
@@ -759,14 +763,14 @@ private slots:
       };
       started.start();
       e.start();
-      QTRY_VERIFY(e.state(n).initialized);
+      if (kind != "readonly") QTRY_VERIFY(e.state(n).initialized);
       QTest::qWait(1500);
-      if (!missing) {
+      if (kind == "writable") {
         QVERIFY(reports.isEmpty());
         continue;
       }
       QCOMPARE(reports.size(), 1);
-      QVERIFY2(reports[0] >= 900, qPrintable(QString::number(reports[0])));
+      if (missing) QVERIFY2(reports[0] >= 900, qPrintable(QString::number(reports[0])));
     }
   }
   void freshAlarmCallbackCanDestroyService() {

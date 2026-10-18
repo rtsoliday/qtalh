@@ -421,6 +421,14 @@ void ChannelAccess::rightsChanged(Channel* c) {
   // current desired severity on reconnect in a later change; retain behavior now.
   if (ca_write_access(a) && c->owner->pendingSeverity.contains(c->name))
     c->owner->put(c->name, c->owner->pendingSeverity.value(c->name), WriteKind::Severity);
+  else if (!ca_write_access(a) && c->owner->pendingSeverity.contains(c->name) &&
+           !c->owner->writeUnavailable.contains(c->name)) {
+    // put() did not report a severity written while this output was still
+    // connecting. It connected without write access: report the outage now.
+    c->owner->writeUnavailable.insert(c->name);
+    if (const auto callback = c->owner->error)
+      callback("PV not connected or not writable: " + c->name);
+  }
 }
 void ChannelAccess::updated(Channel* c, const Callback& a) {
   if (clearing || c->cancelled)

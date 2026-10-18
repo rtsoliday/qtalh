@@ -154,8 +154,9 @@ not writable" diagnostic per outage, not one per write attempt; the outage ends
 when the PV becomes writable or a write to it succeeds. A `pva://` output that
 is not connected behaves the same way; its outage ends when the PV connects or a
 write to it completes. A severity written before its output's first connection
-after a load is replayed on connection and reported only if the output misses
-its one-second connection deadline. Legacy ALH was silent
+after a load is replayed when the output connects with write access. It is
+reported if the output misses its one-second connection deadline or connects
+without write access. Legacy ALH was silent
 for a disconnected severity PV and logged every write refused for lack of
 access.
 
