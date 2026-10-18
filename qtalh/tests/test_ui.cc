@@ -4074,6 +4074,47 @@ private slots:
     QTRY_COMPARE(table->model()->rowCount(), 0);
     QTRY_VERIFY(dialog->findChild<QLabel*>("activeAlarmsStatus")->text().contains("1 shelved not shown"));
   }
+  void activeAlarmAcknowledgeOnlySelectedRows() {
+    auto w = std::make_unique<Window>(sample(), options(false), false);
+    w->show();
+    auto& engine = w->alarmEngine();
+    const auto channels = w->document().channels();
+    for (auto n : channels) engine.event(n, {0, 0, 0, 1, "0"});
+    engine.event(channels[0], {3, 2, 2, 1, "12"});
+    engine.event(channels[2], {3, 2, 2, 1, "12"});
+    w->findChild<QAction*>("Active Alarms...")->trigger();
+    auto dialog = w->findChild<QDialog*>("activeAlarmsDialog");
+    auto table = dialog->findChild<QTableView*>("activeAlarmsTable");
+    auto acknowledge = dialog->findChild<QPushButton*>("activeAcknowledge");
+    QTRY_COMPARE(table->model()->rowCount(), 2);
+    auto unackedCount = [&] {
+      int count = 0;
+      for (auto n : channels) count += engine.state(n).unack != 0;
+      return count;
+    };
+    // A Ctrl+click that deselects the only selected row leaves it current but
+    // not selected, so Acknowledge must not act on it.
+    table->selectRow(0);
+    QVERIFY(acknowledge->isEnabled());
+    const auto row0 = table->visualRect(table->model()->index(0, 3)).center();
+    QTest::mouseClick(table->viewport(), Qt::LeftButton, Qt::ControlModifier, row0);
+    QVERIFY(table->selectionModel()->selectedRows().isEmpty());
+    QVERIFY(table->currentIndex().isValid());
+    QVERIFY(!acknowledge->isEnabled());
+    QTest::mouseClick(acknowledge, Qt::LeftButton);
+    QCOMPARE(unackedCount(), 2);
+    // With only unacknowledged alarms listed, the acknowledged row leaves the
+    // list; a second click must not acknowledge the row that becomes current.
+    dialog->findChild<QCheckBox*>("activeUnacknowledgedOnly")->setChecked(true);
+    table->selectRow(0);
+    QVERIFY(acknowledge->isEnabled());
+    QTest::mouseClick(acknowledge, Qt::LeftButton);
+    QCOMPARE(unackedCount(), 1);
+    QCOMPARE(table->model()->rowCount(), 1);
+    QVERIFY(!acknowledge->isEnabled());
+    QTest::mouseClick(acknowledge, Qt::LeftButton);
+    QCOMPARE(unackedCount(), 1);
+  }
   void activeAlarmFilterMatchesAliasedPv() {
     auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root unique:pv\n$ALIAS Pressure gauge\n"), options(false), false);
     w->alarmEngine().event(w->document().channels()[0], {3, 2, 2, 1, "12"});

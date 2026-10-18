@@ -142,11 +142,13 @@ protected:
     return QSortFilterProxyModel::filterAcceptsRow(row, parent);
   }
 };
-QVector<Node*> selectedNodes(QAbstractItemView* view) {
+// Acknowledge passes orCurrent = false: it acts only on highlighted rows, never
+// on a current row the operator deselected or that replaced a removed row.
+QVector<Node*> selectedNodes(QAbstractItemView* view, bool orCurrent = true) {
   QVector<Node*> nodes;
   for (const auto& index : view->selectionModel()->selectedRows())
     if (auto n = nodeOf(index.data(Qt::UserRole))) nodes << n;
-  if (nodes.isEmpty() && view->currentIndex().isValid())
+  if (orCurrent && nodes.isEmpty() && view->currentIndex().isValid())
     if (auto n = nodeOf(view->currentIndex().siblingAtColumn(0).data(Qt::UserRole))) nodes << n;
   return nodes;
 }
@@ -365,10 +367,10 @@ void Window::showActiveAlarms() {
   dialogActions(layout, dialog, QDialogButtonBox::Close,
                 "active-alarms");
   auto updateButtons = [=] {
-    const auto nodes = selectedNodes(table);
     bool unack = false;
-    for (auto n : nodes) unack |= engine->state(n).unack != 0;
+    for (auto n : selectedNodes(table, false)) unack |= engine->state(n).unack != 0;
     acknowledge->setEnabled(unack && !options.engine.passive);
+    const auto nodes = selectedNodes(table);
     for (auto button : {guidanceButton, details, showButton}) button->setEnabled(nodes.size() == 1);
   };
   connect(table->selectionModel(), &QItemSelectionModel::selectionChanged, dialog, updateButtons);
@@ -378,7 +380,7 @@ void Window::showActiveAlarms() {
     proxy->setUnacknowledgedOnly(on);
   });
   connect(acknowledge, &QPushButton::clicked, dialog, [=] {
-    for (auto n : selectedNodes(table)) engine->acknowledge(n);
+    for (auto n : selectedNodes(table, false)) engine->acknowledge(n);
     refresh();
   });
   connect(guidanceButton, &QPushButton::clicked, dialog, [=] {
