@@ -220,6 +220,9 @@ private:
   // ACKT belongs to the IOC record, shared by its bare name and all fields.
   // CA does not expose the identity behind unrelated server-side record aliases.
   QHash<QString, PendingAckT> pendingForceAckT;
+  // Compare requests with the latest accepted intent/record observation, not
+  // another display row's mask while its own monitor is still catching up.
+  QHash<QString, bool> acceptedAckT, observedRecordAckT;
   quint64 nextAckTRequest = 0;
   struct ForceRuntime;
   // Editable directives do not own live CALC variables or subscription lifetimes.

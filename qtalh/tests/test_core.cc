@@ -735,6 +735,41 @@ private slots:
     n->setOption("ACKPV", "replacement 8"); pv.writes.clear(); pv.unwritable.clear();
     QVERIFY(!e.retryAckValue(id)); QVERIFY(pv.writes.isEmpty()); QVERIFY(e.pendingAckValues().isEmpty());
   }
+  void duplicateRowAckTLatestAcceptedRequestWins_data() {
+    QTest::addColumn<QString>("first"); QTest::addColumn<QString>("second");
+    QTest::addColumn<bool>("confirmed");
+    for (const auto first : {"shared", "shared.VAL"})
+      for (const auto second : {"shared", "shared.VAL", "shared.DESC"})
+        for (bool confirmed : {false, true})
+          QTest::newRow(qPrintable(QString("%1-%2-%3").arg(first, second).arg(confirmed)))
+              << QString(first) << QString(second) << confirmed;
+  }
+  void duplicateRowAckTLatestAcceptedRequestWins() {
+    QFETCH(QString, first); QFETCH(QString, second); QFETCH(bool, confirmed);
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root " + first + "\nCHANNEL root " + second + "\n");
+    FakePv pv; Engine e(d, {true}, &pv); auto a = d.channels()[0], b = d.channels()[1];
+    e.event(a, {}); e.event(b, {});
+    e.setMask(a, Mask::parse("T"));
+    QVERIFY(e.state(a).mask[AckT]); QVERIFY(!e.state(b).mask[AckT]);
+    if (confirmed) e.event(a, {0, 0, 0, 0, "normal"});
+    e.setMask(b, Mask::parse("-")); // This matches b's stale display, but reverses the last request.
+    QCOMPARE(pv.writes.size(), 2); QCOMPARE(pv.writes[0].value, 0.0);
+    QCOMPARE(pv.writes[1].name, second); QCOMPARE(pv.writes[1].value, 1.0);
+    QCOMPARE(pv.writes[1].kind, WriteKind::AckTransient);
+    QVERIFY(!e.state(b).mask[AckT]);
+    e.event(a, {}); e.event(b, {}); e.tick(); QCOMPARE(pv.writes.size(), 2);
+    QVERIFY(!e.state(a).mask[AckT]); QVERIFY(!e.state(b).mask[AckT]);
+  }
+  void failedOppositeAckTRequestKeepsAcceptedIntent() {
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root shared\nCHANNEL root shared.VAL\n");
+    FakePv pv; Engine e(d, {true}, &pv); auto a = d.channels()[0], b = d.channels()[1];
+    e.event(a, {}); e.event(b, {}); e.setMask(a, Mask::parse("T"));
+    pv.unwritable.insert(b->name); e.setMask(b, Mask::parse("-"));
+    QCOMPARE(pv.writes.size(), 2); QCOMPARE(pv.writes.last().value, 1.0);
+    pv.unwritable.clear(); e.tick(); QCOMPARE(pv.writes.size(), 2);
+    e.setMask(b, Mask::parse("-")); QCOMPARE(pv.writes.size(), 3);
+    QCOMPARE(pv.writes.last().value, 1.0); // Explicit retry still reverses the accepted request.
+  }
   void topLevelNullParentsMatchIncludes() {
     const QString body = "GROUP NULL branch\n$BEEPSEVR MAJOR\n$FORCEPV gate D 1 0\n"
         "CHANNEL branch direct\nGROUP NULL leaf\nCHANNEL leaf nested\n";

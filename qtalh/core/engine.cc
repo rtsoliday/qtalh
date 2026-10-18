@@ -303,6 +303,8 @@ void Engine::stop() {
   heartbeatDue = 0;
   heartbeatUnavailable = false;
   pendingForceAckT.clear();
+  acceptedAckT.clear();
+  observedRecordAckT.clear();
   pendingAckValueActions.clear();
   if (running && pv)
     pv->clear();
@@ -410,8 +412,14 @@ void Engine::process(Node* n, Event e, qint64 time, int monitorSeverity) {
   s.awaitingObservation = false;
   s.value = e.value;
   if (options.global) {
-    if (e.ackt >= 0)
+    if (e.ackt >= 0) {
       s.mask[AckT] = !e.ackt;
+      const auto record = acknowledgementIdentity(n->name);
+      observedRecordAckT.insert(record, !e.ackt);
+      const auto accepted = acceptedAckT.constFind(record);
+      if (accepted != acceptedAckT.cend() && accepted.value() == !e.ackt)
+        acceptedAckT.remove(record);
+    }
     // Fix an ALH bug: synthetic connection/access errors carry ACKS=0, which
     // used to silence ERROR and hide it in the unacknowledged filter. Latch
     // these errors locally without replacing the last IOC acknowledgement.
@@ -803,19 +811,18 @@ bool Engine::applyMask(Node* n, Mask requested, bool automatic, Node* forceSourc
     // afterward. Failed writes leave the displayed setting unchanged/retryable.
     // Before an IOC monitor arrives, the configured bit is only a placeholder.
     // An automatic force must write (or defer) even if that bit already matches.
-    // Possible inherited ALH bug, deferred: after a successful ACKT submission
-    // through one row, another row for the same record still has its old mask
-    // until the IOC confirms it. A later request matching that stale mask is
-    // skipped here, leaving the earlier setting applied. Track successful
-    // outstanding requests per record when deciding whether a write is a
-    // no-op in a later change; retain current runtime mask behavior for now.
+    const auto record = acknowledgementIdentity(c->name);
+    const bool priorAckT = acceptedAckT.value(record, observedRecordAckT.value(record, old.mask[AckT]));
     if (options.global && !options.passive &&
-        (mask[AckT] != old.mask[AckT] || (automatic && old.observedAckT < 0)) &&
-        (!pv || !pv->put(c->name, !mask[AckT], WriteKind::AckTransient))) {
-      if (automatic && !options.passive)
-        pendingForceAckT.insert(acknowledgementIdentity(c->name), {forceSource, c, mask[AckT], request});
-      mask[AckT] = old.mask[AckT];
-      ackTFailed = true;
+        (mask[AckT] != priorAckT || (automatic && old.observedAckT < 0))) {
+      if (pv && pv->put(c->name, !mask[AckT], WriteKind::AckTransient)) {
+        acceptedAckT.insert(record, mask[AckT]);
+      } else {
+        if (automatic)
+          pendingForceAckT.insert(record, {forceSource, c, mask[AckT], request});
+        mask[AckT] = old.mask[AckT];
+        ackTFailed = true;
+      }
     }
     // Possible inherited ALH bug, deferred: enabling local NoAckT changes the
     // bit without reconciling an already latched transient. A MAJOR -> normal
@@ -862,6 +869,7 @@ void Engine::retryForceWrites() {
     if (current == pendingForceAckT.cend() || current->request != pending.request)
       continue;
     pendingForceAckT.remove(acknowledgementIdentity(c->name));
+    acceptedAckT.insert(acknowledgementIdentity(c->name), pending.mask);
     State before = states[c];
     // Preserve per-row display behavior: update the requesting row here; other
     // monitored rows learn the shared ACKT value from their IOC confirmations.

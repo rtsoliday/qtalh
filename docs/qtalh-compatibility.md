@@ -877,6 +877,13 @@ newer source's request, and group reset keeps its direct-channel-before-subgroup
 precedence. Successful writes are removed; other monitored rows update through
 IOC confirmations. Passive restrictions and startup ACKT precedence are unchanged.
 
+Accepted ACKT requests and the latest record-wide IOC observation are also
+retained while duplicate rows catch up. A rapid opposite request through a
+duplicate row is compared with that record state, rather than the row's stale
+mask, so the latest accepted request wins. Other rows retain their displayed
+feedback until their monitors confirm the setting; failed manual submissions
+still need an explicit retry.
+
 Force CALC retains received input values separately from its mutable calculation
 variables. Assignments to A through F can no longer make an unchanged callback
 advance the expression or make a genuine input change look unchanged. Only the
