@@ -936,7 +936,12 @@ build and requires EPICS 7 Base with pvAccess and pvData.
 Alarm status comes from the condition QSRV places in `alarm.message`, and
 values follow `display.precision`, as `DBR_STSACK_STRING` reports them through
 CA. Missing PVs report `NOT_CONNECTED` after one second, as with CA. Force
-inputs ignore alarm-only updates, as CA `DBE_VALUE` subscriptions do.
+inputs ignore updates that the server marks as alarm-only and updates that
+repeat the previous value. QSRV marks the value as changed on every alarm
+event, however. With a record deadband (MDEL > 0), an alarm transition can
+therefore deliver a value change that a CA `DBE_VALUE` subscription would not.
+That value can apply or reset a force mask, or advance a stateful CALC. Set
+MDEL to 0 when a `pva://` force input must behave like CA.
 
 QSRV rejects writes to ACKS/ACKT (`dbPut Attempt to modify noMod field`,
 verified with softIocPVA from Base 7.0), and PVA alarms carry no acknowledgement

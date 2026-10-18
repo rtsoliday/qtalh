@@ -452,7 +452,8 @@ void PvAccess::subscribe(Channel* c) {
   if (c->cancelled || !ops.channel || ops.monitor || (!c->alarm && !c->numeric && !c->text))
     return;
   // Alarm monitors follow value and alarm changes; force inputs use value
-  // changes only (see sample()), as Channel Access DBE_VALUE.
+  // changes only (see sample()). QSRV marks the value changed on every alarm
+  // event, so unlike CA DBE_VALUE a sub-deadband value can still arrive.
   try {
     ops.monitorSerial = ++nextId;
     ops.monitorRequester = std::make_shared<MonitorRequester>(inbox, c->id, ops.monitorSerial);
@@ -873,7 +874,8 @@ void PvAccess::sample(Channel* c, const Sample& s) {
     return;
   }
   if (c->numeric) {
-    // Alarm-only updates must not advance stateful CALC inputs.
+    // Updates the server marks as alarm-only must not advance stateful CALC
+    // inputs; the engine also ignores repeated values.
     if (!s.valueChanged)
       return;
     if (!s.numeric) {
