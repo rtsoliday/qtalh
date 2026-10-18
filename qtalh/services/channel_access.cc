@@ -382,14 +382,24 @@ void ChannelAccess::updated(Channel* c, const Callback& a) {
   if (clearing || c->cancelled)
     return;
   if (!a.data) {
-    // Possible inherited ALH bug, deferred: alarm monitor failures only report
-    // a diagnostic below, leaving the last alarm state and haveLast cache valid.
-    // A previously healthy channel can remain available with no ERROR latch.
-    // Address invalidation/error state and fresh-sample recovery in a later
-    // change; preserve the current alarm behavior here.
     if (c->numeric)
       numericUnavailable(c, "Monitor failed: " + QString::fromLocal8Bit(ca_message(a.status)));
-    else
+    else if (c->alarm) {
+      // A monitor failure ends the observation just like a read-access gap.
+      // Access-rights callbacks must not replay the preceding healthy sample;
+      // only a fresh successful subscription event may make it available again.
+      c->haveLast = false;
+      const auto serial = c->serial, epoch = c->epoch;
+      QPointer<ChannelAccess> self(this);
+      report(a.status == ECA_NORMAL ? ECA_GETFAIL : a.status, "Monitor " + c->name);
+      // A diagnostic may cancel the channel, replace its monitor, or destroy
+      // this adapter. Do not deliver the failed event to a replacement owner.
+      if (!self || !(c = channelsBySerial.value(serial)) || c->epoch != epoch ||
+          c->cancelled || clearing)
+        return;
+      if (const auto callback = c->alarm)
+        callback({READ_ALARM, 4, 0, -1, "0"});
+    } else
       report(a.status, "Monitor " + c->name);
     return;
   }

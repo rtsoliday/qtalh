@@ -39,6 +39,7 @@ public:
   void configureInitialAckT(const Document&);
 
 private:
+  friend struct ChannelAccessTestAccess;
   struct Channel {
     ChannelAccess* owner = nullptr;
     // Identifies the channel in queued callbacks; epoch changes when its

@@ -9,6 +9,36 @@
 #include <QThread>
 #include <QtTest>
 #include <cmath>
+namespace alh {
+// Exercise a failed subscription callback after a healthy sample without an
+// IOC-specific failure trigger. Inject its arguments privately, then use the
+// normal copied callback queue and dispatch path; no production injection API.
+struct ChannelAccessTestAccess {
+  static bool failAlarm(ChannelAccess& ca, const QString& name, int status) {
+    for (auto c : ca.channelsByName.value(name))
+      if (c->alarm && !c->cancelled) {
+        event_handler_args args{};
+        args.usr = c;
+        args.chid = c->id;
+        args.type = DBR_STSACK_STRING;
+        args.count = 1;
+        args.status = status;
+        ChannelAccess::update(args);
+        ca.dispatch();
+        return true;
+      }
+    return false;
+  }
+  static bool recheckRights(ChannelAccess& ca, const QString& name) {
+    for (auto c : ca.channelsByName.value(name))
+      if (c->alarm && !c->cancelled) {
+        ca.rightsChanged(c);
+        return true;
+      }
+    return false;
+  }
+};
+} // namespace alh
 using namespace alh;
 class IocTests : public QObject {
   Q_OBJECT
@@ -525,6 +555,80 @@ private slots:
     auto n = d.channels()[0];
     QTRY_VERIFY_WITH_TIMEOUT(e.state(n).initialized, 10000);
     QVERIFY(!ca.put(prefix + "readonly", 1));
+  }
+  void failedAlarmMonitorRequiresFreshSample_data() {
+    QTest::addColumn<bool>("global");
+    QTest::addColumn<int>("status");
+    QTest::newRow("local-failed-read") << false << int(ECA_GETFAIL);
+    QTest::newRow("global-failed-read") << true << int(ECA_GETFAIL);
+    QTest::newRow("local-missing-payload") << false << int(ECA_NORMAL);
+    QTest::newRow("global-missing-payload") << true << int(ECA_NORMAL);
+  }
+  void failedAlarmMonitorRequiresFreshSample() {
+    QFETCH(bool, global); QFETCH(int, status);
+    const auto name = prefix + "alarm";
+    ChannelAccess driver;
+    driver.prepare(name);
+    QTRY_VERIFY(driver.put(name, 0));
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root " + name + "\n");
+    ChannelAccess ca({global}); Engine e(d, {global}, &ca);
+    auto n = d.channels()[0];
+    QStringList errors;
+    ca.error = [&](const QString& text) { errors << text; };
+    e.start();
+    QTRY_COMPARE(e.state(n).severity, 0);
+    QTest::qWait(100); // Drain the initial healthy monitor and access events.
+    QVERIFY(e.channelUpdate(n).available);
+    QVERIFY(ChannelAccessTestAccess::failAlarm(ca, name, status));
+    QCOMPARE(errors.size(), 1);
+    QVERIFY(errors[0].contains("Monitor " + name));
+    QCOMPARE(severityName(e.state(n).severity), QString("ERROR"));
+    QCOMPARE(statusName(e.state(n).status), QString("READ"));
+    QCOMPARE(e.state(n).unack, 4);
+    QVERIFY(!e.channelUpdate(n).available);
+    // A rights notification without new data must not replay the old cache.
+    QVERIFY(ChannelAccessTestAccess::recheckRights(ca, name));
+    QCOMPARE(e.state(n).severity, 4);
+    QVERIFY(!e.channelUpdate(n).available);
+    QTest::qWait(100);
+    QCOMPARE(e.state(n).severity, 4);
+    QVERIFY(driver.put(name, 20));
+    QTRY_COMPARE(e.state(n).severity, 2);
+    QVERIFY(e.channelUpdate(n).available);
+    QVERIFY(driver.put(name, 0));
+    QTRY_COMPARE(e.state(n).severity, 0);
+    QVERIFY(e.channelUpdate(n).available);
+  }
+  void failedAlarmMonitorDiagnosticCanRemoveOwner_data() {
+    QTest::addColumn<QString>("action");
+    for (const auto& action : {"clear", "cancel", "replace", "destroy"})
+      QTest::newRow(action) << QString(action);
+  }
+  void failedAlarmMonitorDiagnosticCanRemoveOwner() {
+    QFETCH(QString, action);
+    const auto name = prefix + "alarm";
+    auto ca = std::make_unique<ChannelAccess>();
+    int events = 0, replacementErrors = 0, diagnostics = 0;
+    ca->monitor(name, [&](Event) { ++events; });
+    QTRY_VERIFY(events > 0);
+    QTest::qWait(100);
+    const auto before = events;
+    ca->error = [&](const QString&) {
+      ++diagnostics;
+      if (action == "clear") ca->clear();
+      else if (action == "cancel") ca->cancel(name);
+      else if (action == "destroy") ca.reset();
+      else {
+        ca->cancel(name);
+        ca->monitor(name, [&](Event event) { if (event.severity == 4) ++replacementErrors; });
+      }
+    };
+    QVERIFY(ChannelAccessTestAccess::failAlarm(*ca, name, ECA_GETFAIL));
+    QCOMPARE(diagnostics, 1);
+    QCOMPARE(events, before);
+    QCOMPARE(replacementErrors, 0);
+    QTest::qWait(100);
+    QCOMPARE(replacementErrors, 0);
   }
   void readAccessRecoveryRequiresFreshAlarm_data() {
     QTest::addColumn<bool>("global");
