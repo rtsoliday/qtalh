@@ -177,7 +177,9 @@ through `qmake6`, using its header, shared-library, and build-tool paths. Set
 `QMAKE6=/path/to/qmake6` for a custom installation. The fallback also supplies
 the build flags for QtALH, its helpers, and its tests; reinstalling the same Qt
 packages or changing `PKG_CONFIG_PATH` is unnecessary when `.pc` files are absent.
-`QT_VERSION=5` or `6` forces the choice. `MOC` and `RCC` can be
+`QT_VERSION=5` or `6` forces the choice. When it is given on the `make` command
+line and that Qt is not installed, the top-level build fails instead of skipping
+QtALH. `MOC` and `RCC` can be
 overridden for unusual installations and must match the selected Qt libraries.
 
 On Linux, the build prefers `/usr/bin/pkg-config` so an active Conda

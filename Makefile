@@ -9,7 +9,9 @@ else
 HAVE_MOTIF := $(if $(and $(XM_LIB),$(wildcard $(MOTIF_INC)/Xm/Xm.h)),1)
 endif
 .PHONY: all alh qtalh test-qtalh clean distclean check-dependencies
-all: check-dependencies $(if $(HAVE_MOTIF),alh) $(if $(HAVE_QT),qtalh)
+# An explicit QT_VERSION must build QtALH or fail; it is never skipped.
+QT_REQUESTED := $(filter command line,$(origin QT_VERSION))
+all: check-dependencies $(if $(HAVE_MOTIF),alh) $(if $(or $(HAVE_QT),$(QT_REQUESTED)),qtalh)
 	@$(if $(or $(HAVE_MOTIF),$(HAVE_QT)),:,false)
 
 # Complete notices before either recursive build, including with make -j.
@@ -41,7 +43,8 @@ endif
 	@echo "=========================================="
 	@echo ""
 endif
-ifeq ($(HAVE_QT),)
+# With an explicit QT_VERSION, the qtalh sub-make reports what is missing.
+ifeq ($(HAVE_QT)$(QT_REQUESTED),)
 	@echo ""
 	@echo "=========================================="
 	@echo "NOTE: Qt development libraries not found."
