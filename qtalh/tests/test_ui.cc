@@ -5402,6 +5402,11 @@ private slots:
     QTRY_COMPARE(actionValue, -1.0);
     QTest::qWait(300); QCOMPARE(actionValue, -1.0); // Recovery never submits an automatic replay.
     QCOMPARE(engine.pendingAckValues()[0].count, quint64(1));
+    // Now that a retry would succeed, Enter still must not press Retry ACKPV.
+    QVERIFY(retry->isEnabled());
+    QTest::keyClick(table, Qt::Key_Return); QTest::keyClick(table, Qt::Key_Enter);
+    QTest::qWait(300); QCOMPARE(actionValue, -1.0);
+    QCOMPARE(engine.pendingAckValues()[0].count, quint64(1));
     retry->click(); QTRY_COMPARE(actionValue, 7.0);
     QTRY_COMPARE(table->rowCount(), 0); QVERIFY(engine.pendingAckValues().isEmpty());
     QCOMPARE(engine.state(n).unack, 0);
