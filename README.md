@@ -20,6 +20,56 @@ PV names prefixed with `pva://` are monitored over pvAccess; all other names
 use Channel Access as in ALH (see
 [pvAccess channels](docs/qtalh-user-guide.md#pvaccess-channels)).
 
+## Feature tour
+
+These screenshots show the modern Qt 6 interface with an isolated accelerator
+demo. PVs, alarm events, operator names, and notification destinations are demo
+data; no live facility connections or notification deliveries were used.
+
+### See the facility at a glance
+
+Navigate the alarm hierarchy while keeping subsystem severity, outstanding
+acknowledgements, and shelved-channel counts in view. Select a group to inspect
+its channels, with guidance one click away.
+
+![QtALH facility overview with subsystem alarm colors and vacuum channel status](docs/screenshots/qtalh-overview.png)
+
+### Work from one active alarm queue
+
+The sortable, filterable Active Alarms table brings channels from across the
+configuration into one place. Select alarms to acknowledge them, read guidance
+and details, or jump to their location in the tree. Recovered alarms that still
+need acknowledgement remain visible.
+
+![Active Alarms table showing major, minor, acknowledged, and recovered alarms](docs/screenshots/qtalh-active-alarms.png)
+
+### Find noisy channels with session analytics
+
+Identify frequent offenders, chattering channels, standing alarms, and
+acknowledgement response times. Filter by time range or subsystem, then export
+tables and charts as CSV for further analysis.
+
+![Alarm Analytics showing frequent offenders, activation counts, and a session trend](docs/screenshots/qtalh-analytics.png)
+
+### Manage maintenance with timed shelving
+
+Shelve alarms with an operator name, a reason, and an expiry time. The shelf
+browser shows remaining time and current alarm state, with controls to change a
+shelf or end it early. Shelves expire automatically and apply only to the current
+runtime session.
+
+![Shelved Alarms browser showing maintenance reasons, expiry times, and operator names](docs/screenshots/qtalh-shelving.png)
+
+### Escalate alarms to the right people
+
+Opt-in personal notifications support email and webhook destinations. Match
+alarms by scope, PV wildcard, and severity; add delivery stages, repeat
+suppression, and optional resolution messages. This example sets stages at 60
+and 600 seconds, adding the shift lead at the second stage while an alarm remains
+eligible and unacknowledged.
+
+![Notification subscription with severity filtering and two escalation stages](docs/screenshots/qtalh-notifications.png)
+
 ## Documentation
 
 The [modern documentation site](https://qtalh-documentation.rtsoliday123.chatgpt.site)
