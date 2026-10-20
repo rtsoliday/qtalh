@@ -72,7 +72,9 @@ dev_flags = $(filter-out -O% -g% /O% -Ox -GL /GL,$(1)) $(if $(filter Windows,$(O
 build_comma := ,
 EPICS_SHARED_EXT = $(if $(filter Darwin,$(OS)),dylib,so)
 find_epics_host_arch = $(firstword $(wildcard $(addprefix $(1)/,lib/perl/EpicsHostArch.pl src/tools/EpicsHostArch.pl startup/EpicsHostArch.pl)))
-epics_readline = $(if $(shell nm -u "$(1)/libCom.a" 2>/dev/null | sed -n '/ U _\{0,1\}\(readline\|rl_readline_name\)$$/p'),-lreadline)
+NM ?= nm
+# GNU nm prefixes undefined symbols with U; Apple nm -u prints just the name.
+epics_readline = $(if $(shell $(NM) -u "$(1)/libCom.a" 2>/dev/null | awk '$$NF ~ /^_?(readline|rl_readline_name)$$/ { print; exit }'),$(EPICS_READLINE_LINK_LIBS))
 epics_rpath = $(if $(filter %.$(EPICS_SHARED_EXT),$(1)),-Wl$(build_comma)-rpath$(build_comma)$(2))
 
 # A recognized build environment takes precedence over a mounted site tree.
@@ -350,6 +352,16 @@ endif
 
 # EPICS Base discovery is independent of the extensions installation directory.
 ifneq ($(or $(EPICS_BASE),$(EPICS_REQUIRED_LIBS),$(EPICS_OPTIONAL_LIBS)),)
+# The macOS system Readline shim lacks some GNU Readline symbols used by Base.
+# Prefer standalone Readline, and include its terminal library for static links.
+EPICS_READLINE_LINK_LIBS = -lreadline
+ifeq ($(OS),Darwin)
+EPICS_READLINE_DIRS ?= /opt/local/lib /opt/homebrew/opt/readline/lib /usr/local/opt/readline/lib
+EPICS_READLINE_LIBRARY ?= $(firstword $(foreach directory,$(EPICS_READLINE_DIRS),$(wildcard $(directory)/libreadline.a $(directory)/libreadline.dylib)) -lreadline)
+EPICS_READLINE_TERM_DIRS ?= /opt/local/lib /opt/homebrew/opt/ncurses/lib /usr/local/opt/ncurses/lib
+EPICS_READLINE_TERMINAL_LIBS ?= $(if $(filter %.dylib,$(EPICS_READLINE_LIBRARY)),,$(firstword $(foreach directory,$(EPICS_READLINE_TERM_DIRS),$(wildcard $(directory)/libncurses.a $(directory)/libncurses.dylib)) -lncurses))
+EPICS_READLINE_LINK_LIBS = $(EPICS_READLINE_LIBRARY) $(EPICS_READLINE_TERMINAL_LIBS)
+endif
 EPICS_SEARCH_PATHS ?= /usr/local/oag/base $(RULES_DIR)epics-base $(RULES_DIR)../epics-base $(RULES_DIR)../../../base $(HOME)/epics/base $(HOME)/epics/base-7.0
 EPICS_BASE ?= $(firstword $(foreach b,$(EPICS_SEARCH_PATHS),$(if $(wildcard $(b)/include/cadef.h),$(b))))
 ifneq ($(strip $(EPICS_BASE)),)
