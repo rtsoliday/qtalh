@@ -87,6 +87,9 @@ endif
 	$(MAKE) -C qtalh $@
 
 # Build the standalone documentation site without Qt or EPICS.
+# Cleanup uses Python 3 on PATH, independent of the toolkit interpreter.
+# An explicit command-line PYTHON setting still takes precedence.
+docs-clean docs-distclean: PYTHON = $(if $(filter Windows,$(OS)),python,python3)
 .PHONY: docs
 DOCS_BASE ?= /
 docs:
