@@ -33,7 +33,7 @@ $(OBJ_DIR)/services/pv_access.obj $(OBJ_DIR)/tests/test_pva.obj: CXXFLAGS += /Zc
 .PHONY: all clean distclean test test-core test-ui test-ioc test-helpers test-visual benchmark-cpu FORCE
 PROD = qtalh
 $(OBJ_DIR)/qtalh.exe: $(OBJECTS) $(OBJ_DIR)/main.obj
-	$(LINKEXE) $(LDFLAGS) /OUT:$@ $^ $(LIBS)
+	$(LINKEXE) $(LDFLAGS) /OUT:$@ $(filter %.$(OBJEXT),$^) $(LIBS)
 $(OBJ_DIR)/tests/%.obj: tests/%.cc $(HEADERS) $(TEST_HEADERS) $(BUILD_FILES)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CPPFLAGS) $(INCLUDES) $(QT_CFLAGS) $(QT_TEST_CFLAGS) $(CXXFLAGS) /c $< /Fo$@
@@ -93,7 +93,7 @@ OBJECTS = $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o) $(SERVICES:.cc=.o) $(GUI:.cc=.o
 PROD = qtalh qtalh_printer qtalh_DB
 .PHONY: all test test-core test-ui test-ioc test-helpers clean distclean
 $(OBJ_DIR)/qtalh: $(OBJECTS)
-	$(CXX) $(LDFLAGS) -o $@ $^ $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(LDLIBS)
+	$(CXX) $(LDFLAGS) -o $@ $(filter %.$(OBJEXT),$^) $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(LDLIBS)
 # Keep the test rule first for macOS GNU Make 3.81, which uses rule order.
 $(OBJ_DIR)/tests/%.o: tests/%.cc $(BUILD_FILES)
 	@mkdir -p $(dir $@)
