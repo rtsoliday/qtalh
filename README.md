@@ -247,12 +247,9 @@ line and that Qt is not installed, the top-level build fails instead of skipping
 QtALH. `MOC` and `RCC` can be
 overridden for unusual installations and must match the selected Qt libraries.
 
-On Linux, the build prefers `/usr/bin/pkg-config` and `/usr/bin/qmake6` so an
-active Conda environment does not select Conda's Qt through its `pkg-config`
-wrapper or `qmake6`. The build also stops if the Qt modules found through
-`PKG_CONFIG_PATH` come from more than one installation, or if Qt include, library
-or tool paths (or `CPPFLAGS`/`LDFLAGS`) point into the active Conda environment
-(`CONDA_PREFIX`); pass `QTALH_ALLOW_CONDA=1` to build against a Conda Qt on purpose.
+On Linux, the build prefers `/usr/bin/pkg-config` and `/usr/bin/qmake6`.
+The build stops if the Qt modules found through `PKG_CONFIG_PATH` come from
+more than one installation.
 This also applies inside `rhel8-shell`, where `/usr` refers to the container.
 To select another installation, set `PKG_CONFIG` and, if needed,
 `PKG_CONFIG_PATH` explicitly, for example `make -j4 PKG_CONFIG=/path/to/pkg-config`.

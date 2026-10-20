@@ -36,8 +36,7 @@ Changes that operators and site maintainers should review before deployment:
 - As in ALH, runtime File → Open replaces the monitored configuration, and with
   `-B` SIGINT (Ctrl-C) exits without confirmation once this instance's
   broadcast has been delivered.
-- The build ignores a `qmake6` found only through `PATH`, refuses Qt from an
-  active Conda environment unless `QTALH_ALLOW_CONDA=1`, and refuses Qt
+- The build ignores a `qmake6` found only through `PATH` and refuses Qt
   modules mixed from different installations.
 
 Additional 1.0.0 audit decisions and corrections:

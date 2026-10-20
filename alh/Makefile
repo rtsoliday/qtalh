@@ -75,7 +75,7 @@ ifeq ($(I_WANT_CMLOG),YES)
   USR_LDFLAGS_solaris =  -R$(cmlog_DIR)
 
   LINK.c = $(LINK.cc)
-  CPLUSPLUS = CCC
+  CPLUSPLUS = CXX
 endif
 
 .PHONY:	libcmlog.a
@@ -201,7 +201,15 @@ alh.res:../version.h
 
 else
 .DEFAULT_GOAL := all
+QT_MODULES :=
+EPICS_REQUIRED_LIBS := ca Com
+MOTIF_REQUIRED := 1
 include ../Makefile.rules
+ifneq ($(OS),Windows)
+CFLAGS += -std=gnu99
+endif
+
+ALH_HELP_URL ?= https://epics.anl.gov/EpicsDocumentation/ExtensionsManuals/AlarmHandler/current/ALHUserGuide.html
 
 ALH_SRCS = alCA.c acknowledge.c alAudio.c alarm.c alCaCommon.c \
   alConfig.c alFilter.c alLib.c alLog.c alView.c \
@@ -227,6 +235,18 @@ $(OBJ_DIR)/alh_DB: $(OBJ_DIR)/alh_DB.o
 
 $(OBJ_DIR)/awAlh.o: ALH_CPPFLAGS += -DALH_HELP_URL='"$(ALH_HELP_URL)"'
 
+RPC_CFLAGS ?= $(if $(filter-out Darwin,$(OS)),$(shell $(PKG_CONFIG) --cflags libtirpc 2>/dev/null))
+RPC_LIBS ?= $(if $(filter-out Darwin,$(OS)),$(shell $(PKG_CONFIG) --libs libtirpc 2>/dev/null))
+ALH_CPPFLAGS = -D_DEFAULT_SOURCE -I. -Ios/$(OS) -Ios/default $(EPICS_INCLUDES) $(addprefix -I,$(MOTIF_INC) $(X11_INC)) $(RPC_CFLAGS)
+vpath %.c os/$(OS) os/default
+alh_OBJS = $(ALH_OBJS)
+alh_LIBS = $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(X_LIBS) $(LDLIBS)
+alh_printer_OBJS = $(OBJ_DIR)/printer.o
+alh_printer_LIBS = $(LDLIBS)
+alh_DB_OBJS = $(OBJ_DIR)/alh_DB.o
+alh_DB_LIBS = $(RPC_LIBS) $(LDLIBS)
+BUILD_CONFIG_VARIABLES += ALH_HELP_URL RPC_CFLAGS RPC_LIBS
 EXTRA_CFLAGS = $(ALH_CPPFLAGS)
+CUSTOM_LINK_PRODUCTS += alh alh_printer alh_DB
 include ../Makefile.build
 endif

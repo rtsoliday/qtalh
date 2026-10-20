@@ -1,6 +1,16 @@
 .DEFAULT_GOAL := all
-QTALH_GUI := 1
+QT_REQUIRED := 1
+QT_MODULES := Core Gui Widgets Network PrintSupport Multimedia
+EPICS_REQUIRED_LIBS := pvAccess pvData ca Com
 include ../Makefile.rules
+ifeq ($(OS),Windows)
+OBJ_DIR = O.$(OS)-$(ARCH)-qt$(QT_VERSION)
+CPPFLAGS += -DNOMINMAX -D_CRT_SECURE_NO_WARNINGS
+QT_QPA_FONTDIR ?= $(subst \,/,$(SystemRoot))/Fonts
+INCLUDES = -I. -I$(OBJ_DIR) $(EPICS_INCLUDES)
+endif
+RPC_CFLAGS ?= $(if $(filter-out Darwin Windows,$(OS)),$(shell $(PKG_CONFIG) --cflags libtirpc 2>/dev/null))
+RPC_LIBS ?= $(if $(filter-out Darwin Windows,$(OS)),$(shell $(PKG_CONFIG) --libs libtirpc 2>/dev/null))
 HELP_DOCS = ../docs/qtalh-user-guide.md $(addprefix ../docs/site/,\
             operate/alarm-tools.md operate/logs.md operate/notifications.md \
             operate/analytics.md configure/editor.md configure/masks.md \
@@ -75,20 +85,6 @@ test-ui-motif: $(OBJ_DIR)/test_ui.exe
 	@QT_QPA_PLATFORM=offscreen QT_QPA_FONTDIR="$(QT_QPA_FONTDIR)" QTALH_TEST_STYLE=motif $(OBJ_DIR)/test_ui.exe -o $(OBJ_DIR)/test-artifacts/ui-motif.txt,txt; result=$$?; cat $(OBJ_DIR)/test-artifacts/ui-motif.txt; exit $$result
 else
 OBJ_DIR = O.$(OS)-$(ARCH)-qt$(QT_VERSION)
-CXXFLAGS ?= -O2 -g -Wall -Wextra -std=c++17 -fPIC
-ifneq ($(filter-out clean distclean,$(or $(MAKECMDGOALS),all)),)
-ifeq ($(filter $(QT_VERSION),5 6),)
-$(error QT_VERSION must be 5 or 6)
-endif
-ifeq ($(QT_VERSION),5)
-ifeq ($(shell $(PKG_CONFIG) --atleast-version=5.15 Qt5Core && echo yes),)
-$(error Qt 5.15 or newer is required)
-endif
-endif
-ifeq ($(HAVE_QT),)
-$(error Qt $(QT_VERSION) Widgets, Network, PrintSupport, and Multimedia development packages are required)
-endif
-endif
 INCLUDES = -I. -I$(OBJ_DIR) -I$(EPICS_BASE)/include -I$(EPICS_BASE)/include/compiler/$(EPICS_COMPILER) -I$(EPICS_BASE)/include/os/$(OS)
 CORE = core/analytics.cc core/model.cc core/config.cc core/engine.cc core/notifications.cc core/phoebus.cc
 SERVICES = services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/pv_access.cc services/pv_router.cc services/options.cc services/logging.cc services/ipc.cc
@@ -137,7 +133,7 @@ $(OBJ_DIR)/tests/test_pva.o: $(OBJ_DIR)/test_pva.moc
 $(OBJ_DIR)/test_pva: $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o)) $(OBJ_DIR)/services/pv_access.o $(OBJ_DIR)/tests/test_pva.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(call qt_libs,Test Core)
 .PHONY: test-pva test-build
-# Qt discovery checks (Conda qmake6/PKG_CONFIG_PATH); dry make queries, no compile.
+# Qt discovery checks for tool selection and matching module installations.
 test-build:
 	tests/test_build.sh
 test-pva: $(OBJ_DIR)/test_pva
@@ -213,5 +209,15 @@ endif
 
 CLEAN_DIRS = O.$(OS)-$(ARCH)-qt5 O.$(OS)-$(ARCH)-qt6
 EXTRA_CXX_OBJ_DEPS = $(HEADERS)
-CCFLAGS = $(CXXFLAGS) $(INCLUDES) $(QT_CFLAGS) $(RPC_CFLAGS)
+EXTRA_CXXFLAGS = $(INCLUDES) $(QT_CFLAGS) $(RPC_CFLAGS)
+qtalh_OBJS = $(OBJECTS) $(if $(filter Windows,$(OS)),$(OBJ_DIR)/main.obj)
+qtalh_LIBS = $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(LDLIBS)
+qtalh_printer_OBJS = $(OBJ_DIR)/printer_main.o $(OBJ_DIR)/services/ipc.o
+qtalh_printer_LIBS = $(call qt_libs,Core Network)
+qtalh_DB_OBJS = $(OBJ_DIR)/database_main.o $(OBJ_DIR)/services/ipc.o
+qtalh_DB_LIBS = $(call qt_libs,Core) $(RPC_LIBS)
+BUILD_GENERATED += $(OBJ_DIR)/resources.cc $(addprefix $(OBJ_DIR)/test_,core.moc ui.moc ioc.moc pva.moc helpers.moc notifications.moc analytics.moc visual.moc)
+BUILD_OBJECTS += $(addprefix $(OBJ_DIR)/tests/test_,core.$(OBJEXT) ui.$(OBJEXT) ioc.$(OBJEXT) pva.$(OBJEXT) helpers.$(OBJEXT) notifications.$(OBJEXT) analytics.$(OBJEXT) visual.$(OBJEXT))
+BUILD_CONFIG_VARIABLES += RPC_CFLAGS RPC_LIBS
+CUSTOM_LINK_PRODUCTS += qtalh qtalh_printer qtalh_DB
 include ../Makefile.build

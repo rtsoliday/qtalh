@@ -1,6 +1,8 @@
 # ALH and QtALH builds.
 .DEFAULT_GOAL := all
-QTALH_TOP_LEVEL := 1
+QT_MODULES := Core Gui Widgets Network PrintSupport Multimedia
+# Discover Base here; individual components enforce their own requirements.
+EPICS_OPTIONAL_LIBS := ca Com
 include Makefile.rules
 ifeq ($(OS),Windows)
 HAVE_MOTIF :=
