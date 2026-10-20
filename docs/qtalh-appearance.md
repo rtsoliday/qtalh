@@ -172,7 +172,7 @@ Ogg/Vorbis fixture twice with output muted. On macOS it runs this case in a
 native Cocoa child process so media callbacks receive the correct event loop.
 The recorded Radiation Monitors launch produced no sound-decoding error. Audible output
 through the operator's speakers still needs a listening check. See the
-[Qt audio overview](https://doc.qt.io/qt-6.10/audiooverview.html) for media-format
+[Qt audio overview](https://doc.qt.io/qt-6.12/audiooverview.html) for media-format
 support and backend requirements.
 
 

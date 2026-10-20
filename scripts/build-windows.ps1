@@ -35,7 +35,7 @@ $arguments = @('-C', $repositoryRoot, "-j$Jobs", 'OS=Windows', 'ARCH=x86_64',
 $env:PATH = "$cygwinBin;$(Split-Path $make);$env:PATH"
 
 if ($Target -ne 'clean') {
-  $qtRoot = if ($env:QT_DIR) { $env:QT_DIR } else { 'C:\Qt\6.11.2\msvc2022_64' }
+  $qtRoot = if ($env:QT_DIR) { $env:QT_DIR } else { 'C:\Qt\6.12.0\msvc2022_64' }
   $qtVersion = if ($env:QT_VERSION) { $env:QT_VERSION } else { '6' }
   if ($qtVersion -notin @('5', '6')) { throw 'QT_VERSION must be 5 or 6.' }
   $multimediaRoot = if ($env:QT_MULTIMEDIA_DIR) { $env:QT_MULTIMEDIA_DIR } else { $qtRoot }

@@ -117,14 +117,14 @@ From PowerShell or Command Prompt:
 .\build-windows.bat rebuild 4
 ```
 
-The launcher discovers Visual Studio and defaults to Qt
-`C:\Qt\6.11.2\msvc2022_64`, Cygwin `C:\cygwin64`, and the sibling
+The launcher discovers Visual Studio and defaults to Qt 6.12.0 LTS at
+`C:\Qt\6.12.0\msvc2022_64`, Cygwin `C:\cygwin64`, and the sibling
 `..\epics-base` checkout. Override `QT_DIR`, `QT_VERSION` (5 or 6), `EPICS_BASE`,
 `EPICS_HOST_ARCH`, `QTALH_CYGWIN_ROOT`, or `QTALH_MAKE_EXE` through environment
 variables. Qt 5 requires 5.15 or newer. `QT_MULTIMEDIA_DIR` can point to a
 separate matching Qt Multimedia SDK (same Qt version, MSVC kit and architecture).
 For an already configured MSVC/Cygwin shell, use
-`make -j4 OS=Windows ARCH=x86_64 QT_DIR=C:/Qt/6.11.2/msvc2022_64`.
+`make -j4 OS=Windows ARCH=x86_64 QT_DIR=C:/Qt/6.12.0/msvc2022_64`.
 Use dependency paths without spaces for EPICS Base and the repository.
 
 The output is `bin/Windows-x86_64/qtalh.exe`. To run it, add the Qt, Multimedia

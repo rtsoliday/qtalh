@@ -701,7 +701,7 @@ EXEEXT = $(if $(filter Windows,$(OS)),.exe)
 OUTPUT = $(if $(filter Windows,$(OS)),/Fo$@,-o $@)
 OUTPUTEXE = $(if $(filter Windows,$(OS)),-out:$@,-o $@)
 
-QT_DIR ?= C:/Qt/6.11.2/msvc2022_64
+QT_DIR ?= C:/Qt/6.12.0/msvc2022_64
 
 # These functions also serve SDDS components that select Qt themselves.
 qt_modules = $(sort $(1) Core $(if $(filter Widgets PrintSupport Multimedia,$(1)),Gui) $(if $(filter PrintSupport,$(1)),Widgets) $(if $(filter Multimedia,$(1)),Network))
