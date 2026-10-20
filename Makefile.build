@@ -172,7 +172,13 @@ BUILD_CONFIG_OBJECTS := $(sort $(BUILD_OBJECTS))
 BUILD_CONFIG_GENERATED := $(sort $(BUILD_GENERATED))
 .PHONY: force-build-config
 $(BUILD_CONFIG): force-build-config | $(OBJ_DIR)
+ifeq ($(OS),Windows)
+# Write directly from make to avoid Windows shell command limits. Recipe
+# functions also expand during dry runs, when OBJ_DIR may not exist.
+	$(if $(findstring n,$(firstword -$(MAKEFLAGS))),,$(file >$@.new,$(BUILD_CONFIG_VALUES)))
+else
 	@printf '%s\n' $(BUILD_CONFIG_VALUES) > $@.new
+endif
 	@if cmp -s $@.new $@; then rm -f $@.new; else mv -f $@.new $@; fi
 # Shared prerequisites cover custom recipes as well as pattern rules.
 $(BUILD_CONFIG_OBJECTS) $(BUILD_CONFIG_GENERATED): $(BUILD_FILES)
