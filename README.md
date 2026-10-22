@@ -211,6 +211,18 @@ Qt **6**, including Widgets, Network, PrintSupport, Multimedia, `moc`, and `rcc`
 Qt Test is needed for tests. Motif ALH needs Motif, X11, Xt and Xmu development
 files. Explicit Qt builds do not include or link Motif/Xt.
 
+SDDS export is optional. QtALH automatically enables binary SDDS snapshots and
+analytics exports when a quiet compile/link check finds compatible headers and
+libraries. It checks `SDDS_INCLUDE_DIR` plus `SDDS_LIB_DIR` overrides first,
+then the sibling `SDDS` checkout (`SDDS_REPO` overrides its root), configured
+EPICS extensions directories, and `/usr/local/epics/extensions`. Headers and
+core libraries must belong to the same installation; supporting SDDS libraries,
+compression libraries and their link dependencies must also be usable. Missing
+or incomplete installations silently omit the export controls. Availability is
+rechecked on subsequent builds without requiring `make clean`. Set both explicit
+directory overrides to nonexistent paths to build without SDDS. This applies to
+Linux, macOS and Windows; SDDS is never required for normal operation.
+
 On RHEL-family systems the Qt 5 packages include `qt5-qtbase-devel`,
 `qt5-qtmultimedia-devel` and `libtirpc-devel`. On Debian-family systems they
 include `qtbase5-dev`, `qtmultimedia5-dev`, and `libtirpc-dev`. Qt 6 equivalents

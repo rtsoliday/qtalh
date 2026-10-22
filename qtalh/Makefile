@@ -3,8 +3,9 @@ QT_REQUIRED := 1
 QT_MODULES := Core Gui Widgets Network PrintSupport Multimedia
 EPICS_REQUIRED_LIBS := pvAccess pvData ca Com
 include ../Makefile.rules
-ifeq ($(OS),Windows)
 OBJ_DIR = O.$(OS)-$(ARCH)-qt$(QT_VERSION)
+include build/sdds.mk
+ifeq ($(OS),Windows)
 CPPFLAGS += -DNOMINMAX -D_CRT_SECURE_NO_WARNINGS
 QT_QPA_FONTDIR ?= $(subst \,/,$(SystemRoot))/Fonts
 INCLUDES = -I. -I$(OBJ_DIR) $(EPICS_INCLUDES)
@@ -19,13 +20,13 @@ ifeq ($(OS),Windows)
 # Native Windows Base uses DLL import libraries, including pvData static data.
 CPPFLAGS += -DEPICS_CALL_DLL
 CORE = core/analytics.cc core/model.cc core/config.cc core/engine.cc core/notifications.cc core/phoebus.cc
-SERVICES = services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/pv_access.cc services/pv_router.cc services/options.cc services/logging.cc services/ipc.cc
+SERVICES = services/sdds_export.cc services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/pv_access.cc services/pv_router.cc services/options.cc services/logging.cc services/ipc.cc
 GUI = ui/analytics.cc ui/notifications.cc ui/appearance.cc ui/workflows.cc ui/tools.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc ui/help.cc ui/about_banner.cc
 OBJECTS = $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.obj) $(SERVICES:.cc=.obj) $(GUI:.cc=.obj)) $(OBJ_DIR)/resources.obj
 # MSVC does not emit GCC-style .d files. Rebuild on project header changes.
 HEADERS = $(wildcard core/*.h services/*.h ui/*.h)
 TEST_HEADERS = $(wildcard tests/*.h)
-LIBS = advapi32.lib $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(LDLIBS)
+LIBS = advapi32.lib $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(LDLIBS) $(SDDS_LINK_LIBS)
 # pvData needs delayed template parsing, while Qt 6.11 requires /permissive-.
 # Limit the EPICS compatibility option to translation units using its headers.
 $(OBJ_DIR)/services/pv_access.obj $(OBJ_DIR)/tests/test_pva.obj: CXXFLAGS += /Zc:twoPhase-
@@ -46,11 +47,11 @@ $(OBJ_DIR)/test_%.moc: tests/test_%.cc $(HEADERS) $(TEST_HEADERS) $(BUILD_FILES)
 	@mkdir -p $(OBJ_DIR)
 	$(MOC) -D_WIN32 $(CPPFLAGS) $(INCLUDES) $(QT_CFLAGS) $< -o $@
 
-TESTS = core ui ioc pva helpers notifications analytics
+TESTS = core ui ioc pva helpers notifications analytics sdds
 define test_rules
 $(OBJ_DIR)/tests/test_$(1).obj: $(OBJ_DIR)/test_$(1).moc
 $(OBJ_DIR)/test_$(1).exe: $(OBJECTS) $(OBJ_DIR)/tests/test_$(1).obj
-	$$(LINKEXE) $$(LDFLAGS) /OUT:$$@ $$^ $$(LIBS) $$(QT_TEST_LIBS)
+	$$(LINKEXE) $$(LDFLAGS) /OUT:$$@ $$(filter %.$$(OBJEXT),$$^) $$(LIBS) $$(QT_TEST_LIBS)
 test-$(1): $(OBJ_DIR)/test_$(1).exe
 	@mkdir -p $(OBJ_DIR)/test-artifacts
 	@QT_QPA_PLATFORM=offscreen QT_QPA_FONTDIR="$(QT_QPA_FONTDIR)" $(OBJ_DIR)/test_$(1).exe -o $(OBJ_DIR)/test-artifacts/$(1).txt,txt; result=$$$$?; cat $(OBJ_DIR)/test-artifacts/$(1).txt; exit $$$$result
@@ -62,7 +63,7 @@ test-visual:
 	@echo "Visual comparisons require Motif ALH and X11 on Linux/macOS."
 	@exit 1
 $(OBJ_DIR)/benchmark_cpu.exe: $(OBJECTS) $(OBJ_DIR)/tests/benchmark_cpu.obj
-	$(LINKEXE) $(LDFLAGS) /OUT:$@ $^ $(LIBS)
+	$(LINKEXE) $(LDFLAGS) /OUT:$@ $(filter %.$(OBJEXT),$^) $(LIBS)
 benchmark-cpu: $(OBJ_DIR)/benchmark_cpu.exe
 	QT_QPA_PLATFORM=offscreen $< 10000 idle 10
 	QT_QPA_PLATFORM=offscreen $< 10000 updates 10
@@ -71,7 +72,7 @@ benchmark-cpu: $(OBJ_DIR)/benchmark_cpu.exe
 $(OBJ_DIR)/tests/test_visual.obj: $(OBJ_DIR)/test_visual.moc
 $(OBJ_DIR)/tests/test_visual.obj: CPPFLAGS += -DTEST_OUTPUT='"$(abspath $(OBJ_DIR)/test-artifacts)"'
 $(OBJ_DIR)/test_visual.exe: $(OBJECTS) $(OBJ_DIR)/tests/test_visual.obj
-	$(LINKEXE) $(LDFLAGS) /OUT:$@ $^ $(LIBS) $(QT_TEST_LIBS)
+	$(LINKEXE) $(LDFLAGS) /OUT:$@ $(filter %.$(OBJEXT),$^) $(LIBS) $(QT_TEST_LIBS)
 .PHONY: test-gallery test-ui-fusion test-ui-motif
 test-gallery: $(OBJ_DIR)/test_visual.exe
 	QT_QPA_PLATFORM=offscreen QT_QPA_FONTDIR="$(QT_QPA_FONTDIR)" $< dialogGallery
@@ -84,16 +85,15 @@ test-ui-motif: $(OBJ_DIR)/test_ui.exe
 	@mkdir -p $(OBJ_DIR)/test-artifacts
 	@QT_QPA_PLATFORM=offscreen QT_QPA_FONTDIR="$(QT_QPA_FONTDIR)" QTALH_TEST_STYLE=motif $(OBJ_DIR)/test_ui.exe -o $(OBJ_DIR)/test-artifacts/ui-motif.txt,txt; result=$$?; cat $(OBJ_DIR)/test-artifacts/ui-motif.txt; exit $$result
 else
-OBJ_DIR = O.$(OS)-$(ARCH)-qt$(QT_VERSION)
 INCLUDES = -I. -I$(OBJ_DIR) -I$(EPICS_BASE)/include -I$(EPICS_BASE)/include/compiler/$(EPICS_COMPILER) -I$(EPICS_BASE)/include/os/$(OS)
 CORE = core/analytics.cc core/model.cc core/config.cc core/engine.cc core/notifications.cc core/phoebus.cc
-SERVICES = services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/pv_access.cc services/pv_router.cc services/options.cc services/logging.cc services/ipc.cc
+SERVICES = services/sdds_export.cc services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/pv_access.cc services/pv_router.cc services/options.cc services/logging.cc services/ipc.cc
 GUI = ui/analytics.cc ui/notifications.cc ui/appearance.cc ui/workflows.cc ui/tools.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc ui/help.cc ui/about_banner.cc main.cc
 OBJECTS = $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o) $(SERVICES:.cc=.o) $(GUI:.cc=.o)) $(OBJ_DIR)/resources.o
 PROD = qtalh qtalh_printer qtalh_DB
 .PHONY: all test test-core test-ui test-ioc test-helpers clean distclean
 $(OBJ_DIR)/qtalh: $(OBJECTS)
-	$(CXX) $(LDFLAGS) -o $@ $(filter %.$(OBJEXT),$^) $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(LDLIBS)
+	$(CXX) $(LDFLAGS) -o $@ $(filter %.$(OBJEXT),$^) $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(LDLIBS) $(SDDS_LINK_LIBS)
 # Keep the test rule first for macOS GNU Make 3.81, which uses rule order.
 $(OBJ_DIR)/tests/%.o: tests/%.cc $(BUILD_FILES)
 	@mkdir -p $(dir $@)
@@ -116,7 +116,7 @@ $(OBJ_DIR)/test_ui.moc: tests/test_ui.cc
 $(OBJ_DIR)/tests/test_ui.o: $(OBJ_DIR)/test_ui.moc
 $(OBJ_DIR)/tests/test_ui.o: CPPFLAGS += -DTEST_OUTPUT='"$(abspath $(OBJ_DIR)/test-artifacts)"' -DEPICS_TEST_BIN='"$(EPICS_BASE)/bin/$(EPICS_HOST_ARCH)"'
 $(OBJ_DIR)/test_ui: $(filter-out $(OBJ_DIR)/main.o,$(OBJECTS)) $(OBJ_DIR)/tests/test_ui.o
-	$(CXX) $(LDFLAGS) -o $@ $^ $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(call qt_libs,Test)
+	$(CXX) $(LDFLAGS) -o $@ $(filter %.$(OBJEXT),$^) $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(SDDS_LINK_LIBS) $(call qt_libs,Test)
 test-ui: $(OBJ_DIR)/qtalh $(OBJ_DIR)/test_ui
 	QT_QPA_PLATFORM=offscreen $(OBJ_DIR)/test_ui
 $(OBJ_DIR)/test_ioc.moc: tests/test_ioc.cc
@@ -151,7 +151,17 @@ $(OBJ_DIR)/test_helpers: $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o)) $(OBJ_DIR)/serv
 test-helpers: all $(OBJ_DIR)/test_helpers
 	$(OBJ_DIR)/test_helpers
 
-test: test-core test-ui test-ui-motif test-ioc test-pva test-helpers test-notifications test-analytics
+test: test-core test-ui test-ui-motif test-ioc test-pva test-helpers test-notifications test-analytics test-sdds
+
+$(OBJ_DIR)/test_sdds.moc: tests/test_sdds.cc
+	@mkdir -p $(OBJ_DIR)
+	$(MOC) $(CPPFLAGS) $(INCLUDES) $(QT_CFLAGS) $< -o $@
+$(OBJ_DIR)/tests/test_sdds.o: $(OBJ_DIR)/test_sdds.moc
+$(OBJ_DIR)/test_sdds: $(filter-out $(OBJ_DIR)/main.o,$(OBJECTS)) $(OBJ_DIR)/tests/test_sdds.o
+	$(CXX) $(LDFLAGS) -o $@ $(filter %.$(OBJEXT),$^) $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(SDDS_LINK_LIBS) $(call qt_libs,Test)
+.PHONY: test-sdds
+test-sdds: $(OBJ_DIR)/test_sdds
+	QT_QPA_PLATFORM=offscreen $(OBJ_DIR)/test_sdds
 
 $(OBJ_DIR)/test_analytics.moc: tests/test_analytics.cc
 	@mkdir -p $(OBJ_DIR)
@@ -184,7 +194,7 @@ $(OBJ_DIR)/test_visual.moc: tests/test_visual.cc
 $(OBJ_DIR)/tests/test_visual.o: $(OBJ_DIR)/test_visual.moc
 $(OBJ_DIR)/tests/test_visual.o: CPPFLAGS += -DTEST_BIN_DIR='"$(abspath $(BIN_DIR))"' -DEPICS_TEST_BIN='"$(EPICS_BASE)/bin/$(EPICS_HOST_ARCH)"' -DTEST_OUTPUT='"$(abspath $(OBJ_DIR)/test-artifacts)"'
 $(OBJ_DIR)/test_visual: $(filter-out $(OBJ_DIR)/main.o,$(OBJECTS)) $(OBJ_DIR)/tests/test_visual.o
-	$(CXX) $(LDFLAGS) -o $@ $^ $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(call qt_libs,Test)
+	$(CXX) $(LDFLAGS) -o $@ $(filter %.$(OBJEXT),$^) $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(SDDS_LINK_LIBS) $(call qt_libs,Test)
 .PHONY: test-visual test-gallery test-ui-fusion test-ui-motif
 test-gallery: $(OBJ_DIR)/test_visual
 	QT_QPA_PLATFORM=offscreen $(OBJ_DIR)/test_visual dialogGallery
@@ -198,7 +208,7 @@ test-visual: $(OBJ_DIR)/test_visual
 
 
 $(OBJ_DIR)/benchmark_cpu: $(filter-out $(OBJ_DIR)/main.o,$(OBJECTS)) $(OBJ_DIR)/tests/benchmark_cpu.o
-	$(CXX) $(LDFLAGS) -o $@ $^ $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS)
+	$(CXX) $(LDFLAGS) -o $@ $(filter %.$(OBJEXT),$^) $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(SDDS_LINK_LIBS)
 .PHONY: benchmark-cpu
 benchmark-cpu: $(OBJ_DIR)/benchmark_cpu
 	QT_QPA_PLATFORM=offscreen $(OBJ_DIR)/benchmark_cpu 10000 idle 10
@@ -211,13 +221,20 @@ CLEAN_DIRS = O.$(OS)-$(ARCH)-qt5 O.$(OS)-$(ARCH)-qt6
 EXTRA_CXX_OBJ_DEPS = $(HEADERS)
 EXTRA_CXXFLAGS = $(INCLUDES) $(QT_CFLAGS) $(RPC_CFLAGS)
 qtalh_OBJS = $(OBJECTS) $(if $(filter Windows,$(OS)),$(OBJ_DIR)/main.obj)
-qtalh_LIBS = $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(LDLIBS)
+qtalh_LIBS = $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(QT_LIBS) $(LDLIBS) $(SDDS_LINK_LIBS)
 qtalh_printer_OBJS = $(OBJ_DIR)/printer_main.o $(OBJ_DIR)/services/ipc.o
 qtalh_printer_LIBS = $(call qt_libs,Core Network)
 qtalh_DB_OBJS = $(OBJ_DIR)/database_main.o $(OBJ_DIR)/services/ipc.o
 qtalh_DB_LIBS = $(call qt_libs,Core) $(RPC_LIBS)
-BUILD_GENERATED += $(OBJ_DIR)/resources.cc $(addprefix $(OBJ_DIR)/test_,core.moc ui.moc ioc.moc pva.moc helpers.moc notifications.moc analytics.moc visual.moc)
-BUILD_OBJECTS += $(addprefix $(OBJ_DIR)/tests/test_,core.$(OBJEXT) ui.$(OBJEXT) ioc.$(OBJEXT) pva.$(OBJEXT) helpers.$(OBJEXT) notifications.$(OBJEXT) analytics.$(OBJEXT) visual.$(OBJEXT))
-BUILD_CONFIG_VARIABLES += RPC_CFLAGS RPC_LIBS
+BUILD_GENERATED += $(OBJ_DIR)/resources.cc $(addprefix $(OBJ_DIR)/test_,core.moc ui.moc ioc.moc pva.moc helpers.moc notifications.moc analytics.moc sdds.moc visual.moc)
+BUILD_OBJECTS += $(addprefix $(OBJ_DIR)/tests/test_,core.$(OBJEXT) ui.$(OBJEXT) ioc.$(OBJEXT) pva.$(OBJEXT) helpers.$(OBJEXT) notifications.$(OBJEXT) analytics.$(OBJEXT) sdds.$(OBJEXT) visual.$(OBJEXT))
+BUILD_CONFIG_VARIABLES += RPC_CFLAGS RPC_LIBS SDDS_SELECTED SDDS_LINK_LIBS SDDS_REPO SDDS_INCLUDE_DIR SDDS_LIB_DIR
+qtalh_DEPS = $(SDDS_DEPENDENCIES)
+$(OBJ_DIR)/services/sdds_export.$(OBJEXT) $(OBJ_DIR)/tests/test_sdds.$(OBJEXT): $(SDDS_HEADERS)
+$(addprefix $(OBJ_DIR)/,$(addsuffix $(EXEEXT),test_ui test_sdds test_visual benchmark_cpu)): $(SDDS_DEPENDENCIES)
+ifeq ($(OS),Windows)
+# Native tests share all service/UI objects, including the optional writer.
+$(addprefix $(OBJ_DIR)/test_,$(addsuffix .exe,$(TESTS))): $(SDDS_DEPENDENCIES)
+endif
 CUSTOM_LINK_PRODUCTS += qtalh qtalh_printer qtalh_DB
 include ../Makefile.build

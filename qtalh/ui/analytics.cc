@@ -1,5 +1,6 @@
 #include "dialogs.h"
 #include "window.h"
+#include "services/sdds_export.h"
 #include <QTimeZone>
 #include <QtWidgets>
 #include <algorithm>
@@ -368,13 +369,19 @@ void Window::showAnalytics() {
     plots << plot;
   }
   auto actions = new QHBoxLayout;
-  layout->addLayout(actions);
   auto details = new QPushButton("Channel details");
   details->setObjectName("analyticsDetails");
   auto exportTable = new QPushButton("Export table CSV…");
   exportTable->setObjectName("analyticsExportTable");
   auto exportChart = new QPushButton("Export chart CSV…");
   exportChart->setObjectName("analyticsExportChart");
+  QPushButton *exportTableSdds = nullptr, *exportChartSdds = nullptr;
+  if (sddsAvailable()) {
+    exportTableSdds = new QPushButton("Export table SDDS…");
+    exportTableSdds->setObjectName("analyticsExportTableSdds");
+    exportChartSdds = new QPushButton("Export chart SDDS…");
+    exportChartSdds->setObjectName("analyticsExportChartSdds");
+  }
   auto reset = new QPushButton("Reset Analytics");
   reset->setObjectName("analyticsReset");
   auto close = new QPushButton("Close");
@@ -382,6 +389,13 @@ void Window::showAnalytics() {
     if (b == close && !legacyAppearance()) actions->addStretch();
     actions->addWidget(b);
   }
+  if (exportTableSdds) {
+    // A separate row keeps the controls usable in both modern and Motif styles.
+    auto sddsActions = new QHBoxLayout;
+    sddsActions->addWidget(exportTableSdds); sddsActions->addWidget(exportChartSdds); sddsActions->addStretch();
+    layout->addLayout(sddsActions);
+  }
+  layout->addLayout(actions);
   auto report = std::make_shared<AnalyticsReport>();
   auto query = [=] {
     AnalyticsQuery q;
@@ -484,18 +498,27 @@ void Window::showAnalytics() {
             });
   }
 
-  auto exportCsv = [=](bool chart) {
+  auto exportData = [=](bool chart, bool sdds) {
     if (report->session.isEmpty())
       return;
-    auto path = chooseFile(dialog, "Export analytics CSV", {}, "CSV files (*.csv)", true);
-    if (path.isEmpty())
+    if (sdds && !sameQuery(report->query, query())) {
+      QMessageBox::information(dialog, "Export analytics", "Waiting for a report matching the current filters.");
       return;
+    }
+    // Freeze the report, table order and chart selection before the file dialog
+    // runs its event loop and permits another analytics report to arrive.
     auto copy = *report;
     int tab = tabs->currentIndex();
-    if (chart && tab == 1 && !plots[1]->selected.isEmpty()) {
+    if (chart && tab == 1 && (sdds || !plots[1]->selected.isEmpty())) {
+      auto selected = plots[1]->selected;
+      if (sdds && !copy.rows.isEmpty() && std::none_of(copy.rows.begin(), copy.rows.end(),
+            [&](const auto& row) { return row.channel.key == selected; })) {
+        selected = std::max_element(copy.rows.begin(), copy.rows.end(),
+            [](const auto& a, const auto& b) { return a.stats.activations < b.stats.activations; })->channel.key;
+      }
       copy.rows.erase(
           std::remove_if(copy.rows.begin(), copy.rows.end(),
-                         [&](const auto& r) { return r.channel.key != plots[1]->selected; }),
+                         [&](const auto& r) { return r.channel.key != selected; }),
           copy.rows.end());
     } else if (!chart) {
       copy.rows.clear();
@@ -509,6 +532,14 @@ void Window::showAnalytics() {
           copy.rows << report->rows[lookup[id]];
       }
     }
+    const auto path = chooseFile(dialog, sdds ? "Export analytics SDDS" : "Export analytics CSV", {},
+                                 sdds ? "SDDS files (*.sdds)" : "CSV files (*.csv)", true);
+    if (path.isEmpty()) return;
+    if (sdds) {
+      try { saveAnalyticsSdds(path, copy, tab, chart); }
+      catch (const std::exception& e) { QMessageBox::warning(dialog, "Export analytics", QString::fromUtf8(e.what())); }
+      return;
+    }
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
       QMessageBox::warning(dialog, "Export analytics", "Cannot open CSV output.");
@@ -518,8 +549,12 @@ void Window::showAnalytics() {
     if (file.write(bytes) != bytes.size() || !file.commit())
       QMessageBox::warning(dialog, "Export analytics", "Cannot save CSV output.");
   };
-  connect(exportTable, &QPushButton::clicked, dialog, [=] { exportCsv(false); });
-  connect(exportChart, &QPushButton::clicked, dialog, [=] { exportCsv(true); });
+  connect(exportTable, &QPushButton::clicked, dialog, [=] { exportData(false, false); });
+  connect(exportChart, &QPushButton::clicked, dialog, [=] { exportData(true, false); });
+  if (exportTableSdds) {
+    connect(exportTableSdds, &QPushButton::clicked, dialog, [=] { exportData(false, true); });
+    connect(exportChartSdds, &QPushButton::clicked, dialog, [=] { exportData(true, true); });
+  }
   connect(reset, &QPushButton::clicked, dialog, [=] {
     analytics->reset();
     coverage->setText("Analytics reset; awaiting updated report.");

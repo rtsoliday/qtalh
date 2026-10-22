@@ -9,6 +9,7 @@
 #include "dialogs.h"
 #include "help.h"
 #include "window.h"
+#include "services/sdds_export.h"
 #include <QDesktopServices>
 #include <QPrintDialog>
 #include <QPrinter>
@@ -739,6 +740,20 @@ void Window::setupEngine() {
   for (auto n : doc.nodes()) configuredBeep.insert(n, engine->state(n).beepThreshold);
   dirty = true;
 }
+namespace {
+// ALH's pane-width scale; the trough turns blue with the footer while silenced.
+QString paneWidthStyle(const char* trough) {
+  return QString("QSlider {background:%1; border:1px solid; border-top-color:#dde6e9; "
+                 "border-left-color:#dde6e9; border-bottom-color:#5f696d; border-right-color:#5f696d;}"
+                 "QSlider::groove:horizontal {height:11px; margin:1px; background:%1; "
+                 "border:1px solid; border-top-color:#5f696d; border-left-color:#5f696d; "
+                 "border-bottom-color:#dde6e9; border-right-color:#dde6e9;}"
+                 "QSlider::handle:horizontal {width:28px; margin:1px 0; background:#b0c3ca; "
+                 "border:1px solid; border-top-color:#dde6e9; border-left-color:#dde6e9; "
+                 "border-bottom-color:#5f696d; border-right-color:#5f696d;}")
+      .arg(trough);
+}
+} // namespace
 void Window::buildUi() {
   auto central = new QWidget;
   auto layout = new QVBoxLayout(central);
@@ -769,15 +784,8 @@ void Window::buildUi() {
     divider->setValue(50);
     divider->setFixedHeight(17);
     divider->setToolTip("Tree/group window width");
-    divider->setStyleSheet(
-        "QSlider {background:#b0c3ca; border:1px solid; border-top-color:#dde6e9; "
-        "border-left-color:#dde6e9; border-bottom-color:#5f696d; border-right-color:#5f696d;}"
-        "QSlider::groove:horizontal {height:11px; margin:1px; background:#b0c3ca; "
-        "border:1px solid; border-top-color:#5f696d; border-left-color:#5f696d; "
-        "border-bottom-color:#dde6e9; border-right-color:#dde6e9;}"
-        "QSlider::handle:horizontal {width:28px; margin:1px 0; background:#b0c3ca; "
-        "border:1px solid; border-top-color:#dde6e9; border-left-color:#dde6e9; "
-        "border-bottom-color:#5f696d; border-right-color:#5f696d;}");
+    divider->setStyleSheet(paneWidthStyle("#b0c3ca"));
+    paneWidth = divider;
     connect(divider, &QSlider::valueChanged, splitter, [splitter](int value) {
       int width = splitter->width() - splitter->handleWidth();
       splitter->setSizes({width * value / 100, width * (100 - value) / 100});
@@ -878,9 +886,10 @@ void Window::buildUi() {
       "Mask <CDATL>:  <Cancel,Disable,noAck,noackT,noLog>     H=noAck 1hr timer",
       "Group Alarm Counts:  (ERROR,INVALID,MAJOR,MINOR,NOALARM)",
       "Channel Alarm Data: <Status,Severity> (<Unack Severity>)"};
-  QWidget* footer = nullptr;
   if (legacyAppearance()) {
     footer = new QWidget;
+    footer->setObjectName("statusFooter");
+    footer->setAutoFillBackground(true); // Painted blue during a silence interval.
     footer->setFixedHeight(114);
     auto bottom = new QHBoxLayout(footer);
     bottom->setContentsMargins(10, 4, 4, 17);
@@ -974,6 +983,7 @@ void Window::buildUi() {
   layout->addWidget(footer);
   connect(silenceBox, &QCheckBox::toggled, this, [this](bool yes) {
     engine->setSilenceUntil(yes ? engine->monotonicNow() + silenceMinutes * 60000 : 0);
+    refreshStatus();
   });
   connect(currentBox, &QCheckBox::toggled, this,
           [this](bool yes) { engine->setSilenceCurrent(yes); });
@@ -1148,6 +1158,39 @@ void Window::refresh() {
   if (redoAction)
     redoAction->setEnabled(!redo.isEmpty());
 }
+void Window::updateSilenceColors() {
+  // ALH turns its message area (this footer) and pane-width scale blue while
+  // Silence N minutes is on. Without -maskcolor the panes turn blue too; with
+  // it, blue marks silencing masks instead and the panes keep their color.
+  const bool silenced = !options.editor && engine && engine->silenceUntil > engine->monotonicNow();
+  if (silenced == silenceColored)
+    return;
+  silenceColored = silenced;
+  QPalette colors; // Unset roles follow the application palette.
+  if (silenced) {
+    colors.setColor(QPalette::Window, Qt::blue);
+    // Text is left alone: check marks are drawn in it on the white Base box.
+    for (auto role : {QPalette::WindowText, QPalette::ButtonText, QPalette::Link,
+                      QPalette::PlaceholderText})
+      colors.setColor(role, Qt::white);
+  }
+  // The classic appearance's application style sheet stops palette
+  // inheritance, so each footer widget receives the colors directly.
+  footer->setPalette(colors);
+  for (auto child : footer->findChildren<QWidget*>())
+    child->setPalette(colors);
+  if (legacyAppearance()) {
+    // The classic message line belongs to ALH's message area.
+    messageBanner->setAutoFillBackground(silenced);
+    messageBanner->setPalette(colors);
+  }
+  if (paneWidth)
+    paneWidth->setStyleSheet(paneWidthStyle(silenced ? "blue" : "#b0c3ca"));
+  for (auto view : {treeView, groupView})
+    static_cast<AlarmView*>(view)->setSilenced(silenced && !options.maskColor);
+  // Recompute the Silence Forever warning color against the new footer.
+  silenceForeverLabel->setProperty("warning", QVariant());
+}
 // Time-dependent indicators and logging ownership still update while alarms are idle.
 void Window::refreshStatus() {
   execution->setText(
@@ -1159,13 +1202,15 @@ void Window::refreshStatus() {
   filename->setToolTip(doc.filename);
   silenceForeverLabel->setText(
       QString("Silence Forever: %1").arg(engine->silenceForever ? "On" : "Off"));
+  updateSilenceColors();
   // Modern displays flag a permanently silenced handler in a warning color.
   if (!legacyAppearance() && silenceForeverLabel->property("warning").toBool() != engine->silenceForever) {
     silenceForeverLabel->setProperty("warning", engine->silenceForever);
     // Only the changed attributes are set, so zoom and palette changes still apply.
     QPalette colors;
     if (engine->silenceForever) {
-      const bool dark = palette().color(QPalette::Window).lightness() < 128;
+      // Contrast with the footer, which is blue during a silence interval.
+      const bool dark = contrastingText(footer->palette().color(QPalette::Window)) == QColor(Qt::white);
       colors.setColor(QPalette::WindowText, QColor(dark ? "#fbbf24" : "#b45309"));
     }
     silenceForeverLabel->setPalette(colors);
@@ -1390,8 +1435,21 @@ void Window::menus() {
       }
     });
   }
-  action(file, "Import Phoebus XML...", [this] { importPhoebus(); });
-  action(file, "Export Phoebus XML...", [this] { exportPhoebus(); });
+  // Phoebus conversion is a migration tool, so it stays out of operator menus
+  // unless QTALH_PHOEBUS_MENU is set. --to-phoebus/--from-phoebus always work.
+  const auto phoebusMenu = qEnvironmentVariable("QTALH_PHOEBUS_MENU");
+  if (!phoebusMenu.isEmpty() && phoebusMenu != "0") {
+    action(file, "Import Phoebus XML...", [this] { importPhoebus(); });
+    action(file, "Export Phoebus XML...", [this] { exportPhoebus(); });
+  }
+  if (!options.editor && sddsAvailable()) {
+    auto snapshot = action(file, "Export Alarm Snapshot (SDDS)...", [this] {
+      const auto path = chooseFile(this, "Export Alarm Snapshot (SDDS)", {}, "SDDS files (*.sdds)", true);
+      if (!path.isEmpty()) try { saveAlarmSnapshot(path); }
+        catch (const std::exception& e) { error(QString::fromUtf8(e.what())); }
+    });
+    snapshot->setObjectName("exportAlarmSnapshotSdds");
+  }
   action(file, "Print...", [this] {
     QPrinter printer;
     QPrintDialog dialog(&printer, this);
@@ -1776,7 +1834,10 @@ void Window::open(bool insert) {
       auto c = cloneNode(*d.root, parent);
       parent->children.push_back(c);
       auto next = writeConfig(doc);
+      const auto moved = hierarchyChange(doc, next);
       parent->children.pop_back();
+      if (!moved.isEmpty())
+        throw ParseError(moved);
       auto result = parseConfig(next);
       result.filename = doc.filename;
       result.latin1 = doc.latin1;
@@ -1787,6 +1848,9 @@ void Window::open(bool insert) {
       replace(std::move(d), false);
       logging->operation(nullptr, "Setup Config File : " + doc.filename);
     } else {
+      // Every edit saves and reloads the configuration text; refuse a file
+      // that would not reload with the same hierarchy.
+      writeCheckedConfig(d);
       auto o = options;
       o.config = path;
       auto w = new Window(std::move(d), o, connectPv);
@@ -1841,7 +1905,10 @@ void Window::addNode(bool group, const QString& name) {
   n->parent = parent;
   parent->children.push_back(n);
   auto text = writeConfig(doc);
+  const auto moved = hierarchyChange(doc, text);
   parent->children.pop_back();
+  if (!moved.isEmpty())
+    throw ParseError(moved);
   auto d = parseConfig(text);
   d.filename = doc.filename;
   d.latin1 = doc.latin1;
@@ -1908,10 +1975,11 @@ void Window::cut(bool remove) {
     if (node != copied.root.get() && node->group) names.insert(node->name);
   for (int suffix = 1; names.contains(copied.root->name); ++suffix)
     copied.root->name = "__QTALH_CLIPBOARD__" + QString::number(suffix);
-  const auto serialized = writeConfig(copied);
+  QString serialized;
   try {
     // Check the actual cross-window payload before publishing it or deleting
     // the source of a Cut. Invalid data must leave both clipboards intact.
+    serialized = writeCheckedConfig(copied);
     parseConfig(serialized);
   } catch (const std::exception& e) {
     error(e.what());
@@ -1937,7 +2005,12 @@ void Window::clearNode() {
   auto offset = i - c.begin();
   c.erase(i);
   auto text = writeConfig(doc);
+  const auto moved = hierarchyChange(doc, text);
   c.insert(c.begin() + offset, backup);
+  if (!moved.isEmpty()) {
+    error(moved);
+    return;
+  }
   auto d = parseConfig(text);
   d.filename = doc.filename;
   d.latin1 = doc.latin1;
@@ -1967,8 +2040,11 @@ void Window::paste() {
   auto c = cloneNode(*clipboard, p);
   p->children.push_back(c);
   auto text = writeConfig(doc);
+  const auto moved = hierarchyChange(doc, text);
   p->children.pop_back();
   try {
+    if (!moved.isEmpty())
+      throw ParseError(moved);
     auto d = parseConfig(text);
     d.filename = doc.filename;
     d.latin1 = doc.latin1;
@@ -2399,7 +2475,7 @@ void Window::properties() {
         for (auto value : item.first->toPlainText().split('\n'))
           if (!value.trimmed().isEmpty()) n->directives.push_back({item.second, value.trimmed()});
       n->setOption("GUIDANCE_TEXT", guidance->toPlainText());
-      auto checked = parseConfig(writeConfig(candidate)); checked.filename = doc.filename;
+      auto checked = parseConfig(writeCheckedConfig(candidate)); checked.filename = doc.filename;
       checked.latin1 = doc.latin1;
       replace(std::move(checked));
     } catch (const std::exception& e) {

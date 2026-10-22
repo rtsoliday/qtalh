@@ -80,6 +80,10 @@ row in **View → Runtime Overrides…**, to end the timer early.
 Changing **Setup → Silence Time Interval** to a different duration ends any
 active timed silence, matching ALH. Enable the silence checkbox again to start
 that duration. Choosing the same interval leaves the countdown unchanged.
+While timed silence is on, the status area at the bottom of the main window
+turns blue, as in ALH. Without `-maskcolor` the alarm panes turn blue too; with
+it, blue is reserved for masks that silence alarms and the panes keep their
+color.
 Timed silence, Silence Current, Silence Forever, interval changes, and timed
 silence expiry are recorded in the operation log when file logging is enabled.
 
@@ -196,7 +200,7 @@ INCLUDE paths retain their separate configuration-directory rule.
 | `-O key` | Send database records to a System V queue; positive decimal integer, Linux/macOS only. Unlike ALH, `-L` is not required; without it every instance sends its alarm records. |
 | `-filter no\|active\|unack` | Initial display filter; default `no`. Active includes active or unacknowledged alarms. Filtering does not stop monitoring. |
 | `-mainwindow` | Open the main runtime window at startup. |
-| `-maskcolor` | Color the mask controls. |
+| `-maskcolor` | Show masks with Cancel, Disable or NoAck set in blue; timed silence then colors only the status area. |
 | `-noerrorpopup` | Suppress error message boxes; errors still appear in the window message area, Qt diagnostic output, and operation log when logging is enabled. |
 | `-desc_field` | Subscribe to each channel record's `.DESC` field for descriptions. |
 | `-debug` | Timestamped startup, alarm, CA, command, logging, and broadcast diagnostics on stderr. Default: off. |
@@ -223,7 +227,12 @@ plugins from a separate SDK. On Windows, `COMSPEC` selects the command shell
 (default `cmd.exe`). Sound paths and an explicit relative `-Lfile` basename
 resolve from the process working directory, rather than `-f` or `-l`.
 Unknown switches and arbitrary Xt resource overrides are errors. CDEV and
-CMLOG extensions are not supported by QtALH.
+CMLOG extensions are not supported by QtALH. A path may follow `-a`, `-o`,
+`-f`, `-l` or `-p` without a space when it starts with `/` or `.`, as in
+`-p/usr/share/sounds/freedesktop/stereo/bell.oga`; ALH rejects that form.
+If the configuration file does not exist, QtALH prints the path it looked
+for and opens a file selection box, preselecting a file whose name differs
+only in case.
 
 ### Operator tools
 
@@ -247,8 +256,10 @@ every appearance:
   failed action per selected row without repeating ACKS; retries are explicit.
 - **Alarm Summary Panel…**: a tile per top-level group with alarm counts.
 
-**File → Import/Export Phoebus XML…** and `--to-phoebus`/`--from-phoebus`
-convert to and from the Phoebus alarm-server format. See
+`--to-phoebus`/`--from-phoebus` convert to and from the Phoebus alarm-server
+format. **File → Import/Export Phoebus XML…** do the same in the application
+when `QTALH_PHOEBUS_MENU` is set (to a value other than empty or `0`); they
+are hidden from operator menus otherwise. See
 [Active alarms, search & details](site/operate/alarm-tools.md) and
 [Phoebus XML import & export](site/configure/phoebus.md).
 
@@ -731,8 +742,23 @@ reload behavior, delivery guarantees, retry rules, and limits.
 
 **View → Alarm Analytics…** provides frequent-offender rankings, configurable
 chatter detection, standing-alarm durations, confirmed acknowledgement response
-times, charts, and CSV export. Collection starts automatically in each runtime
+times, charts, CSV export, and optional binary SDDS export. Collection starts automatically in each runtime
 and remains in memory. Session summaries survive same-configuration reloads;
 rolling history is bounded and reports disclose gaps and partial coverage.
 See the [analytics guide](site/operate/analytics.md) for metric definitions,
 suppression behavior, acknowledgement confirmation, and export details.
+
+## SDDS alarm snapshot
+
+When SDDS support is available, **File → Export Alarm Snapshot (SDDS)…** saves
+one binary page with one row per configured channel, including channels hidden
+by display filters or shelving. Rows include PV and hierarchy, value text,
+description, status and severity, visible and underlying unacknowledged severity,
+observation availability, configured/current masks, shelf details and times.
+Duplicate PVs in different parts of the hierarchy remain separate rows.
+
+Times are QtALH observation/processing Unix epoch seconds with exact millisecond
+companions, not IOC timestamps. Unknown times are NaN with zero milliseconds.
+Saving does not acknowledge alarms, change configuration or write PVs. This is a
+data snapshot, not an ALH configuration or a restorable runtime checkpoint.
+The command is absent in the configuration editor and in builds without SDDS.

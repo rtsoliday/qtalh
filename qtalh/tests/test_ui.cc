@@ -634,6 +634,95 @@ private slots:
     file.seek(0); const auto after = file.readAll();
     QCOMPARE(after.count("Silence Current set to FALSE"), 2);
   }
+  void phoebusMenuNeedsEnvironment() {
+    // Phoebus conversion stays out of operator menus unless QTALH_PHOEBUS_MENU
+    // is set; --to-phoebus and --from-phoebus are unaffected.
+    struct Restore {
+      QByteArray previous = qgetenv("QTALH_PHOEBUS_MENU");
+      ~Restore() {
+        if (previous.isNull()) qunsetenv("QTALH_PHOEBUS_MENU");
+        else qputenv("QTALH_PHOEBUS_MENU", previous);
+      }
+    } restore;
+    auto phoebusActions = [](Window* w) {
+      int count = 0;
+      for (auto action : w->findChildren<QAction*>())
+        if (action->text().contains("Phoebus XML")) ++count;
+      return count;
+    };
+    for (const char* value : {static_cast<const char*>(nullptr), "", "0", "1"}) {
+      if (value) qputenv("QTALH_PHOEBUS_MENU", value);
+      else qunsetenv("QTALH_PHOEBUS_MENU");
+      for (bool editor : {false, true}) {
+        auto w = std::make_unique<Window>(sample(), options(editor), false);
+        QCOMPARE(phoebusActions(w.get()), value && QByteArray(value) == "1" ? 2 : 0);
+      }
+    }
+  }
+  void silenceIntervalTurnsDisplayBlue_data() {
+    QTest::addColumn<bool>("maskColor");
+    QTest::newRow("panes") << false;
+    QTest::newRow("maskcolor") << true;
+  }
+  void silenceIntervalTurnsDisplayBlue() {
+    // ALH's Silence N minutes turns the message area (footer) blue with white
+    // text. Without -maskcolor the panes turn blue too; with it, blue marks
+    // silencing masks and the panes keep their color.
+    QFETCH(bool, maskColor);
+    auto o = options(false);
+    o.maskColor = maskColor;
+    auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root pv\n"), o, false);
+    w->resize(900, 500);
+    w->show();
+    QVERIFY(QTest::qWaitForWindowExposed(w.get()));
+    auto& engine = w->alarmEngine(); qint64 elapsed = 1000;
+    engine.monotonicNow = [&] { return elapsed; };
+    auto footer = w->findChild<QWidget*>("statusFooter");
+    auto label = w->findChild<QLabel*>("executionStatus");
+    auto tree = w->findChild<QTreeView*>("alarmTree");
+    auto interval = w->findChild<QCheckBox*>("silenceInterval");
+    auto timer = w->findChild<QTimer*>("alarmBeepTimer");
+    QVERIFY(footer && label && tree && interval && timer);
+    timer->stop();
+    const QColor blue(Qt::blue);
+    auto footerColor = [&] { return footer->grab().toImage().pixelColor(1, 1); };
+    auto paneColor = [&] {
+      const auto image = tree->viewport()->grab().toImage();
+      return image.pixelColor(image.width() - 2, image.height() - 2);
+    };
+    auto whiteText = [&] {
+      const auto image = footer->grab().toImage();
+      const QRect area(label->mapTo(footer, QPoint()), label->size());
+      for (int y = area.top(); y <= area.bottom(); ++y)
+        for (int x = area.left(); x <= area.right(); ++x)
+          if (image.pixelColor(x, y) == QColor(Qt::white)) return true;
+      return false;
+    };
+    const QColor footerBefore = footerColor(), paneBefore = paneColor();
+    QVERIFY(footerBefore != blue && paneBefore != blue);
+    const auto footerImage = footer->grab().toImage(), paneImage = tree->viewport()->grab().toImage();
+    // The classic appearance's pane-width scale belongs to ALH's message area.
+    auto scale = w->findChild<QWidget*>("paneWidth");
+    const auto scaleImage = scale ? scale->grab().toImage() : QImage();
+    interval->setChecked(true);
+    QCOMPARE(footerColor(), blue);
+    QCOMPARE(paneColor(), maskColor ? paneBefore : blue);
+    QVERIFY(whiteText());
+    if (scale)
+      QCOMPARE(scale->grab().toImage().pixelColor(scale->width() / 4, scale->height() / 2), blue);
+    // The colors follow the engine when the interval expires.
+    elapsed = engine.silenceUntil;
+    engine.tick();
+    QVERIFY(QMetaObject::invokeMethod(timer, "timeout", Qt::DirectConnection));
+    QVERIFY(!interval->isChecked());
+    QCOMPARE(footerColor(), footerBefore);
+    QCOMPARE(paneColor(), paneBefore);
+    // Nothing else is left recolored, including label text and the scale.
+    QVERIFY(footer->grab().toImage() == footerImage);
+    QVERIFY(tree->viewport()->grab().toImage() == paneImage);
+    if (scale)
+      QVERIFY(scale->grab().toImage() == scaleImage);
+  }
   void historicalRingOrder_data() {
     QTest::addColumn<bool>("xml");
     QTest::newRow("text") << false; QTest::newRow("xml") << true;
@@ -2923,18 +3012,23 @@ private slots:
   }
   void rejectAmbiguousGroupInsertion() {
     auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\n"), options(true), false);
-    const auto original = writeConfig(w->document());
-    QVERIFY_THROWS_EXCEPTION(ParseError, w->addNode(true, "root"));
-    QCOMPARE(writeConfig(w->document()), original);
     w->addNode(true, "first");
-    w->addNode(true, "second");
+    // As in ALH a group may repeat an ancestor's name; written last, it reloads in place.
+    w->addNode(true, "root");
     QCOMPARE(w->document().root->children.size(), size_t(2));
+    const auto original = writeConfig(w->document());
+    // A later sibling would be written after the inner root and reload under it.
+    QVERIFY_THROWS_EXCEPTION(ParseError, w->addNode(true, "second"));
+    QCOMPARE(writeConfig(w->document()), original);
     for (const auto& child : w->document().root->children)
       QCOMPARE(child->parent, w->document().root.get());
     w->undoEdit();
     QCOMPARE(w->document().root->children.size(), size_t(1));
     w->redoEdit();
     QCOMPARE(w->document().root->children.size(), size_t(2));
+    // The root's channels are written before its groups, so this is unambiguous.
+    w->addNode(false, "pv");
+    QCOMPARE(w->document().root->children.size(), size_t(3));
   }
   void boundedEditorUndo() {
     auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\n"), options(true), false);

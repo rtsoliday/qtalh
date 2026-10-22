@@ -164,14 +164,23 @@ Masks accept legacy short or reordered uppercase letters (for example `D`, `DA`,
 and `LATDC`) and save in canonical `CDATL` positions. As in legacy `alSetMask`,
 other characters, including lowercase letters, are ignored rather than rejected,
 and `--validate` does not report them: `DISABLED` loads as `-DA-L`, and `cd` sets
-no bits. Group names must not duplicate an ancestor or use the reserved
-name `NULL`; these ambiguous names are rejected transactionally during parsing
-and editing. Repeated names on separate branches remain supported.
+no bits. Group names must not use the reserved name `NULL`. As in ALH, a group
+may repeat an ancestor's name, and a parent name refers to the nearest
+matching ancestor of the current group. Because the file records parents by
+name, such a hierarchy cannot always be saved: when the saved text would
+reload with a group under a different parent, Save, Save As and editor changes
+report the group to rename and keep the current configuration, and the
+configuration tool does not open such a file. Repeated names on separate
+branches remain supported.
 
 Per-node `$BEEPSEVR`, `$ACKPV`, and `$FORCEPV_CALC` use the last directive,
 while first-wins options such as ALIAS and COMMAND retain their legacy precedence.
 GROUP, CHANNEL, and INCLUDE declarations accept trailing comments beginning with
 a whitespace-separated `#`; hashes in names, commands, and guidance are preserved.
+As in ALH, other extra tokens are ignored on `GROUP` lines (including a mask),
+after a channel's mask, after an `INCLUDE` filename, after the `$HEARTBEATPV`
+value, and after the `$ALARMCOUNTFILTER` seconds (for example
+`$ALARMCOUNTFILTER -1 3 -----`); saving drops them.
 Missing `$ALARMCOUNTFILTER` arguments default to count 1 and seconds 1 and save
 in full form. Multiple inline GUIDANCE blocks
 are combined in order, preserving blank lines through display, editing and saving.
@@ -287,7 +296,6 @@ Examples of lines that ALH tolerates but QtALH rejects:
 | Unrecognized or stray `$` line, such as a second `$END` | `Invalid Optional Line`; skipped | `Unsupported directive` |
 | `$STATCOMMAND` or `$ALARMCOUNTFILTER` after a group | `Context not a channel`; skipped | `applies to channels` |
 | `$ACKPV` after a group | Not checked | `ACKPV applies to channels` |
-| Extra non-comment tokens on `GROUP`, `CHANNEL` (after the mask), `INCLUDE`, or `$HEARTBEATPV` lines | Ignored | Declaration or heartbeat error |
 | Non-numeric `$HEARTBEATPV` interval | 1 second | Heartbeat interval error |
 | `$BEEPSEVERITY` or `$BEEPSEVR` value that is not a severity, such as `HIGH` | Ignored; earlier threshold kept | `Unknown severity` |
 | Severity with a suffix, such as `$BEEPSEVR MAJOR_ALARM` or `UP_MAJOR_ALARM` | Prefix match (`MAJOR`) | `Unknown severity` |
@@ -311,7 +319,7 @@ ALH already skips; silently ignored lines produce no entry.
 | Expand one level/branch/all, collapse branch | View menu / tree view | Implemented; manual workflow comparison remains |
 | History, config file, alarm/opmod log windows and search | View menu / text viewers | History dialog smoke test; file/log service tests |
 | All/active/unack display filters | AlarmModel | Membership and filtered selection/expansion regressions |
-| Global beep setting, silence interval, silence forever, log-file selection | Setup menu | Threshold/timer core tests; 5/10/15/30/60-minute choices, default 30 |
+| Global beep setting, silence interval, silence forever, log-file selection | Setup menu | Threshold/timer core tests; 5/10/15/30/60-minute choices, default 30; ALH's blue silence-interval display (footer and width scale, plus the panes without `-maskcolor`) checked against Motif screenshots and in UI tests |
 | New/open/insert/save/save-as, multiple editor windows | Editor File and Insert menus | Editor save plus transaction tests |
 | Group/channel properties, cut/copy/paste/clear, undo/redo | Editor and snapshot model | Add/undo/redo/save and cross-window clipboard tests; properties dialog smoke test |
 | Reports and printing | Text report, QPrinter | Implemented; actual paper output unverified |
@@ -451,13 +459,21 @@ Other command-line differences from ALH:
   duplicate printer and database records.
 - `-fn` and `-font` take precedence over `ALHMAINFONT`; in ALH, `ALHMAINFONT`
   wins.
+- A path may be attached to `-a`, `-o`, `-f`, `-l` or `-p` when it starts
+  with `/` or `.`, as in `-p/usr/share/sounds/freedesktop/stereo/bell.oga`.
+  ALH prints its usage and exits on that form.
+- When the configuration file does not exist, both open a file selection
+  box; QtALH also prints the missing path and preselects a file whose name
+  differs only in case.
 
 `ALARMHANDLER` sets the configuration directory and `ALHMAINFONT` the runtime
 button font. Unless `-l` is supplied, the log directory follows the configuration
 directory from `-f` or `ALARMHANDLER`, matching legacy ALH. Standard `EPICS_CA_*` variables are read by EPICS Base. `DISPLAY`
 and `QT_QPA_PLATFORM` control the display backend. Windows uses `COMSPEC`
 (default `cmd.exe`) for configured shell commands. CDEV/CMLOG command-line
-extensions are outside scope.
+extensions are outside scope. File → Import/Export Phoebus XML appear only
+when `QTALH_PHOEBUS_MENU` is set to a value other than empty or `0`;
+`--to-phoebus` and `--from-phoebus` are always available.
 
 For defaults, option arguments, configuration syntax, and operational guidance,
 see the [QtALH user guide](qtalh-user-guide.md). Windows builds the GUI and
@@ -1077,3 +1093,19 @@ byte-for-byte identical.
   the round-tripped file differs (for example `alarms.    </details>` becomes
   `alarms.</details>`). No conversion note reports this; see
   [Phoebus XML import & export](site/configure/phoebus.md).
+
+## Optional SDDS exports
+
+QtALH adds binary SDDS exports for the current alarm snapshot and analytics
+tables/charts. Legacy ALH has no corresponding export. The runtime File menu
+snapshot includes all configured channels, keeping duplicate PV instances and
+their hierarchy separate. Analytics exports retain current scope, filters,
+table order or chart selection, coverage gaps and incomplete/lower-bound flags.
+These exports change no alarm state or configuration and write no PVs.
+
+Timestamps represent QtALH observation/processing UTC, not IOC time; durations
+use the monotonic clock. Exact millisecond times and counts use signed 64-bit
+integers with current SDDS libraries, or decimal strings with older libraries.
+The build detects usable SDDS headers and libraries automatically and silently
+omits all three controls when unavailable. See the
+[analytics export guide](site/operate/analytics.md#binary-sdds) for the schema.

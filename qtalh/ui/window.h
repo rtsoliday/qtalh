@@ -97,6 +97,7 @@ public:
   void redoEdit();
   void showInitial();
   void saveTo(const QString&);
+  void saveAlarmSnapshot(const QString&) const;
   // SIGINT under -B: the normal exit path without the confirmation popup.
   void exitOnInterrupt();
 
@@ -124,6 +125,10 @@ private:
   QString runtimeSizedText;
   QFont runtimeSizedFont;
   QCheckBox *silenceBox = nullptr, *currentBox = nullptr;
+  // The status footer and the classic pane-width scale, which ALH turns blue
+  // during a silence interval (as are the panes, unless -maskcolor).
+  QWidget *footer = nullptr, *paneWidth = nullptr;
+  bool silenceColored = false;
   QTimer refreshTimer, beepTimer, heartbeatTimer;
   int silenceMinutes = 30;
   QMediaPlayer* sound = nullptr;
@@ -186,6 +191,7 @@ private:
   void menus();
   void refresh();
   void refreshStatus();
+  void updateSilenceColors();
   void restoreVisibleSelection();
   void click(const QModelIndex&, AlarmModel*);
   void select(Node*);

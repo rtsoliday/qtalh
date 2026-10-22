@@ -63,6 +63,11 @@ struct ParseError : std::runtime_error {
 Document loadConfig(const QString& path, const QString& configDir = QString());
 Document parseConfig(const QString& text, const QString& baseDir = QString());
 QString writeConfig(const Document& doc);
+// Why reloading writeConfig(doc) text would change the hierarchy, or empty.
+// Possible only when a group repeats an ancestor's name.
+QString hierarchyChange(const Document& doc, const QString& text);
+// writeConfig() text, or ParseError when hierarchyChange() reports a problem.
+QString writeCheckedConfig(const Document& doc);
 void saveConfig(const Document& doc, const QString& path);
 QString writeReport(const Document& doc);
 std::shared_ptr<Node> cloneNode(const Node& node, Node* parent = nullptr);

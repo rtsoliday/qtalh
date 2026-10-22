@@ -5,10 +5,16 @@
 #include "core/phoebus.h"
 #include "dialogs.h"
 #include "window.h"
+#include "services/sdds_export.h"
 #include <QtWidgets>
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 namespace alh {
+void Window::saveAlarmSnapshot(const QString& path) const {
+  if (!engine) throw std::runtime_error("No alarm runtime is available");
+  saveAlarmSnapshotSdds(path, *engine);
+}
 namespace {
 constexpr int SortRole = Qt::UserRole + 1;
 constexpr int FilterRole = Qt::UserRole + 2;

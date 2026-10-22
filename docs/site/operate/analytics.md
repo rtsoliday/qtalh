@@ -121,3 +121,43 @@ chatter chart export contains the selected channel's retained activation times.
 The standing chart export contains its top ten durations and lower-bound flags;
 the acknowledgement chart export contains the response histogram. CSV is an
 explicit report export, not persistent collection or an importable ALH file.
+
+### Binary SDDS
+
+Builds with SDDS support also offer **Export table SDDS…** and **Export chart
+SDDS…**. Each writes one binary page. The table uses the current tab's filtered
+rows in their displayed sort order; the chart uses the plotted series and, for
+chatter, the selected channel (or the chart's highest-activation fallback).
+The report and selection are captured when the export button is pressed, so
+refreshes while choosing a file do not change the saved data. After changing a
+filter, wait for its report to appear before exporting.
+
+Table columns include path, channel instance and PV, activation count/share,
+peak severity, standing/active/observed durations, acknowledgement samples and
+durations, chatter statistics, suppression, availability, removed/ambiguous
+channel flags, gaps and incomplete samples. Unknown durations are NaN. Separate
+`StandingLowerBound` and `OutstandingLowerBound` flags retain uncertainty about
+when an interval began. Standing tables include only standing alarms.
+
+Chart rows have `Series`, `Label`, channel identifiers, `Time`, `Value`, `Units`,
+exact `Count`, and `TimeKnown`, `CountKnown`, `LowerBound` flags:
+
+| Tab | Series and values |
+| --- | --- |
+| Frequent offenders | `top_offenders`: top ten activation counts; `trend`: retained trend-bin counts at each bin's start |
+| Chattering alarms | `activation_timeline`: selected channel's retained activation times, one activation per row |
+| Standing alarms | `standing`: top ten standing durations in seconds, with lower-bound flags |
+| Acknowledgement times | `acknowledgement_histogram`: sample counts for the nine labelled response-time bins |
+
+Parameters record configuration, session/generation, tab, scope/search/suppression
+filters, chatter settings, requested and available coverage, partial-detail and
+pruned-history flags, and totals for gaps and incomplete samples. Exporting cannot
+recover discarded history. Wall times are QtALH observation/processing Unix epoch
+seconds, accompanied by exact milliseconds; they are not IOC timestamps. Elapsed
+durations come from the monotonic clock. Unknown wall times use NaN/zero.
+
+Counts and millisecond timestamps use signed 64-bit SDDS integers when supported.
+With older SDDS libraries they use exact decimal strings instead, avoiding lost
+precision above 2^53; use `Count` for exact chart counts. Text is UTF-8. Saves
+replace the destination atomically, preserving an existing file on failure.
+These controls are omitted silently when compatible SDDS libraries are unavailable.

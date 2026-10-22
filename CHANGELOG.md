@@ -19,15 +19,24 @@ Changes that operators and site maintainers should review before deployment:
   use Channel Access as in ALH.
 - New View menu tools: Active Alarms, Find Alarm, Alarm Details, Runtime
   Overrides and the Alarm Summary Panel.
-- Phoebus alarm XML import and export (File menu, `--to-phoebus`,
-  `--from-phoebus`).
+- Phoebus alarm XML import and export (`--to-phoebus`, `--from-phoebus`).
+  The File menu commands are hidden unless `QTALH_PHOEBUS_MENU` is set.
 - Timed shelving of channels and groups with automatic re-enable. Shelving
   requires a username, and the operation log records it.
 - Personal notification subscriptions with escalation, and session alarm
   analytics.
 - Commands starting with `medm` launch `qtedm` from `PATH` instead.
 - New `--help`, `--version` and `--validate` conveniences. Unknown switches
-  and Xt resource overrides are errors.
+  and Xt resource overrides are errors. A path attached to `-a`, `-o`, `-f`,
+  `-l` or `-p` (`-p/usr/share/sounds/freedesktop/stereo/bell.oga`) is
+  accepted; ALH exits on that form.
+- As in ALH, extra tokens are ignored on `GROUP`, `CHANNEL`, `INCLUDE`,
+  `$HEARTBEATPV` and `$ALARMCOUNTFILTER` lines (for example
+  `$ALARMCOUNTFILTER -1 3 -----`), and a group may repeat an ancestor's name.
+  Saves and editor changes that would reload such a hierarchy differently are
+  refused with the group to rename.
+- Timed silence (Silence N minutes) turns the status area blue, and the alarm
+  panes too unless `-maskcolor` is given, as in ALH.
 - A directive before an INCLUDE file's first `GROUP` or `CHANNEL` is an error.
   ALH ignored it with "Logic error: glink is NULL"; `$BEEPSEVERITY` and
   `$HEARTBEATPV` are still accepted there.

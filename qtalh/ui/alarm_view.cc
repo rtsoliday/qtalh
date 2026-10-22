@@ -150,7 +150,7 @@ void MotifCheckBox::paintEvent(QPaintEvent* event) {
   if (isChecked())
     painter.fillRect(box.adjusted(2, 2, -2, -2), dark);
   painter.setFont(font());
-  painter.setPen(Qt::black);
+  painter.setPen(palette().color(QPalette::WindowText)); // White on a silenced footer.
   painter.drawText(rect().adjusted(16, 0, 0, 0), Qt::AlignLeft | Qt::AlignVCenter, text());
 }
 AlarmView::AlarmView(bool isTree, QWidget* parent) : QTreeView(parent), tree(isTree) {
@@ -172,11 +172,8 @@ AlarmView::AlarmView(bool isTree, QWidget* parent) : QTreeView(parent), tree(isT
     if (index.isValid()) emit clicked(index);
   });
   setFrameShape(QFrame::NoFrame);
-  if (legacyAppearance()) {
-    auto p = palette();
-    p.setColor(QPalette::Base, base);
-    setPalette(p);
-  } else {
+  setSilenced(false);
+  if (!legacyAppearance()) {
     setMouseTracking(true);
     viewport()->setAttribute(Qt::WA_Hover);
   }
@@ -184,6 +181,22 @@ AlarmView::AlarmView(bool isTree, QWidget* parent) : QTreeView(parent), tree(isT
   header()->setStretchLastSection(false);
   connect(this, &QTreeView::expanded, this, [this] { scheduleExtent(); });
   connect(this, &QTreeView::collapsed, this, [this] { scheduleExtent(); });
+}
+void AlarmView::setSilenced(bool silenced) {
+  // Roles left unset follow the application palette. Alarm, acknowledgement
+  // and name controls keep their own colors, as ALH's changeTreeColor() skips them.
+  QPalette colors;
+  if (legacyAppearance())
+    colors.setColor(QPalette::Base, base);
+  if (silenced) {
+    colors.setColor(QPalette::Base, blue);
+    colors.setColor(QPalette::Text, Qt::white);
+    colors.setColor(QPalette::Highlight, Qt::white);
+  }
+  // The classic appearance's application style sheet stops palette
+  // inheritance, so the viewport (the pane background) is set directly.
+  setPalette(colors);
+  viewport()->setPalette(colors);
 }
 void AlarmView::setModel(QAbstractItemModel* next) {
   if (next == model())
@@ -356,12 +369,14 @@ void AlarmView::drawRow(QPainter* painter, const QStyleOptionViewItem& option,
                         const QModelIndex& row) const {
   if (!legacyAppearance()) { drawStyledRow(painter, option, row); return; }
   painter->save();
-  painter->fillRect(option.rect, base);
+  // The pane is ALH gray, or blue with white text during a silence interval.
+  const QColor pane = palette().color(QPalette::Base), ink = palette().color(QPalette::Text);
+  painter->fillRect(option.rect, pane);
   auto rectangles = cells(row, option.rect);
   if (tree && row.parent().isValid()) {
     auto current = row;
     int x = rectangles[0].left() - 11;
-    painter->setPen(Qt::black);
+    painter->setPen(ink);
     bool leaf = true;
     while (current.parent().isValid()) {
       bool last = current.row() + 1 == model()->rowCount(current.parent());
@@ -384,14 +399,14 @@ void AlarmView::drawRow(QPainter* painter, const QStyleOptionViewItem& option,
     const auto text = field(row, column).toString();
     QColor color = field(row, column, Qt::BackgroundRole).value<QColor>();
     if (!color.isValid())
-      color = base;
+      color = pane;
     painter->setFont(field(row, column, Qt::FontRole).value<QFont>());
     painter->setPen(Qt::black);
     if (column == 3) {
       QPolygon arrow;
       arrow << QPoint(rect.left() + 2, rect.top() + 3) << QPoint(rect.left() + 2, rect.bottom() - 3)
             << QPoint(rect.right() - 1, rect.center().y());
-      painter->setBrush(Qt::black);
+      painter->setBrush(ink);
       painter->drawPolygon(arrow);
       painter->setPen(light);
       painter->drawLine(arrow[0], arrow[1]);
@@ -406,13 +421,15 @@ void AlarmView::drawRow(QPainter* painter, const QStyleOptionViewItem& option,
       const int textOffset = column == 2 ? 2 : 0;
       painter->drawText(rect.adjusted(2, 0, -2, 0).translated(0, textOffset), Qt::AlignCenter, text);
     } else if (column == 1) {
+      // ALH's severity box keeps its color, so it shows on a silenced pane.
+      painter->fillRect(rect.adjusted(0, 2, 0, -2), color);
       if (!text.trimmed().isEmpty()) {
-        painter->fillRect(rect.adjusted(0, 2, 0, -2), color);
         painter->setPen(color == red ? Qt::white : Qt::black);
         painter->drawText(rect, Qt::AlignCenter, text);
       }
     } else {
-      if (column == 6 && color != base) {
+      painter->setPen(ink);
+      if (column == 6 && color != pane) {
         painter->fillRect(rect, color);
         painter->setPen(color == blue ? Qt::white : Qt::black);
       }

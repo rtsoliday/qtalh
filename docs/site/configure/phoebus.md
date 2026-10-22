@@ -10,6 +10,11 @@ the converted configuration.
 
 ## In the application
 
+These File menu commands are hidden unless the `QTALH_PHOEBUS_MENU`
+environment variable is set to a value other than empty or `0`, for example
+`QTALH_PHOEBUS_MENU=1 qtalh -c`. The command-line conversions below are
+always available.
+
 - **File → Export Phoebus XML…** writes the current configuration (configured
   masks, not runtime changes).
 - **File → Import Phoebus XML…** converts a Phoebus file and opens it in the

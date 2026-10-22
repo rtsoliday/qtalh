@@ -5,6 +5,7 @@
 #include "ui/window.h"
 #include "ui/dialogs.h"
 #include <QApplication>
+#include <QDir>
 #include <QFileDialog>
 #include <QStyleFactory>
 #include <QTextStream>
@@ -79,13 +80,26 @@ int main(int argc, char** argv) {
       doc = alh::parseConfig("GROUP NULL NewGroup\n");
     else {
       if (!QFileInfo::exists(options.config)) {
+        // ALH opens a file selection box here. Name the missing path (a relative
+        // name resolves against -f or ALARMHANDLER) and preselect a file whose
+        // name differs only in case, such as Booster.alhconfig.
+        const QFileInfo missing(options.config);
+        QTextStream(stderr) << "qtalh: Configuration not found: " << missing.absoluteFilePath() << '\n';
+        QString initial = missing.dir().exists() ? missing.absolutePath() : options.configDir;
+        for (const auto& name : missing.dir().entryList(QDir::Files))
+          if (name.compare(missing.fileName(), Qt::CaseInsensitive) == 0)
+            initial = missing.dir().filePath(name);
         options.config =
-            alh::chooseFile(nullptr, "Alarm Configuration File", options.configDir,
-                                         "Alarm configurations (*.alhConfig)");
+            alh::chooseFile(nullptr, "Alarm Configuration File (not found: " + missing.fileName() + ")",
+                            initial, "Alarm configurations (*.alhConfig)");
         if (options.config.isEmpty())
           return 0;
       }
       doc = alh::loadConfig(options.config, options.configDir);
+      // The editor saves and reloads the text on every edit; refuse a file
+      // that would not reload with the same hierarchy.
+      if (options.editor)
+        alh::writeCheckedConfig(doc);
     }
     auto window = new alh::Window(std::move(doc), options);
     if (!options.editor && options.broadcast) alh::handleInterrupt(window);

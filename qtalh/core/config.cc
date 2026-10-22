@@ -114,12 +114,14 @@ public:
         return p;
       };
       if (key == "GROUP" || key == "CHANNEL") {
-        if (w.size() < (key == "GROUP" ? 3 : 3) || w.size() > (key == "GROUP" ? 3 : 4))
+        // ALH scans a fixed number of tokens and ignores the rest, including a
+        // mask on a GROUP line and anything after a channel's mask.
+        if (w.size() < 3)
           fail("Invalid group/channel declaration");
         auto n = std::make_shared<Node>();
         n->group = key == "GROUP";
         n->name = w[2];
-        if (!n->group && w.size() == 4)
+        if (!n->group && w.size() >= 4)
           n->mask = Mask::parse(w[3]);
         if (w[1] == "NULL") {
           if (!n->group)
@@ -134,14 +136,12 @@ public:
           n->parent = findParent(w[1]);
         if (n->group && n->name == "NULL")
           fail("NULL is reserved for the root's parent");
+        // A group may repeat an ancestor's name, as in ALH: parent names resolve
+        // to the nearest such ancestor. writeCheckedConfig() guards saves and
+        // edits that the text could not record unambiguously.
         int nesting = 0;
-        for (Node* p = n->parent; p; p = p->parent) {
-          // Parent references are names, so a repeated ancestor name cannot
-          // distinguish an intended sibling from a child when saving/editing.
-          if (n->group && n->name == p->name)
-            fail("Group name duplicates an ancestor: " + n->name);
+        for (Node* p = n->parent; p; p = p->parent)
           ++nesting;
-        }
         if (nesting >= 50)
           fail("Group nesting exceeds 50 levels");
         if (n->parent)
@@ -151,7 +151,8 @@ public:
         current = n.get();
         declared = true;
       } else if (key == "INCLUDE") {
-        if (w.size() != 3)
+        // As in ALH, tokens after the filename are ignored.
+        if (w.size() < 3)
           fail("INCLUDE requires parent and filename");
         Node* parent = findParent(w[1]);
         const QString path = QFileInfo(QDir(base).filePath(w[2])).absoluteFilePath();
@@ -203,9 +204,11 @@ public:
           continue;
         }
         if (name == "HEARTBEATPV") {
-          const auto args = words(value);
-          if (args.isEmpty() || args.size() > 3)
+          // ALH reads the PV, interval and value and ignores further tokens.
+          const auto args = words(value).mid(0, 3);
+          if (args.isEmpty())
             fail("Invalid heartbeat arguments");
+          value = args.join(' ');
           bool ok = true;
           if (args.size() > 2)
             args[2].toShort(&ok);
@@ -348,14 +351,15 @@ public:
         }
         if (name == "ALARMCOUNTFILTER") {
           // ALH's %i conversions accept decimal, octal and hexadecimal integers.
-          // Omitted arguments use its one-count, one-second defaults.
+          // Omitted arguments use its one-count, one-second defaults, and tokens
+          // after the seconds (for example a copied "-----" mask) are ignored.
           bool a = true, b = true;
           int count = 1, seconds = 1;
           if (!args.isEmpty())
             count = args[0].toInt(&a, 0);
           if (args.size() > 1)
             seconds = args[1].toInt(&b, 0);
-          if (args.size() > 2 || !a || !b || count < -1 || count > 1000000 || seconds < 0)
+          if (!a || !b || count < -1 || count > 1000000 || seconds < 0)
             fail("Invalid count filter");
           value = QString("%1 %2").arg(count).arg(seconds);
         }
@@ -455,11 +459,68 @@ QString writeConfig(const Document& doc) {
     writeNode(out, *doc.root);
   return text;
 }
+namespace {
+// Nodes in writeConfig() order: each node's channels, then its groups.
+void writerOrder(Node* n, QVector<Node*>& out) {
+  out.push_back(n);
+  for (bool groups : {false, true})
+    for (const auto& child : n->children)
+      if (child->group == groups)
+        writerOrder(child.get(), out);
+}
+bool repeatsAncestorName(const Node& n) {
+  if (n.group)
+    for (auto p = n.parent; p; p = p->parent)
+      if (p->name == n.name)
+        return true;
+  for (const auto& child : n.children)
+    if (repeatsAncestorName(*child))
+      return true;
+  return false;
+}
+int depth(const Node* n) {
+  int result = 0;
+  for (auto p = n->parent; p; p = p->parent)
+    ++result;
+  return result;
+}
+} // namespace
+QString hierarchyChange(const Document& doc, const QString& text) {
+  // Parent names resolve to the nearest matching ancestor. Once a group repeats
+  // an ancestor's name, a later line meant for the outer group can resolve to
+  // the inner one, so reload the text and require the same hierarchy.
+  if (!doc.root || !repeatsAncestorName(*doc.root))
+    return {};
+  Document reloaded;
+  try {
+    reloaded = parseConfig(text);
+  } catch (const ParseError&) {
+    return {}; // Callers that reload the text report other errors themselves.
+  }
+  QVector<Node*> expected, actual;
+  writerOrder(doc.root.get(), expected);
+  writerOrder(reloaded.root.get(), actual);
+  for (int i = 0; i < expected.size(); ++i)
+    if (i >= actual.size() || depth(expected[i]) != depth(actual[i])) {
+      const auto parent = expected[i]->parent ? expected[i]->parent->name : QString();
+      return QString("%1 %2 would move under another group named %3 when saved; "
+                     "rename one of the %3 groups")
+          .arg(expected[i]->group ? "Group" : "Channel", expected[i]->name, parent);
+    }
+  return {};
+}
+QString writeCheckedConfig(const Document& doc) {
+  const auto text = writeConfig(doc);
+  const auto moved = hierarchyChange(doc, text);
+  if (!moved.isEmpty())
+    throw ParseError(moved);
+  return text;
+}
 void saveConfig(const Document& doc, const QString& path) {
   QSaveFile f(path);
   if (!f.open(QIODevice::WriteOnly))
     throw ParseError(f.errorString());
-  const auto text = writeConfig(doc);
+  const auto text = writeCheckedConfig(doc);
   // Edits may add text that ISO-8859-1 cannot represent; keep it, not '?'.
   auto data = doc.latin1 ? text.toLatin1() : text.toLocal8Bit();
   if (doc.latin1 && QString::fromLatin1(data) != text)

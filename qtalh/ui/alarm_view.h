@@ -31,6 +31,8 @@ protected:
 class AlarmView : public QTreeView {
 public:
   explicit AlarmView(bool tree, QWidget* parent = nullptr);
+  // ALH's Silence N minutes display: a blue pane with white text.
+  void setSilenced(bool);
   void setModel(QAbstractItemModel*) override;
   QRect visualRect(const QModelIndex&) const override;
   QModelIndex indexAt(const QPoint&) const override;

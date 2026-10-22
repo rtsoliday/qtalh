@@ -22,7 +22,7 @@ void Window::activateRuntime() {
   if (!options.editor) return;
   try {
     // Validate and clone the edited configuration; runtime masks must not mutate the editor.
-    auto snapshot = parseConfig(writeConfig(doc));
+    auto snapshot = parseConfig(writeCheckedConfig(doc));
     if (doc.filename.isEmpty()) {
       save(true);
       if (doc.filename.isEmpty()) return;

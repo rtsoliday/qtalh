@@ -3,7 +3,24 @@
 #include <QDir>
 #include <QFileInfo>
 namespace alh {
-Options parseOptions(const QStringList& args) {
+Options parseOptions(const QStringList& arguments) {
+  // Workspace scripts sometimes attach a path to its switch, as in
+  // "-p/usr/share/sounds/bell.oga". ALH prints its usage and exits; QtALH
+  // splits the form for the path switches, where a leading '/' or '.' cannot
+  // begin another option name.
+  QStringList args;
+  for (int i = 0; i < arguments.size(); ++i) {
+    const auto& a = arguments[i];
+    if (a == "--") {
+      args << arguments.mid(i);
+      break;
+    }
+    if (i > 0 && a.size() > 2 && a[0] == '-' && QString("aoflp").contains(a[1]) &&
+        (a[2] == '/' || a[2] == '.'))
+      args << a.left(2) << a.mid(2);
+    else
+      args << a;
+  }
   Options o;
   bool explicitLogDir = false, explicitMaxRecords = false;
   o.configDir = qEnvironmentVariable("ALARMHANDLER", ".");
@@ -115,10 +132,17 @@ Options parseOptions(const QStringList& args) {
       }
       if (i + 1 < args.size())
         throw ParseError("Only one configuration filename is accepted");
-    } else if (a.startsWith('-'))
-      throw ParseError("Unsupported option: " + a +
-                       " (Xt resource overrides, CDEV and CMLOG are not available)");
-    else {
+    } else if (a.startsWith('-')) {
+      // Explain the legacy switches QtALH omits; otherwise point to the help.
+      static const QStringList xt = {"-xrm", "-bg", "-background", "-fg", "-foreground", "-bd",
+                                     "-bordercolor", "-bw", "-borderwidth", "-name", "-title",
+                                     "-iconic", "-rv", "-reverse", "-synchronous",
+                                     "-selectionTimeout", "-xnllanguage"};
+      const QString reason = a == "-aCM" || a == "-oCM" ? "CMLOG logging is not available"
+                             : xt.contains(a)          ? "Xt resource options are not available"
+                                                       : "see qtalh -help for supported options";
+      throw ParseError("Unsupported option: " + a + " (" + reason + ")");
+    } else {
       if (!o.config.isEmpty())
         throw ParseError("Only one configuration filename is accepted");
       o.config = a;

@@ -2355,8 +2355,54 @@ $GUIDANCE https://example.invalid/guide
       QVERIFY(d.channels()[3]->mask[Disable]);
       d = parseConfig(writeConfig(d));
     }
-    QVERIFY_THROWS_EXCEPTION(ParseError, parseConfig("GROUP NULL root extra # invalid\n"));
-    QVERIFY_THROWS_EXCEPTION(ParseError, parseConfig("GROUP NULL root\nCHANNEL root pv D extra # invalid\n"));
+  }
+  void legacyIgnoredTokens() {
+    // ALH scans a fixed number of tokens on these lines and ignores the rest,
+    // as in production files with a mask copied onto a GROUP or a count filter.
+    QTemporaryDir dir;
+    QFile included(dir.filePath("child.alhConfig"));
+    QVERIFY(included.open(QIODevice::WriteOnly));
+    included.write("GROUP NULL child\nCHANNEL child nested\n");
+    included.close();
+    auto d = parseConfig("GROUP NULL root ---T-\n"
+                         "$HEARTBEATPV beat 2 1 extra\n"
+                         "CHANNEL root pv ---- - # mask then a stray token\n"
+                         "$ALARMCOUNTFILTER -1 3 -----\n"
+                         "INCLUDE root child.alhConfig extra\n", dir.path());
+    for (int load = 0; load < 2; ++load) {
+      QCOMPARE(d.root->name, QString("root"));
+      QCOMPARE(d.channels().size(), 2);
+      QCOMPARE(d.channels()[0]->mask.text(), QString("-----"));
+      QCOMPARE(d.channels()[0]->option("ALARMCOUNTFILTER"), QString("-1 3"));
+      QCOMPARE(d.root->option("HEARTBEATPV"), QString("beat 2 1"));
+      QCOMPARE(d.channels()[1]->name, QString("nested"));
+      d = parseConfig(writeConfig(d));
+    }
+  }
+  void repeatedAncestorNames() {
+    // ALH resolves a parent name to the nearest matching ancestor, so a group
+    // may repeat an ancestor's name (Shutdown1.alhConfig: Vacuum/.../Vacuum).
+    auto d = parseConfig("GROUP NULL Vacuum\nGROUP Vacuum Sector\nGROUP Sector Vacuum\n"
+                         "CHANNEL Vacuum inner\n");
+    auto inner = d.channels()[0];
+    QCOMPARE(inner->parent->name, QString("Vacuum"));
+    QCOMPARE(inner->parent->parent->name, QString("Sector"));
+    QVERIFY(hierarchyChange(d, writeConfig(d)).isEmpty());
+    // A group added beside Sector would follow the inner Vacuum when saved and
+    // reload under it. Saving and checked edits refuse instead of moving it.
+    auto beside = std::make_shared<Node>();
+    beside->group = true;
+    beside->name = "Beside";
+    beside->parent = d.root.get();
+    d.root->children.push_back(beside);
+    const auto text = writeConfig(d);
+    QVERIFY(hierarchyChange(d, text).contains("Group Beside would move under another group named Vacuum"));
+    QCOMPARE(parseConfig(text).nodes().back()->parent->parent->name, QString("Sector"));
+    QVERIFY_THROWS_EXCEPTION(ParseError, writeCheckedConfig(d));
+    QTemporaryDir dir;
+    const auto path = dir.filePath("saved.alhConfig");
+    QVERIFY_THROWS_EXCEPTION(ParseError, saveConfig(d, path));
+    QVERIFY(!QFileInfo::exists(path));
   }
   void countFilterDefaults_data() {
     QTest::addColumn<QString>("arguments");
@@ -2365,6 +2411,7 @@ $GUIDANCE https://example.invalid/guide
     QTest::newRow("no-arguments") << "" << 1 << 1;
     QTest::newRow("count-only") << "2" << 2 << 1;
     QTest::newRow("explicit") << "-1 3" << -1 << 3;
+    QTest::newRow("trailing-tokens") << "-1 3 -----" << -1 << 3;
   }
   void countFilterDefaults() {
     QFETCH(QString, arguments);
@@ -2384,7 +2431,7 @@ $GUIDANCE https://example.invalid/guide
     ++time; e.tick(); QCOMPARE(e.state(n).severity, 2);
   }
   void countFilterInvalidArguments() {
-    for (const auto arguments : {"bad", "2 bad", "-2", "1 -1", "1000001", "1 2 3"})
+    for (const auto arguments : {"bad", "2 bad", "-2", "1 -1", "1000001"})
       QVERIFY_THROWS_EXCEPTION(ParseError, parseConfig(QString("GROUP NULL root\nCHANNEL root pv\n"
           "$ALARMCOUNTFILTER ") + arguments + "\n"));
   }
@@ -2457,9 +2504,6 @@ $GUIDANCE https://example.invalid/guide
   }
   void malformed_data() {
     QTest::addColumn<QString>("text");
-    QTest::newRow("ancestor name") << "GROUP NULL root\nGROUP root root";
-    QTest::newRow("distant ancestor name")
-        << "GROUP NULL root\nGROUP root branch\nGROUP branch root";
     QTest::newRow("reserved group name") << "GROUP NULL root\nGROUP root NULL";
     QTest::newRow("missing root") << "CHANNEL root pv";
     QTest::newRow("bad parent") << "GROUP NULL root\nCHANNEL missing pv";
@@ -2480,10 +2524,6 @@ $GUIDANCE https://example.invalid/guide
     QTest::newRow("group statcommand") << "GROUP NULL a\n$STATCOMMAND HIHI true";
     QTest::newRow("group count filter") << "GROUP NULL a\n$ALARMCOUNTFILTER 2 5";
     QTest::newRow("group ackpv") << "GROUP NULL a\n$ACKPV ack 1";
-    QTest::newRow("group extra token") << "GROUP NULL a extra";
-    QTest::newRow("channel extra token") << "GROUP NULL a\nCHANNEL a pv ----- extra";
-    QTest::newRow("include extra token") << "GROUP NULL a\nINCLUDE a file extra";
-    QTest::newRow("heartbeat extra token") << "GROUP NULL a\n$HEARTBEATPV beat 1 1 extra";
     QTest::newRow("heartbeat text interval") << "GROUP NULL a\n$HEARTBEATPV beat fast";
     QTest::newRow("unknown facility beep") << "$BEEPSEVERITY HIGH\nGROUP NULL a";
     QTest::newRow("unknown beep") << "GROUP NULL a\n$BEEPSEVR HIGH";
@@ -3333,6 +3373,35 @@ $GUIDANCE https://example.invalid/guide
     const auto expectedLog = QFileInfo(explicitPath ? path :
         QDir(useEnvironment ? config : logs).filePath(path)).absoluteFilePath();
     QCOMPARE(o.alarmFile, expectedLog); QCOMPARE(o.opmodFile, expectedLog);
+  }
+  void attachedPathValues() {
+    // A workspace script wrote "-p/usr/share/...": ALH prints its usage and
+    // exits. QtALH splits the attached path for -a, -o, -f, -l and -p.
+    auto o = parseOptions({"qtalh", "-maskcolor", "-m", "2000", "-p/usr/share/sounds/bell.oga",
+                           "-l/tmp/qtalh-logs", "-f./configs", "-a./alarms", "linac.alhConfig"});
+    QCOMPARE(o.sound, QString("/usr/share/sounds/bell.oga"));
+    QCOMPARE(o.logDir, QString("/tmp/qtalh-logs"));
+    QCOMPARE(o.configDir, QString("./configs"));
+    QCOMPARE(o.alarmFile, QFileInfo("./alarms").absoluteFilePath());
+    QCOMPARE(o.config, QFileInfo(QDir("./configs").filePath("linac.alhConfig")).absoluteFilePath());
+    QVERIFY(o.maskColor);
+    QCOMPARE(o.maxRecords, 2000);
+    // After "--" the argument is a configuration name, not an option.
+    o = parseOptions({"qtalh", "--", "-p/x"});
+    QVERIFY(o.sound.isEmpty());
+    QVERIFY(o.config.endsWith("-p/x"));
+    // Other unknown switches name the reason or point to the help.
+    const QList<QPair<QString, QString>> unsupported = {
+        {"-pbell.oga", "see qtalh -help"}, {"-xrm", "Xt resource options"}, {"-aCM", "CMLOG"}};
+    for (const auto& item : unsupported) {
+      try {
+        parseOptions({"qtalh", item.first});
+        QFAIL(qPrintable(item.first));
+      } catch (const ParseError& e) {
+        QVERIFY2(QString(e.what()).contains("Unsupported option: " + item.first) &&
+                     QString(e.what()).contains(item.second), e.what());
+      }
+    }
   }
   void logDirectoryInheritance() {
     struct RestoreEnvironment {

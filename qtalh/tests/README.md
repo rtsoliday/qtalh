@@ -15,7 +15,7 @@ make -j4 test-qtalh QT_VERSION=5
 ```
 
 This builds legacy programs if Motif is detected and runs the core, modern and
-classic UI, IOC, pvAccess, helper, notification, and analytics suites. It does **not** run visual comparisons. The equivalent
+classic UI, IOC, pvAccess, helper, notification, analytics, and SDDS suites. It does **not** run visual comparisons. The equivalent
 `make -C qtalh test` builds Qt prerequisites but does not build legacy helpers.
 Individual targets allow testing the Qt core/UI/CA/PVA without Motif:
 
@@ -30,6 +30,7 @@ Individual targets allow testing the Qt core/UI/CA/PVA without Motif:
 | `test-pva` | Deterministic pvAccess callback tests for failed/ended monitors, stale data and write completions after disconnect, shared alarm subscriptions, acknowledgement changes, callback cancellation, never-connected channels, alarm-only force-input updates, value and alarm-status extraction, write conversions, rejected completions, oversized updates, inbox overflow with reads in flight, `readStrings`, and late callbacks after destruction (including from another thread). Uses a test provider without network sockets or an IOC. |
 | `test-helpers` | Log rotation/recovery, broadcasts, locks, and Unix queue/TCP/RPC compatibility. On Linux/macOS, requires `alh_printer`, `alh_DB`, local rpcbind, and `python3` (POSIX lock competitors) in addition to the Qt helpers built by this target. |
 | `test-build` | Linux only. Dry-run checks of Qt discovery: a `qmake6` found only on `PATH` is not used; `PKG_CONFIG_PATH` may not mix Qt installations. Compiles nothing. Not part of `make -C qtalh test`. |
+| `test-sdds` | Optional binary alarm snapshot and analytics table/chart readback, UTF-8, exact large counts and timestamps, unknown/lower-bound durations, empty output, atomic failure handling, menu availability, sorted rows and selected charts captured before a refresh. Uses offscreen Qt; data cases skip when SDDS is unavailable. Also run with `QTALH_TEST_STYLE=motif`. |
 | `test-visual` | Motif/Qt screenshots, dialog gallery, and an ordered alarm-log comparison. Requires a built `alh`, `softIoc`, an X11 display, and `xwininfo`. Does not build the legacy application. |
 
 Prepare legacy prerequisites with `make alh` before Unix helper/visual suites.
@@ -141,6 +142,24 @@ namespace. `test-build` passed 5 checks, `test-visual` passed under Xvfb and
 ThreadSanitizer runs of the suites reported no errors in QtALH code; the only
 sanitizer-run failures were the known fixed time bounds in
 `analyticsLargeDashboard` and `batchingAndTenThousandChannels`.
+
+## SDDS verification (2026-10-21)
+
+Linux x86-64 with GCC 11.3.0, Qt 5.15.9 and EPICS Base 7.0.8 passed the new
+SDDS suite in the modern and classic appearances (8 checks each), and against
+the older `/usr/local/epics/extensions` SDDS libraries (8 checks). Readback
+verified binary encoding, snapshot fields, analytics provenance, chart series,
+exact counts above 2^53, UTF-8, pre-epoch times and unknown/lower-bound values.
+Without SDDS, availability checks passed and five data cases skipped.
+
+An existing build directory successfully switched through usable, broken and
+restored SDDS libraries without cleaning. Broken/absent support produced no
+SDDS diagnostic or link dependency; cleanup skipped probing. Existing core
+(464), analytics (29), modern UI (293), and focused classic analytics UI (5)
+checks passed. The UI run used `QT_GSTREAMER_PLAYBIN_AUDIOSINK=fakesink` because
+the host's default audio sink could not open its resource. Documentation built
+and passed local-link checks. These SDDS changes have not been built with Qt 6,
+macOS or Windows.
 
 ## macOS verification (2026-10-15)
 

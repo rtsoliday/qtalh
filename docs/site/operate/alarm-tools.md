@@ -1,5 +1,13 @@
 # Active alarms, search & details
 
+With optional SDDS support, **File → Export Alarm Snapshot (SDDS)…** saves all
+configured channels in one binary page, regardless of the current view filter.
+The snapshot includes values as text, hierarchy, alarm and acknowledgement state,
+configured/runtime masks, shelving and observation availability. It changes no
+alarm state and writes no PVs. Timestamps describe QtALH processing, not IOC time.
+See the [SDDS export conventions](/operate/analytics#binary-sdds) for time and
+integer encoding.
+
 These runtime tools add views for finding and understanding alarms. They work
 with every appearance, including `-style motif`, and do not change how the alarm
 tree, acknowledgement or logging behave. Their **Acknowledge** and **Restore
