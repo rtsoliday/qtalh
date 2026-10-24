@@ -176,10 +176,10 @@ public:
           inc->before = takeBefore();
           inc->parent = include;
           parent->includes.push_back({inc, int(parent->children.size()),
-                                      current == parent && !afterInclude ? parent->directives.size() : -1});
+                                      current == parent && !afterInclude ? int(parent->directives.size()) : -1});
           parent->includes.back().sequence = ++sequence;
           regions.push_back({include, current, parent, declared, declarations,
-                             parent->includes.size() - 1, depth, pending});
+                             int(parent->includes.size()) - 1, depth, pending});
           include = inc;
           current = parent;
           declared = false;
@@ -328,7 +328,7 @@ public:
         inc->before = takeBefore();
         inc->parent = include;
         parent->includes.push_back({inc, int(parent->children.size()),
-                                    current == parent && !afterInclude ? parent->directives.size() : -1});
+                                    current == parent && !afterInclude ? int(parent->directives.size()) : -1});
         parent->includes.back().sequence = ++sequence;
         const int index = parent->includes.size() - 1;
         const int count = read(text, base, parent, depth + 1, path, inc);
