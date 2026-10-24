@@ -358,6 +358,13 @@ void checkNotificationDirective(const QString& name, const QString& value) {
   if (name == "NOTIFY") parseNotify(value);
   else parseDestination(name, value);
 }
+QStringList notificationDestinationIds(const QString& value) {
+  QStringList result;
+  for (const auto& stage : parseNotify(value).stages)
+    for (const auto& id : stage.destinations)
+      if (!result.contains(id)) result << id;
+  return result;
+}
 NotificationSettings configurationNotifications(const Document& doc, const QString& configuration,
                                                 const QString& sender, const QString& program) {
   NotificationSettings result;

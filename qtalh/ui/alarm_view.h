@@ -36,6 +36,7 @@ public:
   // ALH's Silence N minutes display: a blue pane with white text.
   void setSilenced(bool);
   void setModel(QAbstractItemModel*) override;
+  void scrollTo(const QModelIndex&, ScrollHint hint = EnsureVisible) override;
   QRect visualRect(const QModelIndex&) const override;
   QModelIndex indexAt(const QPoint&) const override;
   void dataChanged(const QModelIndex&, const QModelIndex&,
@@ -56,6 +57,7 @@ protected:
   void drawRow(QPainter*, const QStyleOptionViewItem&, const QModelIndex&) const override;
   void drawBranches(QPainter*, const QRect&, const QModelIndex&) const override {}
   void resizeEvent(QResizeEvent*) override;
+  void updateGeometries() override;
 
 private:
   QPersistentModelIndex hovered, pressed;
@@ -71,6 +73,8 @@ private:
   MotifButton *alarmsAbove = nullptr, *alarmsBelow = nullptr;
   QPersistentModelIndex nearestAbove, nearestBelow;
   QTimer offscreenTimer;
+  int offscreenHeight = 0;
+  bool offscreenUpdating = false, offscreenGeometryUpdating = false;
   void scheduleOffscreen() { if (!offscreenTimer.isActive()) offscreenTimer.start(); }
   void updateOffscreen();
   bool extentPending = false;

@@ -2195,10 +2195,43 @@ void Window::redoEdit() {
   modified = true;
   refresh();
 }
+namespace {
+bool notificationDestination(const Directive& d) {
+  return d.key == "NOTIFY_EMAIL" || d.key == "NOTIFY_WEBHOOK";
+}
+QString destinationId(const Directive& d) {
+  return d.value.trimmed().section(QRegularExpression("\\s+"), 0, 0);
+}
+bool sameDestination(const Directive& a, const Directive& b) {
+  // Conservatively reject different definitions rather than deliver copied
+  // alarms to a destination that merely has the same name.
+  return a.key == b.key && a.value.simplified() == b.value.simplified();
+}
+Node* correspondingNode(const Document& before, const Document& after, Node* node) {
+  const auto index = before.nodes().indexOf(node);
+  return index < 0 ? nullptr : after.nodes().at(index);
+}
+} // namespace
+Document Window::withoutSelection() const {
+  if (!selection || !selection->parent)
+    throw ParseError("The root group cannot be removed.");
+  Document candidate = doc;
+  candidate.root = cloneNode(*doc.root);
+  auto selected = correspondingNode(doc, candidate, selection);
+  auto parent = selected->parent;
+  const auto& siblings = parent->children;
+  const int offset = int(std::find_if(siblings.begin(), siblings.end(),
+                                     [selected](const auto& n) { return n.get() == selected; }) -
+                         siblings.begin());
+  takeChild(*parent, offset);
+  auto result = parseConfig(writeCheckedConfig(candidate, ConfigText::Edit));
+  result.filename = doc.filename;
+  result.latin1 = doc.latin1;
+  return result;
+}
 void Window::cut(bool remove) {
   if (!selection)
     return;
-  auto candidate = cloneNode(*selection);
   Document copied;
   copied.root = std::make_shared<Node>();
   copied.root->group = true;
@@ -2210,44 +2243,47 @@ void Window::cut(bool remove) {
   for (int suffix = 1; names.contains(copied.root->name); ++suffix)
     copied.root->name = "__QTALH_CLIPBOARD__" + QString::number(suffix);
   QString serialized;
+  Document remaining;
   try {
+    QSet<QString> required, defined;
+    for (auto node : copied.nodes())
+      for (const auto& d : node->directives)
+        if (d.key == "NOTIFY")
+          for (const auto& id : notificationDestinationIds(d.value)) required.insert(id);
+        else if (notificationDestination(d))
+          defined.insert(destinationId(d));
+    // Destinations have document-wide scope. Carry only the definitions this
+    // subtree needs from elsewhere, independently of the source window.
+    for (auto node : doc.nodes())
+      for (const auto& d : node->directives)
+        if (notificationDestination(d) && required.contains(destinationId(d)) &&
+            !defined.contains(destinationId(d))) {
+          copied.root->directives << d;
+          defined.insert(destinationId(d));
+        }
     // Check the actual cross-window payload before publishing it or deleting
     // the source of a Cut. Invalid data must leave both clipboards intact.
     serialized = writeCheckedConfig(copied, ConfigText::Source);
     parseConfig(serialized);
+    if (remove) remaining = withoutSelection();
   } catch (const std::exception& e) {
     error(e.what());
     return;
   }
-  clipboard = std::move(candidate);
+  clipboard = std::move(copied);
   auto mime = new QMimeData;
   mime->setText(selection->name);
   mime->setData("application/x-qtalh-config", serialized.toUtf8());
   QApplication::clipboard()->setMimeData(mime);
   if (remove)
-    clearNode();
+    replace(std::move(remaining));
 }
 void Window::clearNode() {
-  if (!selection || !selection->parent) {
-    error("The root group cannot be removed.");
-    return;
+  try {
+    replace(withoutSelection());
+  } catch (const std::exception& e) {
+    error(e.what());
   }
-  auto parent = selection->parent;
-  auto& c = parent->children;
-  const int offset = int(std::find_if(c.begin(), c.end(), [this](auto& p) { return p.get() == selection; }) -
-                         c.begin());
-  auto backup = takeChild(*parent, offset);
-  auto text = writeConfig(doc, ConfigText::Edit);
-  const auto moved = hierarchyChange(doc, text);
-  insertChild(*parent, offset, backup);
-  if (!moved.isEmpty()) {
-    error(moved);
-    return;
-  }
-  auto d = parseConfig(text);
-  d.filename = doc.filename;
-  d.latin1 = doc.latin1;
-  replace(std::move(d));
 }
 void Window::paste() {
   if (!selection) {
@@ -2255,33 +2291,57 @@ void Window::paste() {
     return;
   }
   auto mime = QApplication::clipboard()->mimeData();
+  Document copied = clipboard;
   if (mime && mime->hasFormat("application/x-qtalh-config")) {
     try {
-      auto copied = parseConfig(QString::fromUtf8(mime->data("application/x-qtalh-config")));
-      if (!copied.root->children.empty())
-        clipboard = cloneNode(*copied.root->children.front());
+      copied = parseConfig(QString::fromUtf8(mime->data("application/x-qtalh-config")));
     } catch (const std::exception& e) {
       error(e.what());
       return;
     }
   }
-  if (!clipboard)
+  if (!copied.root || copied.root->children.empty())
     return;
   auto p = selection->group ? selection : selection->parent;
   if (!p)
     return;
-  // Pasted nodes join the file of the group they are pasted into.
-  auto c = cloneNode(*clipboard, p, false);
-  p->children.push_back(c);
-  auto text = writeConfig(doc, ConfigText::Edit);
-  const auto moved = hierarchyChange(doc, text);
-  p->children.pop_back();
   try {
-    if (!moved.isEmpty())
-      throw ParseError(moved);
-    auto d = parseConfig(text);
+    Document candidate = doc;
+    candidate.root = cloneNode(*doc.root);
+    p = correspondingNode(doc, candidate, p);
+    // Pasted nodes join the file of the group they are pasted into.
+    auto c = cloneNode(*copied.root->children.front(), p, false);
+    QHash<QString, Directive> destinations;
+    for (auto node : candidate.nodes())
+      for (const auto& directive : node->directives)
+        if (notificationDestination(directive)) destinations.insert(destinationId(directive), directive);
+    auto addDestination = [&](const Directive& directive) {
+      const auto id = destinationId(directive);
+      const auto existing = destinations.constFind(id);
+      if (existing != destinations.cend()) {
+        if (!sameDestination(*existing, directive))
+          throw ParseError("Notification destination " + id + " has a different definition here");
+        return false;
+      }
+      destinations.insert(id, directive);
+      return true;
+    };
+    Document subtree;
+    subtree.root = c;
+    for (auto node : subtree.nodes())
+      for (int i = 0; i < node->directives.size();)
+        if (notificationDestination(node->directives[i]) && !addDestination(node->directives[i]))
+          node->directives.removeAt(i);
+        else
+          ++i;
+    for (const auto& directive : copied.root->directives)
+      if (notificationDestination(directive) && addDestination(directive))
+        candidate.root->directives << directive;
+    p->children.push_back(c);
+    auto d = parseConfig(writeCheckedConfig(candidate, ConfigText::Edit));
     d.filename = doc.filename;
     d.latin1 = doc.latin1;
+    clipboard = std::move(copied);
     replace(std::move(d));
   } catch (const std::exception& e) {
     error(e.what());

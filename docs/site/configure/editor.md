@@ -52,6 +52,12 @@ Clicking **P** runs the related-process command in the configuration tool too, a
 
 Undo uses **Alt+Backspace**, and redo uses **Ctrl+Y**. The editor also supports cut/copy/paste and copying between editor windows.
 
+Copying a group or channel also carries the notification destinations its
+`$NOTIFY` directives need. Paste reuses matching destination definitions and
+adds missing ones to the destination configuration's root. It refuses a paste
+if the same destination name has a different definition there. Clear and Cut
+refuse to remove a destination still used elsewhere in the configuration.
+
 Undo and redo share a limit of 100 configuration snapshots and a 32 MiB memory
 budget. Older snapshots are discarded as needed. A configuration too large for
 one snapshot clears the undo/redo history.
@@ -109,6 +115,8 @@ INCLUDE files, to the file of the destination group.
 
 Before writing, QtALH reads the saved text back and refuses to save if it would
 load as a different configuration; nothing is written then.
+This also applies when different INCLUDE paths reach the same file through a
+symbolic link: their copies must agree before Save can write that file.
 
 In a runtime, **View → Configuration File** shows the running configuration as
 read-only text with search, with the comments and blank lines of its source

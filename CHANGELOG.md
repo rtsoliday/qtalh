@@ -56,6 +56,14 @@ Changes that operators and site maintainers should review before deployment:
 
 Additional 1.0.0 audit decisions and corrections:
 
+- Editor Clear and Cut reject changes that would leave notification references
+  unresolved. Copy and Paste carry required notification destinations between
+  editor windows, reuse matching definitions and reject conflicting definitions.
+- Renaming a group updates its INCLUDE parent references. CRLF guidance saves
+  consistently, and saves reject differing copies of the same included file
+  reached through symbolic links.
+- Offscreen alarm indicators leave room to reveal the final row and update
+  after font changes.
 - Phoebus XML remains an interchange format with documented conversion limits.
   Keep the original `.alhConfig` as the authoritative configuration.
 - Phoebus imports keep every line within legacy ALH's 498-byte line limit:

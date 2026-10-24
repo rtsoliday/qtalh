@@ -14,6 +14,7 @@
 #include <QScrollBar>
 #include <QStyledItemDelegate>
 #include <QTimer>
+#include <climits>
 namespace alh {
 namespace {
 const QColor base("#b0c3ca"), light("#dde6e9"), dark("#5f696d"), red("red"), blue("blue");
@@ -215,16 +216,63 @@ void AlarmView::resizeEvent(QResizeEvent* event) {
   QTreeView::resizeEvent(event);
   updateOffscreen();
 }
+void AlarmView::scrollTo(const QModelIndex& index, ScrollHint hint) {
+  QTreeView::scrollTo(index, hint);
+  if (!offscreenHeight || !index.isValid()) return;
+  // scrollTo() updates Qt's private scrollbar range directly, bypassing our
+  // geometry override. Restore the spacer before positioning within the band
+  // above the strip; otherwise the final row is clamped underneath it.
+  updateGeometries();
+  const auto row = QTreeView::visualRect(index.sibling(index.row(), 0));
+  if (row.isEmpty()) return;
+  const int band = qMax(1, viewport()->height() - offscreenHeight);
+  auto scroll = verticalScrollBar();
+  int offset = scroll->value();
+  if (hint == PositionAtTop || (hint == EnsureVisible && row.top() < 0))
+    offset += row.top();
+  else if (hint == PositionAtBottom || (hint == EnsureVisible && row.bottom() >= band))
+    offset += row.height() > band ? row.top() : row.bottom() + 1 - band;
+  else if (hint == PositionAtCenter)
+    offset += row.top() - (band - row.height()) / 2;
+  scroll->setValue(offset);
+}
+void AlarmView::updateGeometries() {
+  if (offscreenGeometryUpdating) return;
+  offscreenGeometryUpdating = true;
+  const int offset = verticalScrollBar()->value();
+  QTreeView::updateGeometries();
+  // When the rows fit without a strip, release it and let the queued recount
+  // use the whole viewport. Retaining padding here could preserve an old scroll
+  // position and manufacture an alarm above otherwise fully visible rows.
+  if (!verticalScrollBar()->maximum() && offscreenHeight) {
+    offscreenHeight = 0;
+    offscreenBar->hide();
+  }
+  if (offscreenHeight) {
+    // QTreeView resets viewport margins itself. Reserve a scrollable spacer
+    // instead, so even the final row can move clear of the indicator strip.
+    auto scroll = verticalScrollBar();
+    scroll->setMaximum(int(qMin(qint64(INT_MAX), qint64(scroll->maximum()) + offscreenHeight)));
+    scroll->setPageStep(qMax(1, scroll->pageStep() - offscreenHeight));
+    // Qt's unpadded range can temporarily clamp a position inside the spacer.
+    scroll->setValue(offset);
+  }
+  offscreenGeometryUpdating = false;
+  if (offscreenBar) scheduleOffscreen();
+}
 void AlarmView::updateOffscreen() {
+  if (offscreenUpdating || offscreenGeometryUpdating || !offscreenBar) return;
+  offscreenUpdating = true;
   offscreenTimer.stop();
   nearestAbove = nearestBelow = QModelIndex();
   int above = 0, below = 0, worstAbove = 0, worstBelow = 0;
   // Measure a button, not the bar, whose hint shrinks while both are hidden.
   const auto margins = offscreenBar->layout()->contentsMargins();
   const int height = alarmsBelow->sizeHint().height() + margins.top() + margins.bottom();
-  // A row is hidden when its middle is outside the visible band, which excludes
-  // the strip the bar covers whenever it is shown.
-  const int limit = viewport()->height() - height;
+  // A hidden bar leaves the entire viewport available. Only reserve its strip
+  // after a hidden alarm makes it necessary; otherwise alarms in the bottom
+  // strip alone would cause the bar to appear and hide those same alarms.
+  const int limit = viewport()->height() - offscreenHeight;
   for (auto index = model() ? model()->index(0, 0, rootIndex()) : QModelIndex(); index.isValid();
        index = indexBelow(index)) {
     const int severity = index.data(AlarmSeverityRole).toInt();
@@ -255,6 +303,14 @@ void AlarmView::updateOffscreen() {
   offscreenBar->setGeometry(pane.left(), pane.bottom() - height + 1, pane.width(), height);
   offscreenBar->setVisible(above || below);
   offscreenBar->raise();
+  const int reserved = above || below ? height : 0;
+  if (offscreenHeight != reserved) {
+    offscreenHeight = reserved;
+    updateGeometries();
+    // The scroll range and its clamped position may have changed.
+    scheduleOffscreen();
+  }
+  offscreenUpdating = false;
 }
 void AlarmView::setSilenced(bool silenced) {
   // Roles left unset follow the application palette. Alarm, acknowledgement
@@ -328,6 +384,7 @@ void AlarmView::invalidateTextWidths() {
   chipImages.clear();
   doItemsLayout();
   scheduleExtent();
+  scheduleOffscreen();
 }
 std::array<QRect, 9> AlarmView::cells(const QModelIndex& row, const QRect& bounds) const {
   std::array<QRect, 9> result;
@@ -645,6 +702,7 @@ void AlarmView::currentChanged(const QModelIndex& current, const QModelIndex& pr
   updateRow(previous);
 }
 bool AlarmView::viewportEvent(QEvent* event) {
+  if (event->type() == QEvent::Resize) scheduleOffscreen();
   // Row extents do not depend on the viewport, which only sets the minimum width.
   if (!legacyAppearance() && event->type() == QEvent::Resize) scheduleExtent(false);
   if (!legacyAppearance() && (event->type() == QEvent::MouseMove ||

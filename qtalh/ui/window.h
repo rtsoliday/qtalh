@@ -147,7 +147,8 @@ private:
   Node *selection = nullptr, *selectedGroup = nullptr;
   QStringList undo, redo;
   void rememberEdit(QStringList&, QString);
-  std::shared_ptr<Node> clipboard;
+  // Dummy root holds notification destinations required by its copied child.
+  Document clipboard;
   QAction *undoAction = nullptr, *redoAction = nullptr;
   QPointer<QDialog> historyDialog, shelfListDialog, notificationDialog, analyticsDialog;
   QPointer<QMessageBox> errorPopup, exitPopup;
@@ -236,6 +237,7 @@ private:
   void cut(bool remove);
   void paste();
   void clearNode();
+  Document withoutSelection() const;
   void exitApplication();
   QModelIndex treeIndex(Node*) const;
   // Select a node as replace() and addNode() leave it: highlighted in the tree

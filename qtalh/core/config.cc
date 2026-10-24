@@ -446,7 +446,7 @@ public:
             static const QRegularExpression invalidEnd("^[ \\t]*\\$");
             if (lines[i].contains(invalidEnd))
               fail("Guidance must end with $END, not " + lines[i].trimmed());
-            body.push_back(lines[i]);
+            body.push_back(lines[i].endsWith('\r') ? lines[i].chopped(1) : lines[i]);
           }
           if (!ended) {
             i = start; // Report the $GUIDANCE line, not one past the end.
@@ -656,9 +656,12 @@ public:
     // INCLUDE files to write: those declaring a node, with the files that
     // include them, and empty ones whose group remains. A file whose groups
     // and channels were all removed is no longer included.
-    for (auto n : doc.nodes())
+    for (auto n : doc.nodes()) {
       for (auto i = n->origin.get(); i; i = i->parent.get())
         present.insert(i);
+      for (const auto& l : n->includes)
+        attach.insert(l.include.get(), n);
+    }
     for (bool added = true; added;) {
       added = false;
       for (auto n : doc.nodes())
@@ -863,14 +866,18 @@ private:
       return;
     written.insert(k);
     lines(out, k->before);
-    auto w = words(k->line);
-    Node* const parent = findParent(w.value(1));
+    const auto w = words(k->line);
+    Node* const parent = attach.value(k, findParent(w.value(1)));
+    // A Properties rename changes the owning group, not its saved INCLUDE
+    // text. Keep that text only while its parent token still names the owner.
+    const auto includeLine = parent && findParent(w.value(1)) != parent
+                                 ? "INCLUDE " + parent->name + ' ' + w.value(2)
+                                 : k->line;
     switch (form) {
     case ConfigText::Source:
       // Expanded in place, read on from the included text.
       if (separate) {
-        line(out, k->line);
-        attach.insert(k, parent);
+        line(out, includeLine);
         queue << k;
         current = parent;
         declared = true;
@@ -879,7 +886,7 @@ private:
       }
       return;
     case ConfigText::Listing:
-      line(out, k->line);
+      line(out, includeLine);
       current = parent;
       declared = false;
       ++depth;
@@ -887,7 +894,7 @@ private:
       --depth;
       break;
     case ConfigText::Edit:
-      out += QString(EditMarker) + "include " + k->path + '\n' + EditMarker + "line " + k->line + '\n';
+      out += QString(EditMarker) + "include " + k->path + '\n' + EditMarker + "line " + includeLine + '\n';
       current = parent;
       declared = false;
       writeFile(k, out);
@@ -1017,13 +1024,25 @@ QVector<ConfigFile> writeConfigFiles(const Document& doc, const QString& path,
                                      const QString& configDir, bool check) {
   const auto absolute = QFileInfo(path).absoluteFilePath();
   const auto files = SourceWriter(doc, ConfigText::Source, true).files(absolute);
-  // A file included more than once is written once.
+  // A file included more than once is written once. Different paths through
+  // symbolic links still name one file; their copies must agree before any
+  // writes, even when an unchanged copy would otherwise be left on disk.
+  auto fileKey = [](const QString& path) {
+    const QFileInfo file(path);
+    const auto canonical = file.canonicalFilePath();
+    return canonical.isEmpty() ? QDir::cleanPath(file.absoluteFilePath()) : canonical;
+  };
   QHash<QString, QString> included;
+  QHash<QString, QString> physicalFiles{{fileKey(absolute), files.front().text}};
   QVector<ConfigFile> result{files.front()};
   for (int i = 1; i < files.size(); ++i) {
-    const auto found = included.constFind(files[i].path);
-    if (found == included.cend()) {
-      included.insert(files[i].path, files[i].text);
+    // The readback parser needs every INCLUDE spelling, including aliases
+    // that do not require another physical write.
+    included.insert(files[i].path, files[i].text);
+    const auto key = fileKey(files[i].path);
+    const auto found = physicalFiles.constFind(key);
+    if (found == physicalFiles.cend()) {
+      physicalFiles.insert(key, files[i].text);
       result << files[i];
     } else if (*found != files[i].text) {
       throw ParseError(files[i].path + " is included more than once, and its copies differ");

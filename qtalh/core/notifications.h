@@ -33,6 +33,9 @@ void validateNotifications(const NotificationSettings&);
 // checkNotificationDirective() throws ParseError for a malformed value.
 bool isNotificationDirective(const QString& name);
 void checkNotificationDirective(const QString& name, const QString& value);
+// Destination names referenced by a $NOTIFY value, in first-use order.
+// Uses the same syntax validation as checkNotificationDirective().
+QStringList notificationDestinationIds(const QString& value);
 // The settings a document defines, bound to its canonical configuration. IDs
 // start with "file:", so they never collide with personal settings. Email
 // destinations without from= or program= use the given defaults. Throws

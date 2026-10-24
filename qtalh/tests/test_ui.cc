@@ -3683,6 +3683,140 @@ private slots:
     to->undoEdit(); QCOMPARE(to->document().channels().size(), 0);
     to->redoEdit(); QCOMPARE(to->document().channels().size(), 1);
   }
+  void notificationDestinationRemovalIsTransactional_data() {
+    QTest::addColumn<QString>("actionName");
+    QTest::newRow("clear") << "Clear";
+    QTest::newRow("cut") << "Cut";
+  }
+  void notificationDestinationRemovalIsTransactional() {
+    QFETCH(QString, actionName);
+    auto w = std::make_unique<Window>(parseConfig(
+        "GROUP NULL root\nGROUP root destinations\n"
+        "$NOTIFY_WEBHOOK hook http://127.0.0.1:1/hook\n"
+        "GROUP root alarms\n$NOTIFY MAJOR hook\nCHANNEL alarms pv\n"), options(true), false);
+    const auto original = writeConfig(w->document(), ConfigText::Edit);
+    auto tree = w->findChild<QTreeView*>("alarmTree"); QVERIFY(tree);
+    tree->setCurrentIndex(tree->model()->index(0, 2, tree->model()->index(0, 0)));
+    auto mime = new QMimeData;
+    mime->setText("previous clipboard");
+    mime->setData("application/x-qtalh-config", "previous payload");
+    QApplication::clipboard()->setMimeData(mime);
+    auto action = w->findChild<QAction*>(actionName); QVERIFY(action);
+    action->trigger();
+    QCOMPARE(writeConfig(w->document(), ConfigText::Edit), original);
+    QCOMPARE(QApplication::clipboard()->text(), QString("previous clipboard"));
+    QCOMPARE(QApplication::clipboard()->mimeData()->data("application/x-qtalh-config"),
+             QByteArray("previous payload"));
+    QVERIFY(w->findChild<QLabel*>("messageArea")->text().contains("undefined destination hook"));
+    // A rejected edit must not add an undo entry or remove an existing node.
+    w->undoEdit();
+    QCOMPARE(writeConfig(w->document(), ConfigText::Edit), original);
+  }
+  void notificationClipboardCarriesExternalDestinations_data() {
+    QTest::addColumn<bool>("cut");
+    QTest::addColumn<bool>("sameWindow");
+    QTest::addColumn<bool>("included");
+    QTest::newRow("copy within document") << false << true << false;
+    QTest::newRow("cut within document") << true << true << false;
+    QTest::newRow("copy between windows") << false << false << false;
+    QTest::newRow("cut between windows") << true << false << false;
+    QTest::newRow("copy included subtree between windows") << false << false << true;
+    QTest::newRow("cut included subtree between windows") << true << false << true;
+  }
+  void notificationClipboardCarriesExternalDestinations() {
+    QFETCH(bool, cut); QFETCH(bool, sameWindow); QFETCH(bool, included);
+    const auto rootText = QByteArray("GROUP NULL root\n"
+        "$NOTIFY_WEBHOOK hook http://127.0.0.1:1/hook\n"
+        "$NOTIFY_WEBHOOK unused http://127.0.0.1:1/unused\n");
+    QTemporaryDir dir;
+    Document source;
+    if (included) {
+      QFile part(dir.filePath("alarms.alhConfig")); QVERIFY(part.open(QIODevice::WriteOnly));
+      const QByteArray partText("GROUP NULL alarms\n$NOTIFY MAJOR hook\nCHANNEL alarms pv\n");
+      QCOMPARE(part.write(partText), qint64(partText.size())); part.close();
+      QFile main(dir.filePath("main.alhConfig")); QVERIFY(main.open(QIODevice::WriteOnly));
+      const auto mainText = rootText + "INCLUDE root alarms.alhConfig\nGROUP root target\n";
+      QCOMPARE(main.write(mainText), qint64(mainText.size())); main.close();
+      source = loadConfig(main.fileName());
+      QVERIFY(source.channels()[0]->parent->origin);
+    } else {
+      source = parseConfig(QString::fromUtf8(rootText) +
+          "GROUP root alarms\n$NOTIFY MAJOR hook\nCHANNEL alarms pv\nGROUP root target\n");
+    }
+    auto from = std::make_unique<Window>(std::move(source), options(true), false);
+    auto tree = from->findChild<QTreeView*>("alarmTree"); QVERIFY(tree);
+    tree->setCurrentIndex(tree->model()->index(0, 2, tree->model()->index(0, 0)));
+    auto action = from->findChild<QAction*>(cut ? "Cut" : "Copy"); QVERIFY(action);
+    action->trigger();
+    QCOMPARE(QApplication::clipboard()->text(), QString("alarms"));
+    const auto payload = parseConfig(QString::fromUtf8(
+        QApplication::clipboard()->mimeData()->data("application/x-qtalh-config")));
+    QCOMPARE(payload.root->directives.size(), 1);
+    QCOMPARE(payload.root->directives[0].value, QString("hook http://127.0.0.1:1/hook"));
+    QCOMPARE(from->document().channels().size(), cut ? 0 : 1);
+    std::unique_ptr<Window> separate;
+    Window* to = from.get();
+    if (sameWindow) {
+      const auto parent = tree->model()->index(0, 0);
+      tree->setCurrentIndex(tree->model()->index(cut ? 0 : 1, 2, parent));
+    } else {
+      separate = std::make_unique<Window>(parseConfig("GROUP NULL target\n"), options(true), false);
+      to = separate.get();
+      from.reset(); // No private clipboard or source-window state may be needed.
+    }
+    const auto before = writeConfig(to->document(), ConfigText::Edit);
+    auto paste = to->findChild<QAction*>("Paste"); QVERIFY(paste); paste->trigger();
+    QCOMPARE(to->document().channels().size(), sameWindow && !cut ? 2 : 1);
+    auto pv = to->document().channels().last();
+    QCOMPARE(pv->parent->name, QString("alarms"));
+    QCOMPARE(pv->parent->parent->name, QString("target"));
+    QVERIFY(pv->parent->option("NOTIFY").contains("hook"));
+    QVERIFY(!pv->parent->origin);
+    // External dependencies belong to the document, not the copied alarm group.
+    QVERIFY(pv->parent->option("NOTIFY_WEBHOOK").isEmpty());
+    const auto settings = configurationNotifications(to->document(), "test", "", "");
+    QCOMPARE(settings.destinations.size(), sameWindow ? 2 : 1);
+    to->undoEdit(); QCOMPARE(writeConfig(to->document(), ConfigText::Edit), before);
+    to->redoEdit(); QCOMPARE(to->document().channels().size(), sameWindow && !cut ? 2 : 1);
+  }
+  void notificationClipboardHandlesExistingDestinations_data() {
+    QTest::addColumn<bool>("internalDefinition");
+    QTest::addColumn<bool>("conflict");
+    QTest::newRow("external dependency already defined") << false << false;
+    QTest::newRow("subtree definition already defined") << true << false;
+    QTest::newRow("external dependency conflicts") << false << true;
+    QTest::newRow("subtree definition conflicts") << true << true;
+  }
+  void notificationClipboardHandlesExistingDestinations() {
+    QFETCH(bool, internalDefinition); QFETCH(bool, conflict);
+    const auto definition = QString("$NOTIFY_WEBHOOK hook http://127.0.0.1:1/hook\n");
+    auto from = std::make_unique<Window>(parseConfig(
+        "GROUP NULL root\n" + (internalDefinition ? QString() : definition) +
+        "GROUP root alarms\n" + (internalDefinition ? definition : QString()) +
+        "$NOTIFY MAJOR hook\nCHANNEL alarms pv\n"), options(true), false);
+    auto tree = from->findChild<QTreeView*>("alarmTree"); QVERIFY(tree);
+    tree->setCurrentIndex(tree->model()->index(0, 2, tree->model()->index(0, 0)));
+    auto copy = from->findChild<QAction*>("Copy"); QVERIFY(copy); copy->trigger();
+    const auto clipboardPayload = QApplication::clipboard()->mimeData()->data("application/x-qtalh-config");
+    from.reset();
+    auto to = std::make_unique<Window>(parseConfig("GROUP NULL target\n" +
+        (conflict ? QString("$NOTIFY_WEBHOOK hook http://127.0.0.1:1/different\n") : definition)),
+        options(true), false);
+    const auto original = writeConfig(to->document(), ConfigText::Edit);
+    auto paste = to->findChild<QAction*>("Paste"); QVERIFY(paste); paste->trigger();
+    QCOMPARE(QApplication::clipboard()->mimeData()->data("application/x-qtalh-config"), clipboardPayload);
+    if (conflict) {
+      QCOMPARE(writeConfig(to->document(), ConfigText::Edit), original);
+      QVERIFY(to->findChild<QLabel*>("messageArea")->text().contains("different definition"));
+      to->undoEdit(); QCOMPARE(writeConfig(to->document(), ConfigText::Edit), original);
+    } else {
+      QCOMPARE(to->document().channels().size(), 1);
+      const auto settings = configurationNotifications(to->document(), "test", "", "");
+      QCOMPARE(settings.destinations.size(), 1);
+      QVERIFY(to->document().channels()[0]->parent->option("NOTIFY_WEBHOOK").isEmpty());
+      to->undoEdit(); QCOMPARE(writeConfig(to->document(), ConfigText::Edit), original);
+    }
+  }
   void dialogs() {
     auto w = std::make_unique<Window>(sample(), options(false), false);
     w->show();
@@ -6623,6 +6757,90 @@ private slots:
     QCOMPARE(below(tree)->text(), QStringLiteral("▼ 1 MAJOR"));
     tree->collapse(tree->model()->index(0, 0));
     QTRY_VERIFY(bar(tree)->isHidden());
+  }
+  void offscreenAlarmBarLeavesLastRowReachable() {
+    QStandardItemModel model(60, 9);
+    AlarmView view(false);
+    // Isolate vertical row visibility from style-specific horizontal bars.
+    view.setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    view.setModel(&model);
+    view.resize(600, 240); view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    auto bar = view.findChild<QWidget*>("offscreenAlarmBar");
+    auto above = view.findChild<QPushButton*>("offscreenAlarmsAbove");
+    auto below = view.findChild<QPushButton*>("offscreenAlarmsBelow");
+    auto scroll = view.verticalScrollBar();
+    // Capture the range after the initial item layout has settled.
+    QTRY_COMPARE(scroll->maximum(), model.rowCount() *
+                 view.QTreeView::visualRect(model.index(0, 0)).height() - view.viewport()->height());
+    QTRY_VERIFY(scroll->maximum() > 0);
+    const int normalMaximum = scroll->maximum();
+    const auto last = model.index(59, 0);
+    auto lastVisible = [&] {
+      const auto row = view.QTreeView::visualRect(last);
+      const int band = view.viewport()->height() - (bar->isHidden() ? 0 : bar->height());
+      return row.top() >= 0 && row.bottom() < band;
+    };
+    // The last row alone must become visible when its indicator is clicked.
+    model.setData(last, 2, AlarmSeverityRole);
+    QTRY_VERIFY(below->isVisible());
+    below->click();
+    QTRY_VERIFY(bar->isHidden());
+    QTRY_VERIFY(lastVisible());
+    // With another alarm above, the bar stays open and needs real scroll space.
+    model.setData(model.index(0, 0), 1, AlarmSeverityRole);
+    QTRY_VERIFY(above->isVisible());
+    QTRY_COMPARE(scroll->maximum(), normalMaximum + bar->height());
+    scroll->setValue(scroll->maximum());
+    QTRY_VERIFY(lastVisible());
+    QTRY_VERIFY(!below->isVisible());
+    QVERIFY(above->isVisible());
+    // A geometry refresh must keep the spacer and the bottom scroll position.
+    view.resize(620, 240);
+    QTRY_COMPARE(scroll->value(), scroll->maximum());
+    QTRY_VERIFY(lastVisible());
+    // Enlarging the viewport to fit every row must not retain a spacer that
+    // preserves the old scroll offset and hides the first alarm artificially.
+    view.resize(620, 2400);
+    QTRY_COMPARE(scroll->maximum(), 0);
+    QTRY_COMPARE(scroll->value(), 0);
+    QTRY_VERIFY(bar->isHidden());
+    QTRY_VERIFY(lastVisible());
+    view.resize(620, 240);
+    QTRY_VERIFY(below->isVisible());
+    below->click();
+    QTRY_VERIFY(lastVisible());
+    model.setData(model.index(0, 0), 0, AlarmSeverityRole);
+    model.setData(last, 0, AlarmSeverityRole);
+    QTRY_VERIFY(bar->isHidden());
+    QTRY_COMPARE(scroll->maximum(), normalMaximum);
+    QCOMPARE(scroll->value(), normalMaximum);
+  }
+  void offscreenAlarmBarRecountsAfterFontChanges() {
+    if (legacyAppearance()) QSKIP("Classic rows keep a fixed height when the font changes");
+    QStandardItemModel model(60, 9);
+    const auto alarm = model.index(4, 0);
+    model.setData(alarm, 2, AlarmSeverityRole);
+    AlarmView view(false);
+    view.setModel(&model);
+    view.resize(1000, 240); view.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&view));
+    auto bar = view.findChild<QWidget*>("offscreenAlarmBar");
+    auto below = view.findChild<QPushButton*>("offscreenAlarmsBelow");
+    QTRY_VERIFY(view.QTreeView::visualRect(alarm).bottom() < view.viewport()->height());
+    QTRY_VERIFY(bar->isHidden());
+    const auto viewportSize = view.viewport()->size();
+    auto originalFont = view.font();
+    auto enlarged = originalFont; enlarged.setPixelSize(40);
+    view.setFont(enlarged);
+    QTRY_COMPARE(view.viewport()->size(), viewportSize);
+    QTRY_VERIFY(view.QTreeView::visualRect(alarm).center().y() > view.viewport()->height());
+    QTRY_VERIFY(below->isVisible());
+    QVERIFY(bar->height() >= below->sizeHint().height());
+    QCOMPARE(below->text(), QStringLiteral("\u25BC 1 MAJOR"));
+    view.setFont(originalFont);
+    QTRY_VERIFY(bar->isHidden());
+    QTRY_VERIFY(view.QTreeView::visualRect(alarm).bottom() < view.viewport()->height());
   }
   void forceDialogShowsTwelveCalcInputs() {
     QTemporaryDir dir;

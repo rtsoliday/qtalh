@@ -1047,6 +1047,85 @@ private slots:
     QVERIFY_THROWS_EXCEPTION(ParseError, writeConfigFiles(d, other.filePath("main.alhConfig")));
     QCOMPARE(writeConfigFiles(d, other.filePath("main.alhConfig"), dir.path()).size(), 3);
   }
+  void renamedGroupsKeepIncludes() {
+    QTemporaryDir dir;
+    auto write = [&](const QString& name, const QByteArray& text) {
+      QFile f(dir.filePath(name));
+      return f.open(QIODevice::WriteOnly) && f.write(text) == text.size();
+    };
+    QVERIFY(write("part", "GROUP NULL section\nINCLUDE section nested\nINCLUDE section empty\n"));
+    QVERIFY(write("nested", "CHANNEL section pv\n"));
+    QVERIFY(write("empty", "# empty file\n"));
+    auto d = parseConfig("GROUP NULL root\nINCLUDE root part # parts\n", dir.path());
+    d.root->name = "renamed";
+    d.root->children[0]->name = "newSection";
+    // Properties and Undo roundtrip through Edit text before a disk save.
+    auto edited = parseConfig(writeConfig(d, ConfigText::Edit));
+    QCOMPARE(writeConfig(edited), writeConfig(d));
+    const auto path = dir.filePath("main");
+    const auto files = writeConfigFiles(edited, path);
+    QCOMPARE(files.size(), 4);
+    QHash<QString, QString> text;
+    for (const auto& f : files) {
+      text.insert(QFileInfo(f.path).fileName(), f.text);
+      saveConfigText(edited, f.path, f.text);
+    }
+    QCOMPARE(text["main"], QString("GROUP NULL renamed\nINCLUDE renamed part\n"));
+    QVERIFY(text["part"].contains("INCLUDE newSection nested\nINCLUDE newSection empty\n"));
+    QCOMPARE(text["nested"], QString("CHANNEL newSection pv -----\n"));
+    QCOMPARE(text["empty"], QString("# empty file\n"));
+    QCOMPARE(writeConfig(loadConfig(path)), writeConfig(d));
+  }
+  void crlfGuidanceSavesAndKeepsMeaning() {
+    QTemporaryDir dir;
+    const QString text = "GROUP NULL root\r\n$GUIDANCE\r\nCall\r before restart.\r\n"
+                         "Check vacuum.\r\n$END # instructions\r\nCHANNEL root pv\r\n";
+    auto d = parseConfig(text);
+    QCOMPARE(d.root->option("GUIDANCE_TEXT"), QString("Call\r before restart.\nCheck vacuum."));
+    QString normalized = text;
+    normalized.replace("\r\n", "\n");
+    QCOMPARE(writeConfig(d, ConfigText::Source), normalized);
+    QCOMPARE(writeConfig(parseConfig(writeConfig(d, ConfigText::Edit))), writeConfig(d));
+    const auto path = dir.filePath("main");
+    saveConfig(d, path);
+    QCOMPARE(writeConfig(loadConfig(path)), writeConfig(d));
+    // Editor saves use the same guidance source in their separate-file path.
+    QCOMPARE(writeConfigFiles(d, path).front().text, normalized);
+  }
+  void includeAliasesMustAgree_data() {
+    QTest::addColumn<QString>("alias");
+    QTest::newRow("repeated path") << "shared";
+    QTest::newRow("relative path alias") << "./shared";
+#ifndef Q_OS_WIN
+    QTest::newRow("symbolic link") << "alias";
+#endif
+  }
+  void includeAliasesMustAgree() {
+    QFETCH(QString, alias);
+    QTemporaryDir dir;
+    QFile shared(dir.filePath("shared"));
+    QVERIFY(shared.open(QIODevice::WriteOnly));
+    shared.write("GROUP NULL part\nCHANNEL part pv\n");
+    shared.close();
+#ifndef Q_OS_WIN
+    if (alias == "alias")
+      QVERIFY(QFile::link(shared.fileName(), dir.filePath(alias)));
+#endif
+    auto d = parseConfig("GROUP NULL root\nINCLUDE root " + alias + "\nINCLUDE root shared\n", dir.path());
+    const auto path = dir.filePath("main");
+    // Identical copies share one write, while both INCLUDE paths remain valid.
+    QCOMPARE(writeConfigFiles(d, path).size(), 2);
+    d.channels()[0]->mask = Mask::parse("D");
+    QVERIFY_THROWS_EXCEPTION(ParseError, writeConfigFiles(d, path));
+    QVERIFY_THROWS_EXCEPTION(ParseError, writeConfigFiles(d, path, QString(), false));
+    // Editing both copies identically remains safe, including when the first
+    // path is a symlink: saving it must update the common target on reload.
+    d.channels()[1]->mask = Mask::parse("D");
+    const auto files = writeConfigFiles(d, path);
+    QCOMPARE(files.size(), 2);
+    for (const auto& f : files) saveConfigText(d, f.path, f.text);
+    QCOMPARE(writeConfig(loadConfig(path)), writeConfig(d));
+  }
   void keepDirectiveSourcesFollowsEarlierDirectives() {
     const QVector<Directive> before{{"COMMAND", "a", "# run\n", "$COMMAND   a", "a"},
                                     {"ALIAS", "x"},
