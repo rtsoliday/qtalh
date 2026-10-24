@@ -23,7 +23,7 @@ sdds_files = $(foreach lib,SDDS1 rpnlib mdbmth mdblib,$(call sdds_lib,$(lib),$(s
 sdds_includes = -I"$(sdds_include_$(1))" $(if $(filter Windows,$(OS)),-I"$(sdds_include_$(1))/../lzma")
 sdds_windows_gsl = $(foreach lib,gsl gslcblas,$(or $(call sdds_lib,$(lib),$(sdds_library_$(1))),$(call sdds_lib,$(lib),$(WINDOWS_GSL_LIB_DIR))))
 sdds_links = $(foreach lib,$(call sdds_files,$(1)),"$(lib)") \
-             $(if $(filter Windows,$(OS)),$(foreach lib,$(call sdds_windows_gsl,$(1)),"$(lib)") /LIBPATH:"$(sdds_library_$(1))" $(LIB_LINK_DIRS),$(GSL_LINK_LIBS) -lm $(call epics_rpath,$(call sdds_files,$(1)),$(sdds_library_$(1))))
+             $(if $(filter Windows,$(OS)),$(foreach lib,$(call sdds_windows_gsl,$(1)),"$(lib)") /LIBPATH:"$(sdds_library_$(1))" $(LIB_LINK_DIRS),$(GSL_LINK_LIBS) -lm $(call epics_rpath,$(filter $(sdds_library_$(1))/%,$(call sdds_files,$(1))),$(sdds_library_$(1))))
 ifeq ($(OS),Windows)
 sdds_probe_command = $(CXX) $(CPPFLAGS) $(CXXFLAGS) $(call sdds_includes,$(1)) build/sdds_link_probe.cc /Fo"$(OBJ_DIR)/sdds-probe.obj" /Fe"$(OBJ_DIR)/sdds-probe.exe" /link $(LDFLAGS) $(call sdds_links,$(1))
 else
@@ -31,9 +31,10 @@ sdds_probe_command = $(CXX) $(CPPFLAGS) $(CXXFLAGS) $(call sdds_includes,$(1)) b
 endif
 sdds_probe = $(if $(and $(wildcard $(sdds_include_$(1))/SDDS.h),$(call sdds_lib,SDDS1,$(sdds_library_$(1)))),$(shell mkdir -p "$(OBJ_DIR)"; $(call sdds_probe_command,$(1)) > "$(OBJ_DIR)/sdds-probe-$(1).log" 2>&1 && echo yes))
 sdds_first_usable = $(if $(strip $(1)),$(if $(call sdds_probe,$(firstword $(1))),$(firstword $(1)),$(call sdds_first_usable,$(wordlist 2,$(words $(1)),$(1)))))
-ifeq ($(filter clean distclean,$(MAKECMDGOALS)),)
 # Probe on each invocation so replaced headers/libraries and toolchain changes
 # are recognized without a clean build, including recovery from a failed probe.
+# Cleanup alone needs no probe; `make clean all` still builds with SDDS.
+ifneq ($(BUILD_GOALS),)
 SDDS_SELECTED := $(call sdds_first_usable,$(SDDS_CANDIDATES))
 endif
 ifneq ($(SDDS_SELECTED),)

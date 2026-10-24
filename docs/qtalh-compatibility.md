@@ -180,7 +180,8 @@ a whitespace-separated `#`; hashes in names, commands, and guidance are preserve
 As in ALH, other extra tokens are ignored on `GROUP` lines (including a mask),
 after a channel's mask, after an `INCLUDE` filename, after the `$HEARTBEATPV`
 value, and after the `$ALARMCOUNTFILTER` seconds (for example
-`$ALARMCOUNTFILTER -1 3 -----`); saving drops them.
+`$ALARMCOUNTFILTER -1 3 -----`). Saves keep them on unchanged lines; a changed
+line is written without them.
 Missing `$ALARMCOUNTFILTER` arguments default to count 1 and seconds 1 and save
 in full form. Multiple inline GUIDANCE blocks
 are combined in order, preserving blank lines through display, editing and saving.
@@ -452,7 +453,7 @@ Other command-line differences from ALH:
 
 - Help and version text go to stdout with exit status 0; ALH writes them to
   stderr and exits with status 1. The version line is
-  `QtALH 1.0.0 (based on ALH 1.2.35) Qt <version> <EPICS version>` rather than
+  `QtALH 1.1.0 (based on ALH 1.2.35) Qt <version> <EPICS version>` rather than
   `ALH Version 1.2.35  (<EPICS version>)`.
 - Option values may begin with `-`, so a missing value takes the next switch
   as its value (for example, `-a -L` uses `-L` as the alarm filename and does
@@ -525,8 +526,8 @@ acknowledgements emit the legacy code-6 `Ack Channel---` record for each affecte
 channel, including channels acknowledged through a parent group.
 Physical printers and production RPC services are intentionally not used.
 Without `-T` or `-L`, ALH opens the alarm log with `fopen(..., "w+")`; QtALH
-likewise empties the alarm log it opens at startup or through **Setup → New Alarm
-Log File…**. With `-T` or `-L`, both reopen an existing alarm log without
+likewise empties the alarm log it opens at startup; it has no **Setup** command
+for a new alarm log file. With `-T` or `-L`, both reopen an existing alarm log without
 emptying it.
 Alarm logs are registered under their canonical path after creation. Before
 truncating a newly opened path, its native file identity is compared with active

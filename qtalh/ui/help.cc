@@ -70,6 +70,7 @@ QVector<Topic> helpTopics() {
     topics.append({slug(title), title, "Alarm tools", tools.mid(match.capturedEnd(),
         (next.hasMatch() ? next.capturedStart() : tools.size()) - match.capturedEnd()).trimmed()});
   }
+  section("sdds-alarm-snapshot", "Operating tools");
   section("logging-and-shared-operation", "Operating tools");
   page("logs.md", "log-browser", "Browse alarm and operation logs", "Operating tools");
   page("notifications.md", "notifications", "Personal notifications and escalation", "Operating tools");

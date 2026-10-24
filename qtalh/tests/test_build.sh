@@ -71,5 +71,36 @@ else
   echo "SKIP: mixed Qt 5 installation check requires system Qt 5 modules"
 fi
 
+# Optional SDDS: the probe also runs when cleanup precedes a build, and a
+# library directory holding only static archives adds no run-time search path.
+# Dry runs: the clean recipe is printed, not run.
+SDDS_PRINT='print-sdds: ; @echo "SDDS_SELECTED=$(SDDS_SELECTED)|SDDS_DIR=$(sdds_library_$(SDDS_SELECTED))|SDDS_LINK_LIBS=$(SDDS_LINK_LIBS)|"'
+sdds_query() {
+  "$MAKE" -n -s --no-print-directory -C "$QTALH_DIR" ${MAKE_ARGS[@]+"${MAKE_ARGS[@]}"} "$@" \
+    --eval="$SDDS_PRINT" print-sdds 2>&1 | sed -n 's/.*SDDS_SELECTED=\([^|]*\)|SDDS_DIR=\([^|]*\)|SDDS_LINK_LIBS=\([^|]*\)|.*/\1|\2|\3/p'
+}
+sdds=$(sdds_query)
+selected=${sdds%%|*}
+if [ -z "$selected" ]; then
+  echo "SKIP: SDDS checks require a usable SDDS installation"
+else
+  cleaned=$(sdds_query clean)
+  if [ "${cleaned%%|*}" = "$selected" ]; then
+    pass "cleanup before a build keeps SDDS export"
+  else
+    fail "cleanup before a build keeps SDDS export" "selected: '$selected', after clean: '${cleaned%%|*}'"
+  fi
+  rest=${sdds#*|}
+  dir=${rest%%|*}
+  links=${rest#*|}
+  if ls "$dir"/lib*.so* "$dir"/lib*.dylib >/dev/null 2>&1; then
+    echo "SKIP: $dir holds shared libraries, so its run-time search path is needed"
+  elif echo "$links" | grep -qF -- "-rpath,$dir"; then
+    fail "static SDDS libraries add no run-time search path" "$links"
+  else
+    pass "static SDDS libraries add no run-time search path"
+  fi
+fi
+
 echo "Totals: $((total - failures)) passed, $failures failed"
 [ "$failures" -eq 0 ]

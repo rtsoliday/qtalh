@@ -251,13 +251,9 @@ void NotificationService::pump() {
     dispatch(e);
 }
 QString NotificationService::validateWebhook(const NotificationDestination& d) {
-  QUrl url(endpoint(d));
-  if (!url.isValid() || url.host().isEmpty() || !url.userInfo().isEmpty() || url.hasFragment())
-    return "Invalid webhook URL (credentials and fragments are not allowed)";
-  const auto host = url.host().toLower();
-  bool loopback = host == "localhost" || host == "127.0.0.1" || host == "::1";
-  if (url.scheme() != "https" && !(url.scheme() == "http" && loopback))
-    return "Webhook requires HTTPS (HTTP is allowed only for loopback testing)";
+  const auto problem = webhookUrlProblem(endpoint(d));
+  if (!problem.isEmpty())
+    return problem;
   if (!d.bearerEnvironment.isEmpty()) {
     auto bearer = qgetenv(d.bearerEnvironment.toUtf8().constData());
     if (bearer.isEmpty() || bearer.contains('\r') || bearer.contains('\n') || bearer.contains('\0'))

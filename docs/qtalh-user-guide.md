@@ -80,7 +80,10 @@ It names the selected group or channel and, for a group, shows how many channels
 are affected. Turning on **NoAck For One Hour** removes the acknowledgement
 requirement from the selected channel, or from every channel in the selected
 group, and starts a one-hour timer. Turning it off, or the timer expiring,
-restores the configured masks. The toggle applies at once, and the dialog
+returns each affected channel's NoAck setting to its configured value; other
+runtime mask changes remain. In global active mode (`-global` without `-S`),
+this also acknowledges an alarm that cleared meanwhile: QtALH writes the IOC
+ACKS and any `$ACKPV`. The toggle applies at once, and the dialog
 follows the selection. The runtime starts with the facility selected, so
 turning the toggle on before you select another row affects every channel.
 The mask summary shows `H` while the timer runs; clear the toggle, or restore
@@ -218,7 +221,7 @@ INCLUDE paths retain their separate configuration-directory rule.
 | `-mainwindow` | Open the main runtime window at startup. |
 | `-maskcolor` | Show masks with Cancel, Disable or NoAck set in blue; timed silence and Silence Forever then color only the status area. |
 | `-noerrorpopup` | Suppress error message boxes; errors still appear in the window message area, Qt diagnostic output, and operation log when logging is enabled. |
-| `-notifications` | Start with this configuration's saved notification subscriptions enabled. Without it, every runtime starts with notifications paused. |
+| `-notifications` | Start with notifications enabled: this configuration's saved subscriptions and those declared in the configuration file. Without it, every runtime starts with notifications paused. |
 | `-desc_field` | Subscribe to each channel record's `.DESC` field for descriptions. |
 | `-debug` | Timestamped startup, alarm, CA, command, logging, and broadcast diagnostics on stderr. Default: off. |
 | `-display display`, `--display display` | Set `DISPLAY` before opening the GUI (for X11). |
@@ -352,9 +355,11 @@ $END
 
 Exactly one root group is required. A parent must be the current group or one
 of its ancestors (for a channel, lookup starts at its parent), so arrange the
-file in tree order. A group cannot be named `NULL` or repeat an ancestor's name;
-repeated group names in separate branches are allowed. Group nesting is limited
-to 50 levels.
+file in tree order. A group cannot be named `NULL`. As in ALH, a group may repeat
+an ancestor's name; parent names refer to the nearest matching ancestor.
+Editor changes and saves that would reload the hierarchy differently are
+rejected with the group to rename. Repeated group names in separate branches
+are allowed. Group nesting is limited to 50 levels.
 
 `CHANNEL parent pv [mask]` defaults to `-----`. Masks are sets of uppercase
 letters and save in canonical `CDATL` positions; short/reordered forms such as
@@ -426,7 +431,7 @@ rather than applying them to the INCLUDE's parent group.
 | `$SEVRPV` | Output PV for the node's severity (0–4); disabled channels publish -1. Writes require global active mode. `-` leaves the output unset; the first real PV replaces earlier `-` placeholders and takes precedence over later directives. |
 | `$FORCEPV` | `pv mask [force_value [reset_value]]`; default force 1, reset 0. At force, apply the mask; at reset, restore configured channel masks. `NE` or a reset equal to force resets on leaving the force value. Applies to descendant channels for a group. The first value counts as a change, so a Force PV already at its reset value restores the configured masks at startup. In global active mode, a force or reset writes the resulting `T` bit to the IOC's ACKT, even without `-caputackt`: when it differs from the current ACKT, and always before that ACKT has been read. Removing Disable or NoAck can also acknowledge cleared transients (ACKS and `$ACKPV`). |
 | `$FORCEPV_CALC` | EPICS CALC expression required when the FORCEPV name is `CALC`. |
-| `$FORCEPV_CALC_A` through `$FORCEPV_CALC_L` | Numeric constants or PV inputs for CALC, twelve as in EPICS. Legacy ALH reads only A through F and evaluates G through L as 0, so loading and `--validate` warn when G through L are used. An input is a constant only when the whole token is a number (`0`, `-2`, `2e0`); other tokens, including names beginning with a digit such as `1ID:gate`, are PVs. ALH used a token's leading number instead (see the [compatibility inventory](qtalh-compatibility.md)). Unspecified inputs default to zero; all named PV inputs must become available before evaluation. |
+| `$FORCEPV_CALC_A` through `$FORCEPV_CALC_L` | Numeric constants or PV inputs for CALC, twelve as in EPICS. Legacy ALH reads only A through F, and its calculation reads undefined values for G through L, so loading and `--validate` warn when G through L are used. An input is a constant only when the whole token is a number (`0`, `-2`, `2e0`); other tokens, including names beginning with a digit such as `1ID:gate`, are PVs. ALH used a token's leading number instead (see the [compatibility inventory](qtalh-compatibility.md)). Unspecified inputs default to zero; all named PV inputs must become available before evaluation. |
 | `$SEVRCOMMAND` | `UP_severity command` or `DOWN_severity command`, matching direction and destination severity; `ANY` matches any change in that direction, `UP_ALARM` matches leaving NO_ALARM. Channel startup is evaluated from ERROR, matching ALH. Repeat to add commands. |
 | `$STATCOMMAND` | `status command`; channel only, runs when entering that status. Repeat to add commands. Status names follow EPICS alarm names and the additional connection/access states in `qtalh/core/model.cc`. |
 | `$ALARMCOUNTFILTER` | `count seconds`; channel only. Omitted count and seconds each default to 1. Legacy alarm count/time filtering: count -1 delays alarm onset, 0 also holds clearing transitions, positive counts track repeated alarm edges within the interval. Zero seconds disables filtering. Accepted count range: -1 through 1,000,000; seconds must be a nonnegative integer. |
@@ -528,8 +533,9 @@ same window: the previous configuration's subscriptions and
 heartbeat/severity/acknowledgement outputs stop, and the operation log records
 `Setup Config File`. Logs, locks and broadcast files stay those of the startup
 configuration. Configuration tool **File → Open…** opens another editor window.
-Open/insert failures leave the current document intact. Save uses an atomic
-file replacement and keeps comments, blank lines, formatting and INCLUDE lines;
+Open/insert failures leave the current document intact. Save replaces each file
+atomically, and none when one of them cannot be written. It keeps comments,
+blank lines, formatting and INCLUDE lines;
 changed lines are written in standard form, and edited INCLUDE files are saved
 after a confirmation that lists them (see
 [Save comments and INCLUDE files](site/configure/editor.md#save-comments-and-include-files)).
@@ -613,8 +619,8 @@ Replace `my.alhConfig` with your configuration. Without `-L`, alarm logs retain 
 most recent 2000 records by default using a circular file. With `-L`, they append
 without a record limit, matching ALH. An explicit `-m` overrides either default;
 the example above opts into 2000 records. Without `-T` or `-L`, QtALH empties an
-existing alarm log when it opens it at startup or through **Setup → New Alarm Log
-File…**, as ALH does, so earlier alarm records do not survive a restart. A log
+existing alarm log when it opens it at startup, as ALH does, so earlier alarm
+records do not survive a restart. A log
 that another window in the same process is already writing is shared, not
 emptied. With `-T` or `-L`, QtALH reopens an existing alarm log without emptying
 it, and new records continue the file. If a bounded log (`-T`, or `-L` with an
@@ -741,7 +747,7 @@ preventing file logging. Windows does not build these helpers and rejects
 | Acknowledgement or output PV does not change | Check local/global/passive mode and IOC write access. Failed acknowledgements remain visible; manual ACKT changes require an explicit retry. A refused `$ACKPV` stays pending in **View → Runtime Overrides…** until a **Retry ACKPV** submission is accepted, or Cancel or a reload discards it. |
 | "Channel Access Exception" messages | Asynchronous CA errors, such as an IOC rejecting a write or a lost virtual circuit, are reported in the message area and operation log (and as a popup unless `-noerrorpopup`), as in ALH. After 25 reports one "Too many exceptions" notice is shown; later exceptions are printed only. |
 | Cannot open logs or lock files | Create the parent directory and check permissions on the selected files and checkpoint sidecar. A failed log destination change preserves the current destination. `Cannot lock logging lock file` means the lock file opened but its filesystem rejected POSIX locks (for example, NFS without a lock service); the instance stays Slave, so place the `-Lfile` lock on a filesystem with lock support. |
-| "Open files are near this process's limit" | QtALH raises its soft open-file limit to the hard limit at startup and warns, once, when 80% of it is in use; programs it starts keep the original limit. Ask the administrator to raise the hard limit (`ulimit -Hn`), or split a very large configuration. |
+| "Open files are near this process's limit" | On Linux and macOS, QtALH raises its soft open-file limit to the hard limit at startup and warns when 80% of it is in use (again only after use falls below 70%). Commands and notification mailers it starts keep the original limit; programs opened through the desktop, and a `caRepeater` that Channel Access starts, inherit the raised one. Ask the administrator to raise the hard limit (`ulimit -Hn`), or split a very large configuration. |
 | Sound fails | Check the audio path, Qt Multimedia plugins/backend, output device, Silence Forever, and beep threshold. Muted fixture playback verifies decoding, not speaker output. |
 | Helper or visual tests fail | Check the [test prerequisites](../qtalh/tests/README.md); missing rpcbind, legacy executables, softIoc, or X11 are failures, not skipped coverage. |
 

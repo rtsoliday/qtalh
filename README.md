@@ -12,8 +12,9 @@ Add `-style motif` for the classic Motif look, for example
 
 Beyond ALH, the runtime offers an Active Alarms table, Find Alarm, Alarm Details
 (including the record's alarm limits read from the IOC), Runtime Overrides, an
-Alarm Summary panel, and Phoebus alarm XML import/export (also `--to-phoebus` and
-`--from-phoebus`). These work in every appearance, including `-style motif`.
+Alarm Summary panel, and Phoebus alarm XML import/export (`--to-phoebus` and
+`--from-phoebus`, and File menu commands shown when `QTALH_PHOEBUS_MENU` is set).
+These work in every appearance, including `-style motif`.
 QtALH also adds timed shelving (shown when `USE_SHELVING=1`), opt-in personal
 notifications and escalation, and session alarm analytics.
 PV names prefixed with `pva://` are monitored over pvAccess; all other names
@@ -147,8 +148,9 @@ Verified on 2026-10-18 with MSVC 2022, Qt 6.11.2
 Windows x64, at the content of commit 0b047bf: a clean application build and
 1,390 checks passed, with 17 skips. The 1.0.0 audit corrections F-901 to F-933
 that followed were verified only on Linux x86-64 with Qt 5.15.9 (code at
-3664e13); Windows, macOS and Qt 6 builds of the release candidate are not yet
-verified. See the [test guide](qtalh/tests/README.md) for results and limitations.
+3664e13). The 1.1.0 changes since v1.0.0 were built and tested only on Linux
+x86-64 with GCC 11.3.0, Qt 5.15.9 and EPICS Base 7.0.8; Windows, macOS and Qt 6
+builds of 1.1.0 are not yet verified. See the [test guide](qtalh/tests/README.md) for results and limitations.
 The Windows flags explicitly enable
 `/Zc:lambda` so older MSVC 2022 versions can compile Qt 6.11's generated moc
 code in C++17 mode. Keep `/permissive-` for Qt; only the pvAccess implementation
@@ -214,15 +216,19 @@ files. Explicit Qt builds do not include or link Motif/Xt.
 
 SDDS export is optional. QtALH automatically enables binary SDDS snapshots and
 analytics exports when a quiet compile/link check finds compatible headers and
-libraries. It checks `SDDS_INCLUDE_DIR` plus `SDDS_LIB_DIR` overrides first,
-then the sibling `SDDS` checkout (`SDDS_REPO` overrides its root), configured
-EPICS extensions directories, and `/usr/local/epics/extensions`. Headers and
+libraries. When `SDDS_INCLUDE_DIR` or `SDDS_LIB_DIR` is set, only those
+directories are tried. Otherwise it checks the sibling `SDDS` checkout
+(`SDDS_REPO` overrides its root), configured EPICS extensions directories, and
+`/usr/local/epics/extensions`. Headers and
 core libraries must belong to the same installation; supporting SDDS libraries,
 compression libraries and their link dependencies must also be usable. Missing
 or incomplete installations silently omit the export controls. Availability is
 rechecked on subsequent builds without requiring `make clean`. Set both explicit
-directory overrides to nonexistent paths to build without SDDS. This applies to
-Linux, macOS and Windows; SDDS is never required for normal operation.
+directory overrides to nonexistent paths to build without SDDS. The detection is
+designed for Linux, macOS and Windows but has been verified only on Linux. SDDS
+is never required for normal operation, but an SDDS-enabled executable needs
+the shared libraries it was linked with at run time, such as GSL
+(`libgsl`, `libgslcblas`) for the sibling SDDS build; on Linux, check with `ldd`.
 
 On RHEL-family systems the Qt 5 packages include `qt5-qtbase-devel`,
 `qt5-qtmultimedia-devel` and `libtirpc-devel`. On Debian-family systems they
@@ -377,9 +383,10 @@ names), logging, locking and helper protocols. `qtalh/ui/` contains item models,
 Channel Access uses a shared non-preemptive context, socket notifiers and a
 100 ms fallback poll, with serialized callbacks and explicit subscription cleanup.
 
-Existing `.alhConfig` files are supported. Saves use the legacy textual syntax;
-includes are expanded, and comments/formatting are not retained. Open/insert
-failures leave the current document intact. `ALARMHANDLER` and `ALHMAINFONT`
+Existing `.alhConfig` files are supported. Saves use the legacy textual syntax.
+The configuration editor preserves comments, formatting and INCLUDE lines,
+rewriting only changed lines; runtime Save As expands includes into one file.
+Open/insert failures leave the current document intact. `ALARMHANDLER` and `ALHMAINFONT`
 are supported. `-S` is passive mode; `-D` disables file logging and does **not**
 prevent CA writes. Unsupported Xt resource overrides produce a diagnostic.
 QtALH rejects the whole file for lines that ALH skips with an input error or

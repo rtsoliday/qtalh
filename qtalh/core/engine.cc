@@ -1277,20 +1277,22 @@ int Engine::shelveAt(Node* n, qint64 time, qint64 until, const QString& reason,
     throw ParseError("Shelving requires a username (1–120 characters, without spaces or control characters).");
   const QString text = reason.trimmed();
   // Deadlines are wall-clock times from 1 minute to 365 days after `time`.
-  if (until <= time || until - time < 60000 || until - time > qint64(MaximumShelfMinutes) * 60000 ||
+  // Ordered signed endpoints can still have a difference beyond qint64.
+  // Unsigned subtraction represents that interval without overflowing.
+  const quint64 duration = quint64(until) - quint64(time);
+  if (until <= time || duration < 60000 || duration > quint64(MaximumShelfMinutes) * 60000 ||
       text.isEmpty() || text.size() > 240 ||
       text.contains(QRegularExpression("[\\r\\n\\x{2028}\\x{2029}]")))
     throw ParseError("Shelving requires a duration from 1 minute to 365 days and a single-line reason (1–240 characters).");
   if (!n || (replace && n->group)) throw ParseError("Select one channel to change its shelf.");
   state(n); // Validate ownership before traversing.
-  const qint64 duration = until - time;
   int count = 0;
   eachChannel(n, [&](Node* c) {
     auto& s = states[c];
     if (s.shelf.until && s.shelf.until <= time) clearShelf(c, "Shelf expired");
     if (s.shelf.until && !replace) return;
     State before = s;
-    s.shelf = {time + duration, text, user};
+    s.shelf = {until, text, user};
     updatePresentation(c, before);
     publish(c, before, ObservationCause::Suppression);
     noteShelfDeadline(s.shelf.until);

@@ -57,8 +57,10 @@ $NOTIFY MAJOR ops 600:pager
 - `$NOTIFY_EMAIL name recipients` and `$NOTIFY_WEBHOOK name URL` define destinations
   for the whole file. Recipients are comma-separated, without spaces. Optional
   `from=` and `program=` set the email sender and sendmail program; the defaults
-  are `qtalh@` plus the host name, and the local `sendmail`. A webhook URL may
-  instead be `env:VARIABLE`, and `bearer=env:VARIABLE` supplies a bearer token.
+  are `qtalh@` plus the host name, and the local `sendmail`. A webhook URL must
+  use HTTPS unless its host is loopback, and may not contain credentials or a
+  fragment; loading rejects other URLs. It may instead be `env:VARIABLE`, which
+  is checked at delivery, and `bearer=env:VARIABLE` supplies a bearer token.
 - `$NOTIFY` follows a group or channel and covers it and everything beneath it.
   It gives the minimum severity, then the stages: the first stage's destinations
   are notified at once, or after `delay:` seconds, and each later stage
@@ -66,8 +68,9 @@ $NOTIFY MAJOR ops 600:pager
   to matching PV names, `cooldown=` sets the repeat suppression in seconds
   (default 1800), `resolution` also reports the episode's end, and `name=` sets
   the name used in messages (default: the group or channel name).
-- Mistakes are reported with their line when the file is loaded or checked with
-  `--validate`, including a stage that names an undefined destination.
+- Mistakes are reported when the file is loaded or checked with `--validate`:
+  syntax errors with their line, an undefined destination with the group or
+  channel that uses it, and a destination defined twice with its name.
 
 These entries appear in **Setup → Notifications…** marked **[configuration file]**.
 They cannot be edited or removed there, and they are never saved to your personal

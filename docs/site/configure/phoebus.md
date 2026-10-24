@@ -2,7 +2,7 @@
 
 QtALH reads and writes the alarm configuration XML used by the Phoebus alarm
 server and NALMS, so a facility can move between systems or run both.
-For QtALH 1.0.0, these conversions preserve the settings each format supports.
+For QtALH 1.1.0, these conversions preserve the settings each format supports.
 Keep the original `.alhConfig` as the authoritative configuration: exporting
 to XML and importing it again can lose ALH-only settings, including Force PVs,
 beep thresholds, and group aliases. Review the conversion notes before using
@@ -106,7 +106,9 @@ Count filters with a positive count use the same delay and count parameters,
 but ALH also delays clearing; Phoebus delays only alarm onset. Conversions report
 this difference for review.
 
-Names with spaces are converted to underscores, and a component that repeats an ancestor's name is renamed, as ALH requires.
+Names with spaces are converted to underscores. A component that repeats an
+ancestor's name is renamed to avoid ambiguity in ALH's name-based parent
+references.
 
 PV names are copied unchanged in both directions. A Phoebus `pva://` PV is
 monitored over [pvAccess](/reference/configuration#pvaccess-channels), with

@@ -73,7 +73,7 @@ $FORCEPV_CALC_A example:maintenance
 
 Evaluation waits until all named PV inputs are available. Constants can evaluate immediately; omitted inputs are zero. The main-window footer shows the facility-wide count of disabled Force PVs.
 
-Inputs G–L are a QtALH extension: legacy ALH ignores them and evaluates them as 0, so a file that legacy ALH must also read should use only A–F. Loading such a file and `qtalh --validate` print a compatibility warning for each G–L input.
+Inputs G–L are a QtALH extension: legacy ALH ignores them, and its calculation reads undefined values for them (it keeps only six inputs), so a file that legacy ALH must also read should use only A–F. Loading such a file and `qtalh --validate` print a compatibility warning for each G–L input.
 
 An input is a constant only when the whole token is a number, such as `0` or `-2`. A name beginning with a digit, such as `1ID:gate`, is a PV; legacy ALH treated it as the constant 1, and treated a loaded `0` as a PV name.
 

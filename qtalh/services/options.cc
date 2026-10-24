@@ -194,8 +194,8 @@ QString usage() {
   -s -p sound        Silent / audio file (formats depend on Qt media backend)
   -filter no|active|unack
   -mainwindow -maskcolor -noerrorpopup -desc_field -debug
-  -notifications     Start with saved notification subscriptions enabled
-                     (otherwise every runtime starts paused)
+  -notifications     Start with notifications enabled, saved and configuration
+                     file subscriptions (otherwise every runtime starts paused)
   -style name, -style=name
                      Widget appearance: modern (default), motif (classic ALH),
                      fusion, or an installed Qt style

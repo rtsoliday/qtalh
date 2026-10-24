@@ -983,6 +983,34 @@ private slots:
     plain.beepSeverity = 2;
     QCOMPARE(writeConfig(plain, ConfigText::Source), QString("$BEEPSEVERITY MAJOR\nGROUP NULL root\n"));
   }
+  void beepSeverityAfterIncludeKeepsItsPlace() {
+    QTemporaryDir dir;
+    auto write = [&](const QString& name, const QByteArray& text) {
+      QFile f(dir.filePath(name));
+      return f.open(QIODevice::WriteOnly) && f.write(text) == text.size();
+    };
+    // The top-level line overrides the INCLUDE file's, which stays on disk.
+    const QString main = "GROUP NULL root\nINCLUDE root part\n$BEEPSEVERITY MINOR\nCHANNEL root x\n";
+    QVERIFY(write("part", "$BEEPSEVERITY MAJOR\nGROUP NULL sub\nCHANNEL sub pv\n"));
+    QVERIFY(write("main", main.toUtf8()));
+    const auto path = dir.filePath("main");
+    auto d = loadConfig(path);
+    QCOMPARE(d.beepSeverity, 1);
+    QCOMPARE(writeConfigFiles(d, path).front().text, main);
+    // As the editor saves: Edit text, then only the files whose text changed.
+    QHash<QString, QString> saved;
+    const auto before = writeConfigFiles(d, path, QString(), false);
+    for (int i = 1; i < before.size(); ++i) saved.insert(before[i].path, before[i].text);
+    auto edited = parseConfig(writeConfig(d, ConfigText::Edit));
+    QCOMPARE(edited.beepSeverity, 1);
+    edited.channels().back()->mask = Mask::parse("D");
+    const auto files = writeConfigFiles(edited, path);
+    QCOMPARE(files.front().text, QString(main).replace("CHANNEL root x\n", "CHANNEL root x -D---\n"));
+    for (int i = 0; i < files.size(); ++i)
+      if (!i || saved.value(files[i].path) != files[i].text)
+        saveConfigText(edited, files[i].path, files[i].text);
+    QCOMPARE(loadConfig(path).beepSeverity, 1);
+  }
   void configFilesKeepIncludeFiles() {
     QTemporaryDir dir;
     auto write = [&](const QString& name, const QString& text) {
@@ -1508,7 +1536,7 @@ private slots:
   void calcInputsThroughL() {
     auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n$FORCEPV CALC D 1 0\n"
                          "$FORCEPV_CALC A+G+L>2\n$FORCEPV_CALC_A 1\n$FORCEPV_CALC_G input:g\n$FORCEPV_CALC_L 1\n");
-    // Legacy ALH ignores G-L and would evaluate them as 0; loading says so per line.
+    // Legacy ALH ignores G-L, leaving them undefined in its calculation; loading says so per line.
     QCOMPARE(d.warnings.size(), 2);
     QVERIFY2(d.warnings[0].startsWith("Line 6: $FORCEPV_CALC_G is a QtALH extension"), qPrintable(d.warnings[0]));
     QVERIFY(d.warnings[1].startsWith("Line 7: $FORCEPV_CALC_L"));
@@ -2477,6 +2505,34 @@ private slots:
     // An absolute deadline still needs a full minute from the time it is applied.
     QVERIFY_THROWS_EXCEPTION(ParseError, e.shelveUntil(channels[0], time + 59999, "late", "tester", true));
     QCOMPARE(e.shelveUntil(channels[0], time + 60001, "until", "tester", true), 1);
+  }
+  void shelvingDeadlineBoundaries() {
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
+    Engine e(d);
+    auto channel = d.channels()[0];
+    const auto minimum = std::numeric_limits<qint64>::min();
+    const auto maximum = std::numeric_limits<qint64>::max();
+    qint64 time = maximum - 60000;
+    e.now = [&] { return time; };
+    QCOMPARE(e.shelveUntil(channel, maximum, "last minute", "tester"), 1);
+    QCOMPARE(e.state(channel).shelf.until, maximum);
+    e.unshelve(channel);
+    QCOMPARE(e.shelve(channel, 1, "last minute", "tester"), 1);
+    QCOMPARE(e.state(channel).shelf.until, maximum);
+    ++time;
+    QVERIFY_THROWS_EXCEPTION(ParseError, e.shelve(channel, 1, "overflow", "tester", true));
+    QCOMPARE(e.state(channel).shelf.until, maximum);
+    e.unshelve(channel);
+    time = minimum;
+    // Ordered endpoints need not have a representable signed difference.
+    // Under UBSan this used to overflow before rejecting the invalid interval.
+    QVERIFY_THROWS_EXCEPTION(ParseError, e.shelveUntil(channel, maximum, "too long", "tester"));
+    QVERIFY(!e.state(channel).shelf.until);
+    QCOMPARE(e.shelveUntil(channel, minimum + 60000, "first minute", "tester"), 1);
+    QCOMPARE(e.state(channel).shelf.until, minimum + 60000);
+    time = maximum;
+    QVERIFY_THROWS_EXCEPTION(ParseError, e.shelveUntil(channel, minimum, "past", "tester", true));
+    QCOMPARE(e.state(channel).shelf.until, minimum + 60000);
   }
   void shelvingPreservesExternalEffects_data() {
     QTest::addColumn<bool>("global"); QTest::addColumn<bool>("passive");

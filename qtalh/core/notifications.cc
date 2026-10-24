@@ -5,6 +5,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSet>
+#include <QUrl>
 #include <QUuid>
 #include <algorithm>
 #include <stdexcept>
@@ -340,6 +341,9 @@ NotificationDestination parseDestination(const QString& name, const QString& val
     d.urlEnvironment = words[1].mid(4);
     if (!environmentName(d.urlEnvironment)) throw ParseError("Invalid environment variable: " + words[1]);
   } else if (words[1].startsWith("https://") || words[1].startsWith("http://")) {
+    // Refuse at load what every delivery would refuse; env: URLs are checked then.
+    const auto problem = webhookUrlProblem(words[1]);
+    if (!problem.isEmpty()) throw ParseError("$NOTIFY_WEBHOOK " + words[1] + ": " + problem);
     d.url = words[1];
   } else {
     throw ParseError("$NOTIFY_WEBHOOK needs an http(s) URL or env:VARIABLE");
@@ -355,6 +359,16 @@ NotificationDestination parseDestination(const QString& name, const QString& val
   return d;
 }
 } // namespace
+QString webhookUrlProblem(const QString& text) {
+  const QUrl url(text);
+  if (!url.isValid() || url.host().isEmpty() || !url.userInfo().isEmpty() || url.hasFragment())
+    return "Invalid webhook URL (credentials and fragments are not allowed)";
+  const auto host = url.host().toLower();
+  const bool loopback = host == "localhost" || host == "127.0.0.1" || host == "::1";
+  if (url.scheme() != "https" && !(url.scheme() == "http" && loopback))
+    return "Webhook requires HTTPS (HTTP is allowed only for loopback testing)";
+  return {};
+}
 bool isNotificationDirective(const QString& name) {
   return name == "NOTIFY" || name == "NOTIFY_EMAIL" || name == "NOTIFY_WEBHOOK";
 }

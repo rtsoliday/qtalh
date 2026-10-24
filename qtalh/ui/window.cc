@@ -2054,16 +2054,17 @@ void Window::saveTo(const QString& p) {
     if (box.exec() != QMessageBox::Save) return;
   }
   // Unchanged INCLUDE files are never rewritten. Write those that change
-  // before the file that reads them.
+  // before the file that reads them, and none when one cannot be written.
+  QVector<ConfigFile> writes;
+  for (int i = 1; i < files.size(); ++i)
+    if (changed.contains(files[i].path)) writes << files[i];
+  writes << ConfigFile{path, files.front().text};
   QStringList written;
   try {
-    for (int i = 1; i < files.size(); ++i)
-      if (changed.contains(files[i].path)) {
-        saveConfigText(doc, files[i].path, files[i].text);
-        written << files[i].path;
-      }
-    saveConfigText(doc, path, files.front().text);
+    saveConfigTexts(doc, writes, written);
+    written.removeAll(path);
   } catch (const std::exception& e) {
+    written.removeAll(path);
     savedIncludes.clear();
     for (const auto& f : files.mid(1))
       if (written.contains(f.path)) savedIncludes.insert(f.path, f.text);

@@ -209,6 +209,9 @@ private slots:
     }
     QVERIFY(topics >= 20);
     QVERIFY(anchors.contains("pvaccess-channels"));
+    // Snapshot export has its own offline Help topic, separate from analytics exports.
+    QVERIFY(anchors.contains("sdds-alarm-snapshot"));
+    QVERIFY(browser->toPlainText().contains("data snapshot, not an ALH configuration"));
     // Following the scrollbar and an internal documentation link updates the topic.
     auto position = anchors.value("log-browser");
     auto block = browser->document()->findBlock(position);
@@ -3456,6 +3459,70 @@ private slots:
                                                                     "GROUP NULL root\nCHANNEL root added -----\n")
                                        : latin1);
     }
+  }
+  void editorSaveFailureLeavesIncludeFiles() {
+#ifdef Q_OS_WIN
+    QSKIP("Directory permissions do not prevent creating files on Windows");
+#else
+    QTemporaryDir dir;
+    QVERIFY(QDir(dir.path()).mkpath("top"));
+    auto write = [&](const QString& name, const QByteArray& text) {
+      QFile file(dir.filePath(name));
+      return file.open(QIODevice::WriteOnly) && file.write(text) == text.size();
+    };
+    auto read = [](const QString& path) {
+      QFile file(path);
+      return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    };
+    const QByteArray main = "GROUP NULL root\nINCLUDE root ../part\n";
+    const QByteArray part = "GROUP root part\nCHANNEL part a\n";
+    QVERIFY(write("top/main", main));
+    QVERIFY(write("part", part));
+    const auto path = dir.filePath("top/main");
+    auto w = std::make_unique<Window>(loadConfig(path), options(true), false);
+    // Renaming the root changes the INCLUDE file's parent line and the top-level file.
+    auto tree = w->findChild<QTreeView*>("alarmTree");
+    tree->setCurrentIndex(tree->model()->index(0, 2));
+    for (auto action : w->findChildren<QAction*>())
+      if (action->text() == "Properties Window") action->trigger();
+    auto properties = w->findChild<QDialog*>("propertiesDialog"); QVERIFY(properties);
+    properties->findChild<QLineEdit*>("propertyNAME")->setText("renamed");
+    properties->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Apply)->click();
+    properties->close();
+    QCOMPARE(w->document().root->name, QString("renamed"));
+    // The top-level file's directory accepts no replacement file.
+    QFile::Permissions permissions = QFile::permissions(dir.filePath("top"));
+    QVERIFY(QFile::setPermissions(dir.filePath("top"), QFile::ReadOwner | QFile::ExeOwner));
+    if (QFile probe(dir.filePath("top/probe")); probe.open(QIODevice::WriteOnly)) {
+      QFile::setPermissions(dir.filePath("top"), permissions);
+      QSKIP("This user can write to a read-only directory");
+    }
+    QTimer::singleShot(0, w.get(), [] {
+      if (auto box = qobject_cast<QMessageBox*>(qApp->activeModalWidget()))
+        box->button(QMessageBox::Save)->click();
+    });
+    QString failure;
+    try {
+      w->saveTo(path);
+    } catch (const ParseError& e) {
+      failure = e.what();
+    }
+    QFile::setPermissions(dir.filePath("top"), permissions);
+    QVERIFY2(failure.contains(path), qPrintable(failure));
+    // Otherwise the INCLUDE file would name a parent that the unchanged
+    // top-level file does not declare, and the facility would not load.
+    QVERIFY(!failure.contains("Already saved"));
+    QCOMPARE(read(dir.filePath("part")), part);
+    QCOMPARE(read(path), main);
+    QCOMPARE(loadConfig(path).root->name, QString("root"));
+    // After the problem is fixed, Save writes both.
+    QTimer::singleShot(0, w.get(), [] {
+      if (auto box = qobject_cast<QMessageBox*>(qApp->activeModalWidget()))
+        box->button(QMessageBox::Save)->click();
+    });
+    w->saveTo(path);
+    QCOMPARE(loadConfig(path).root->name, QString("renamed"));
+#endif
   }
   void editorSaveKeepsCommentsAndIncludeFiles() {
     QTemporaryDir dir;
@@ -6791,6 +6858,14 @@ private slots:
     model.setData(model.index(0, 0), 1, AlarmSeverityRole);
     QTRY_VERIFY(above->isVisible());
     QTRY_COMPARE(scroll->maximum(), normalMaximum + bar->height());
+    // Both arrow targets are persistent indexes replaced synchronously by a
+    // scroll-triggered recount. Exercise each direction before using it again.
+    above->click();
+    QTRY_VERIFY(!above->isVisible());
+    QTRY_VERIFY(below->isVisible());
+    below->click();
+    QTRY_VERIFY(above->isVisible());
+    QTRY_VERIFY(lastVisible());
     scroll->setValue(scroll->maximum());
     QTRY_VERIFY(lastVisible());
     QTRY_VERIFY(!below->isVisible());

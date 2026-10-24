@@ -48,6 +48,8 @@ struct DocumentLine {
   std::shared_ptr<const Include> origin; // Null for the top-level file.
   // Kept by a node: written after this many of its directives.
   int position = 0;
+  // Read order, against an INCLUDE line read after as many directives.
+  int sequence = 0;
 };
 struct Node {
   bool group = false;
@@ -68,6 +70,7 @@ struct Node {
     int children = 0; // This group's children before the INCLUDE line.
     int directives = -1; // Its directives before the line, when the line followed them.
     bool empty = false; // The file declared no group or channel.
+    int sequence = 0; // Read order, as DocumentLine::sequence.
   };
   QVector<IncludeLine> includes;
   // $BEEPSEVERITY and $HEARTBEATPV lines that followed this node's statements.
@@ -143,6 +146,11 @@ QString writeCheckedConfig(const Document& doc, ConfigText form = ConfigText::Ca
 void saveConfig(const Document& doc, const QString& path);
 // Writes `text` as `doc` would be saved, in its encoding.
 void saveConfigText(const Document& doc, const QString& path, const QString& text);
+// Writes several files as saveConfigText() does, in order. All are written to
+// temporary files before any replaces its file, so a write failure leaves every
+// file unchanged. Throws ParseError; `replaced` lists the files already replaced
+// when a later replacement fails.
+void saveConfigTexts(const Document& doc, const QVector<ConfigFile>& files, QStringList& replaced);
 QString writeReport(const Document& doc);
 // With keepOrigins false, the copy belongs to the file of the group it is
 // added to, and its INCLUDE files are written expanded into that file.

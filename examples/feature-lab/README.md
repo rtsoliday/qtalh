@@ -31,6 +31,9 @@ occupied, stop the other lab or choose unused ports, for example:
 python3 examples/feature-lab/run.py --port 15168 --webhook-port 18081
 ```
 
+The selected CA ports apply to both the client and IOC, overriding inherited
+`EPICS_CAS_SERVER_PORT` and `EPICS_CAS_BEACON_PORT` settings.
+
 Use the webhook URL printed by the launcher. The script checks ports before
 starting and does not stop unrelated processes. All lab commands write only
 the `qtalh_lab:` PVs on this loopback IOC.
@@ -176,3 +179,16 @@ It validates the configuration, checks MINOR/MAJOR/normal on all four PVs, posts
 one synthetic notification to the local receiver, and cleans up its processes.
 This is an IOC/receiver check; it does not exercise QtALH's notification sender.
 The automated application suites are documented in [the test guide](../../qtalh/tests/README.md).
+
+To check port selection against conflicting inherited IOC settings, stop any
+running lab and run both smoke cases below with unused ports. Add
+`--epics-bin /path/to/epics/base/bin/linux-x86_64` to each command if Base is not
+in the sibling checkout. Both cases should print the same PASS message and
+clean up their own IOC, receiver and repeater:
+
+```sh
+EPICS_CAS_SERVER_PORT=19764 EPICS_CAS_BEACON_PORT=19765 \
+  python3 examples/feature-lab/run.py --silent --smoke-test
+EPICS_CAS_SERVER_PORT=19764 EPICS_CAS_BEACON_PORT=19765 \
+  python3 examples/feature-lab/run.py --port 19664 --webhook-port 19680 --silent --smoke-test
+```

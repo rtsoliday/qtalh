@@ -76,6 +76,8 @@ public:
   const QHash<QString, QString>* included = nullptr;
   // The node keeping each $BEEPSEVERITY and $HEARTBEATPV line; null for doc.
   QHash<QString, Node*> lineOwners;
+  // Read order of document lines and INCLUDE lines (DocumentLine::sequence).
+  int sequence = 0;
   // Large configurations repeat directive keys and many values (commands,
   // Force PVs, count filters); nodes share one copy of each instead.
   QSet<QString> strings;
@@ -175,6 +177,7 @@ public:
           inc->parent = include;
           parent->includes.push_back({inc, int(parent->children.size()),
                                       current == parent && !afterInclude ? parent->directives.size() : -1});
+          parent->includes.back().sequence = ++sequence;
           regions.push_back({include, current, parent, declared, declarations,
                              parent->includes.size() - 1, depth, pending});
           include = inc;
@@ -326,6 +329,7 @@ public:
         inc->parent = include;
         parent->includes.push_back({inc, int(parent->children.size()),
                                     current == parent && !afterInclude ? parent->directives.size() : -1});
+        parent->includes.back().sequence = ++sequence;
         const int index = parent->includes.size() - 1;
         const int count = read(text, base, parent, depth + 1, path, inc);
         parent->includes[index].empty = !count;
@@ -357,6 +361,7 @@ public:
         // after the statement it followed in this file, or at the file's top.
         auto documentLine = [&](const QString& canonical) {
           DocumentLine l{name, value, takeBefore(), raw != canonical ? raw : QString(), include};
+          l.sequence = ++sequence;
           if (lineOwners.contains(name)) {
             auto owner = lineOwners.value(name);
             auto& kept = owner ? owner->documentLines : doc.documentLines;
@@ -419,7 +424,8 @@ public:
         if (forceCalcInput(name) && name.back() > QLatin1Char('F'))
           doc.warnings << (file.isEmpty() ? QString() : file + ": ") +
               QString("Line %1: $%2 is a QtALH extension; legacy ALH ignores CALC inputs G "
-                      "through L and evaluates them as 0").arg(i + 1).arg(name);
+                      "through L, and its calculation reads undefined values for them")
+                  .arg(i + 1).arg(name);
         if (isNotificationDirective(name)) {
           try {
             checkNotificationDirective(name, value);
@@ -826,28 +832,40 @@ private:
     QVector<const DocumentLine*> placed;
     for (const auto& l : n.documentLines)
       placed << &l;
-    QVector<const Include*> included;
-    QVector<int> positions;
+    QVector<const Node::IncludeLine*> included;
     if (!inlined())
       for (const auto& l : n.includes)
-        if (l.directives >= 0 && l.include->parent.get() == file && present.contains(l.include.get())) {
-          included << l.include.get();
-          positions << l.directives;
-        }
+        if (l.directives >= 0 && l.include->parent.get() == file && present.contains(l.include.get()))
+          included << &l;
     // Each goes before the first directive read after it, so directives
-    // added by editing stay with the group's earlier ones.
+    // added by editing stay with the group's earlier ones. Lines read after
+    // the same directive keep their order: a $BEEPSEVERITY line after an
+    // INCLUDE line must still override that file's.
     int count = 0;
     QSet<const void*> done;
     auto place = [&](bool last) {
+      struct Due {
+        int position, sequence;
+        const DocumentLine* line;
+        const Node::IncludeLine* include;
+      };
+      QVector<Due> due;
       for (auto l : placed)
-        if ((l->position <= count || last) && !done.contains(l)) {
-          done.insert(l);
-          writeDocumentLine(out, *l);
-        }
-      for (int i = 0; i < included.size(); ++i)
-        if ((positions[i] <= count || last) && !done.contains(included[i])) {
-          done.insert(included[i]);
-          writeInclude(included[i], out);
+        if ((l->position <= count || last) && !done.contains(l))
+          due.push_back({l->position, l->sequence, l, nullptr});
+      for (auto l : included)
+        if ((l->directives <= count || last) && !done.contains(l->include.get()))
+          due.push_back({l->directives, l->sequence, nullptr, l});
+      std::stable_sort(due.begin(), due.end(), [](const Due& a, const Due& b) {
+        return a.position != b.position ? a.position < b.position : a.sequence < b.sequence;
+      });
+      for (const auto& d : due)
+        if (d.line) {
+          done.insert(d.line);
+          writeDocumentLine(out, *d.line);
+        } else {
+          done.insert(d.include->include.get());
+          writeInclude(d.include->include.get(), out);
         }
     };
     for (const auto& d : n.directives) {
@@ -1079,16 +1097,40 @@ void saveConfig(const Document& doc, const QString& path) {
     throw ParseError(problem);
   saveConfigText(doc, path, text);
 }
-void saveConfigText(const Document& doc, const QString& path, const QString& text) {
-  QSaveFile f(path);
-  if (!f.open(QIODevice::WriteOnly))
-    throw ParseError(path + ": " + f.errorString());
+namespace {
+QByteArray encodeConfig(const Document& doc, const QString& text) {
   // Edits may add text that ISO-8859-1 cannot represent; keep it, not '?'.
   auto data = doc.latin1 ? text.toLatin1() : text.toLocal8Bit();
   if (doc.latin1 && QString::fromLatin1(data) != text)
     data = text.toLocal8Bit();
+  return data;
+}
+} // namespace
+void saveConfigText(const Document& doc, const QString& path, const QString& text) {
+  QSaveFile f(path);
+  if (!f.open(QIODevice::WriteOnly))
+    throw ParseError(path + ": " + f.errorString());
+  const auto data = encodeConfig(doc, text);
   if (f.write(data) != data.size() || !f.commit())
     throw ParseError(path + ": " + f.errorString());
+}
+void saveConfigTexts(const Document& doc, const QVector<ConfigFile>& files, QStringList& replaced) {
+  // Write every file's temporary copy first: a file that cannot be written,
+  // for example in a read-only directory or on a full disk, then leaves all
+  // of them unchanged. Uncommitted copies are discarded.
+  std::vector<std::unique_ptr<QSaveFile>> copies;
+  for (const auto& file : files) {
+    copies.push_back(std::make_unique<QSaveFile>(file.path));
+    auto& f = *copies.back();
+    const auto data = encodeConfig(doc, file.text);
+    if (!f.open(QIODevice::WriteOnly) || f.write(data) != data.size() || !f.flush())
+      throw ParseError(file.path + ": " + f.errorString());
+  }
+  for (std::size_t i = 0; i < copies.size(); ++i) {
+    if (!copies[i]->commit())
+      throw ParseError(files[int(i)].path + ": " + copies[i]->errorString());
+    replaced << files[int(i)].path;
+  }
 }
 QString writeReport(const Document& doc) {
   QString result;

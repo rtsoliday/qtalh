@@ -29,7 +29,11 @@ keep their order; a new group becomes the group shown, ready for its channels.
 Pasted nodes and **Insert → Configuration File…** are still added at the end
 of the destination group.
 
-There must be one root. Group names must not repeat an ancestor or use the reserved name `NULL`. See the [configuration reference](/reference/configuration) for parent lookup and nesting rules.
+There must be one root, and group names must not use the reserved name `NULL`.
+A group may repeat an ancestor's name, with parent names resolved to the nearest
+matching ancestor. Editor changes and saves that would reload the hierarchy
+differently are rejected with the group to rename. See the
+[configuration reference](/reference/configuration) for parent lookup and nesting rules.
 
 ## Edit properties and guidance
 
@@ -95,12 +99,18 @@ comment at the end of a changed line. A deleted group or channel takes the
 comments directly above it. Directives you add follow the existing directives of
 their group or channel; inserted groups and channels go where described above.
 Directives with no effect are not kept: a value replaced by a later one of the
-same kind, and later `$SEVRPV` or `$HEARTBEATPV` lines that ALH ignores.
+same kind, and later `$SEVRPV` or `$HEARTBEATPV` lines that ALH ignores. In an
+INCLUDE file that other configurations also read, such a line, for example a
+`$BEEPSEVERITY` that this configuration overrides, can take effect there; it is
+removed when Save rewrites that file. If any file of the configuration is read
+as ISO-8859-1, every file Save writes uses ISO-8859-1 where it can represent the
+text.
 
 Groups and channels you add or paste into a group read from an INCLUDE file,
 or insert right after a node read from one,
-belong to that file. When an edit changes an included file, **Save** lists every
-included file it will rewrite and asks before writing them, because other
+belong to that file. When an edit changes an included file, **Save** and
+**Save As** list every included file they will rewrite, in place at its own
+path, and ask before writing them, because other
 configurations that include a file read the change too. Included files you did
 not change are never rewritten. Removing everything an included file declared
 removes its INCLUDE line and leaves the file as it is.
@@ -114,7 +124,10 @@ then refers to that file only. Pasted nodes and
 INCLUDE files, to the file of the destination group.
 
 Before writing, QtALH reads the saved text back and refuses to save if it would
-load as a different configuration; nothing is written then.
+load as a different configuration; nothing is written then. Each file is first
+written to a temporary copy, and no file is replaced unless every copy could be
+written, so a read-only directory or a full disk leaves all files unchanged. If
+replacing a file still fails, the message lists the INCLUDE files already saved.
 This also applies when different INCLUDE paths reach the same file through a
 symbolic link: their copies must agree before Save can write that file.
 

@@ -443,6 +443,35 @@ private slots:
     QCOMPARE(p.take(e, 70000), matches);
     if (matches) QCOMPARE(e.alarms[0].state.pv, pv);
   }
+  void configurationWebhookUrls_data() {
+    QTest::addColumn<QString>("url");
+    QTest::addColumn<bool>("accepted");
+    QTest::newRow("https") << "https://hooks.example.org/alh" << true;
+    QTest::newRow("loopback http") << "http://127.0.0.1:1/test" << true;
+    QTest::newRow("localhost http") << "http://localhost:1/test" << true;
+    QTest::newRow("environment") << "env:QTALH_TEST_WEBHOOK" << true;
+    QTest::newRow("remote http") << "http://hooks.example.org/alh" << false;
+    QTest::newRow("credentials") << "https://user:secret@hooks.example.org/alh" << false;
+    QTest::newRow("fragment") << "https://hooks.example.org/alh#part" << false;
+    QTest::newRow("no host") << "https:///alh" << false;
+  }
+  void configurationWebhookUrls() {
+    // Every delivery refuses these URLs, so loading and --validate must too.
+    QFETCH(QString, url);
+    QFETCH(bool, accepted);
+    const auto config = "GROUP NULL root\n$NOTIFY_WEBHOOK ops " + url + "\n$NOTIFY MAJOR ops\nCHANNEL root pv\n";
+    try {
+      auto d = parseConfig(config);
+      QVERIFY2(accepted, "Webhook URL that cannot be delivered to was accepted");
+      const auto s = configurationNotifications(d, "/test.alh", "qtalh@localhost", "sendmail");
+      QCOMPARE(s.destinations.size(), 1);
+      if (!url.startsWith("env:"))
+        QVERIFY(NotificationService::validateWebhook(s.destinations[0]).isEmpty());
+    } catch (const ParseError& e) {
+      QVERIFY2(!accepted, e.what());
+      QVERIFY(QString::fromUtf8(e.what()).startsWith("Line 2: $NOTIFY_WEBHOOK " + url + ": "));
+    }
+  }
   void invalidPvWildcards_data() {
     QTest::addColumn<QString>("pattern");
     QTest::newRow("letters") << "[z-a]*";

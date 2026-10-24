@@ -62,6 +62,7 @@ def main():
     env = os.environ.copy()
     env.update(EPICS_CA_NAME_SERVERS="", EPICS_CA_AUTO_ADDR_LIST="NO", EPICS_CA_ADDR_LIST=f"127.0.0.1:{args.port}",
                EPICS_CA_SERVER_PORT=str(args.port), EPICS_CA_REPEATER_PORT=str(args.port + 1),
+               EPICS_CAS_SERVER_PORT=str(args.port), EPICS_CAS_BEACON_PORT=str(args.port + 1),
                EPICS_CAS_INTF_ADDR_LIST="127.0.0.1", EPICS_CAS_AUTO_BEACON_ADDR_LIST="NO",
                EPICS_CAS_BEACON_ADDR_LIST=f"127.0.0.1:{args.port + 1}",
                XDG_CONFIG_HOME=str(state / "config"))

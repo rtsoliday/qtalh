@@ -32,6 +32,9 @@ void validateNotifications(const NotificationSettings&);
 // $NOTIFY_WEBHOOK destinations and $NOTIFY subscriptions on a group or channel.
 // checkNotificationDirective() throws ParseError for a malformed value.
 bool isNotificationDirective(const QString& name);
+// Why a webhook URL cannot be used, or empty: it needs a host, no credentials
+// or fragment, and HTTPS unless the host is loopback.
+QString webhookUrlProblem(const QString& url);
 void checkNotificationDirective(const QString& name, const QString& value);
 // Destination names referenced by a $NOTIFY value, in first-use order.
 // Uses the same syntax validation as checkNotificationDirective().

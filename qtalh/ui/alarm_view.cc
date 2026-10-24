@@ -217,13 +217,16 @@ void AlarmView::resizeEvent(QResizeEvent* event) {
   updateOffscreen();
 }
 void AlarmView::scrollTo(const QModelIndex& index, ScrollHint hint) {
-  QTreeView::scrollTo(index, hint);
-  if (!offscreenHeight || !index.isValid()) return;
+  // A persistent target can be replaced by updateOffscreen() when scrolling
+  // emits valueChanged. Keep a value before that can invalidate the reference.
+  const QModelIndex target = index;
+  QTreeView::scrollTo(target, hint);
+  if (!offscreenHeight || !target.isValid()) return;
   // scrollTo() updates Qt's private scrollbar range directly, bypassing our
   // geometry override. Restore the spacer before positioning within the band
   // above the strip; otherwise the final row is clamped underneath it.
   updateGeometries();
-  const auto row = QTreeView::visualRect(index.sibling(index.row(), 0));
+  const auto row = QTreeView::visualRect(target.sibling(target.row(), 0));
   if (row.isEmpty()) return;
   const int band = qMax(1, viewport()->height() - offscreenHeight);
   auto scroll = verticalScrollBar();

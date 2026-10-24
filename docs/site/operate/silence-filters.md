@@ -42,7 +42,7 @@ alarm-only filter is selected. Choosing **No filter** clears this indication.
 
 ## Temporarily remove acknowledgement requirements
 
-Timed NoAck (**Action → NoAck for One Hour…**, Ctrl+N) is different from silence. Its Modify NoAck Mask dialog starts or ends the one-hour timer for the selection. It changes acknowledgement behavior and is shown as `H` in the mask summary. In global active mode, when the hour expires, an alarm that cleared meanwhile is acknowledged automatically: QtALH writes the IOC ACKS and any `$ACKPV`. Use the [mask reference](/reference/configuration) before changing NoAck, NoAckT, Disable, or Cancel settings.
+Timed NoAck (**Action → NoAck for One Hour…**, Ctrl+N) is different from silence. Its Modify NoAck Mask dialog starts or ends the one-hour timer for the selection. It changes acknowledgement behavior and is shown as `H` in the mask summary. Ending it, when the hour expires or when you turn the toggle off, returns the NoAck setting to its configured value. In global active mode, either way, an alarm that cleared meanwhile is acknowledged automatically: QtALH writes the IOC ACKS and any `$ACKPV`. Use the [mask reference](/reference/configuration) before changing NoAck, NoAckT, Disable, or Cancel settings.
 
 ## Temporarily shelve alarms
 
