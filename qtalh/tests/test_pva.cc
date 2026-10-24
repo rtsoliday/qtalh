@@ -891,6 +891,40 @@ private slots:
     output->writer->ready();
     QTRY_COMPARE(output->writer->submitted, QVector<double>{2});
   }
+  void forceInputsShareOneChannel() {
+    // Inputs reading one PV share its channel. One added later receives the
+    // latest value after the call returns, as a new monitor would.
+    PvAccess pv;
+    int a = 0, b = 0, c = 0;
+    QVector<double> first, second, third;
+    pv.number("pva://input", [&](double v) { first << v; }, &a);
+    pv.number("pva://input", [&](double v) { second << v; }, &b);
+    QCOMPARE(provider->channels.size(), size_t(1));
+    auto monitor = provider->channels.back()->monitor;
+    monitor->post(5);
+    QTRY_COMPARE(second, QVector<double>{5});
+    QCOMPARE(first, QVector<double>{5});
+    pv.number("pva://input", [&](double v) { third << v; }, &c);
+    QVERIFY(third.isEmpty());
+    QTRY_COMPARE(third, QVector<double>{5});
+    QCOMPARE(provider->channels.size(), size_t(1));
+    // Cancelling one input keeps the monitor for the others.
+    pv.cancelNumbers(&a);
+    monitor->post(6);
+    QTRY_COMPARE(third, (QVector<double>{5, 6}));
+    QCOMPARE(second, (QVector<double>{5, 6}));
+    QCOMPARE(first, QVector<double>{5});
+    // An unconnected PV is reported once, however many inputs read it.
+    provider->connectOnCreate = false;
+    QStringList errors;
+    pv.error = [&](const QString& s) { errors << s; };
+    int unavailable = 0;
+    pv.number("pva://missing", [&](double v) { unavailable += std::isnan(v); }, &a);
+    pv.number("pva://missing", [&](double v) { unavailable += std::isnan(v); }, &b);
+    QTRY_COMPARE_WITH_TIMEOUT(unavailable, 2, 3000);
+    QCOMPARE(errors.filter("pva://missing").size(), 1);
+    QCOMPARE(provider->channels.size(), size_t(2));
+  }
   void forceInputIgnoresAlarmOnlyUpdates() {
     // Force/CALC inputs follow value changes in the changed bitset only.
     PvAccess pv;

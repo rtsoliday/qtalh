@@ -35,7 +35,8 @@ QString acknowledgementIdentity(const QString& name) {
   // EPICS resolves the record before the first dot. DBR_PUT_ACKT changes
   // that record's ACKT regardless of the addressed field (including .VAL).
   // Keep the original channel name for the actual write/access-rights check.
-  return name.section('.', 0, 0);
+  // A name without a field is its record and is shared rather than copied.
+  return name.contains('.') ? name.section('.', 0, 0) : name;
 }
 QString identity(const Node* n) {
   QString result;
@@ -163,24 +164,25 @@ void Engine::start() {
     heartbeatDue = monotonicNow() + heartbeatInterval;
   }
 }
+static_assert(ForceCalcInputs <= CALCPERFORM_NARGS, "calcPerform argument count");
 struct Engine::ForceRuntime {
   QString source, expression;
   QByteArray compiled;
   std::array<double, CALCPERFORM_NARGS> values{};
-  // calcPerform may assign A through F. ALH compared callbacks against that
+  // calcPerform may assign A through L. ALH compared callbacks against that
   // mutable workspace, losing real changes or accepting duplicate inputs.
-  std::array<double, 6> received{};
-  std::array<QString, 6> inputs;
-  std::array<bool, 6> available{};
+  std::array<double, ForceCalcInputs> received{};
+  std::array<QString, ForceCalcInputs> inputs;
+  std::array<bool, ForceCalcInputs> available{};
   // Stable, per-input owners let editing A leave B's subscription untouched.
-  std::array<unsigned, 6> generation{};
+  std::array<unsigned, ForceCalcInputs> generation{};
   bool resultValid = false;
   double result = -999;
 };
 void Engine::stopForce(Node* n) {
   auto runtime = forces.take(n);
   if (runtime && pv)
-    for (int i = 0; i < 6; ++i)
+    for (int i = 0; i < ForceCalcInputs; ++i)
       pv->cancelNumbers(&runtime->generation[i]);
 }
 bool Engine::startForce(Node* n) {
@@ -223,8 +225,8 @@ bool Engine::startForce(Node* n) {
     }
   }
   QVector<int> subscriptions;
-  for (int i = 0; i < 6; ++i) {
-    const auto name = n->option("FORCEPV_CALC_" + QString(QChar('A' + i)));
+  for (int i = 0; i < ForceCalcInputs; ++i) {
+    const auto name = n->option(forceCalcInputKey(i));
     if (!fresh && runtime->inputs[i] == name) continue;
     calculationChanged = true;
     if (!fresh) pv->cancelNumbers(&runtime->generation[i]);
@@ -277,7 +279,7 @@ void Engine::evaluateForce(Node* n) {
   // CALC workspace. An expression may store NaN/Inf in a temporary variable
   // and repair it on the next evaluation; rejecting that workspace here would
   // leave a force mask stuck. forceValue still rejects nonfinite final results.
-  for (int i = 0; i < 6; ++i)
+  for (int i = 0; i < ForceCalcInputs; ++i)
     if (!runtime->available[i]) return;
   // Possible inherited ALH bug, deferred: calcPerform reads VAL from this
   // result argument, so resetting it makes VAL+1 return 1 on every evaluation.
@@ -502,7 +504,7 @@ void Engine::addHistory(Node* n, qint64 time) {
   history.prepend(historyTimestamp % QLatin1Char(' ') % n->name % QLatin1Char(' ') %
                   statusName(s.status) % QLatin1Char(' ') % severityName(s.severity) %
                   QLatin1Char(' ') % s.value);
-  while (history.size() > 10)
+  while (history.size() > 100)
     history.removeLast();
 }
 void Engine::event(Node* n, Event e) {
@@ -1007,9 +1009,12 @@ void Engine::configureForce(Node* n, const QVector<Directive>& directives, bool 
     return; // In particular, do not discard a pending automatic ACKT write.
   }
   discardForceWrites(n);
-  for (int i = n->directives.size() - 1; i >= 0; --i)
-    if (n->directives[i].key.startsWith("FORCEPV")) n->directives.removeAt(i);
-  n->directives += replacement;
+  // Unchanged Force PV directives keep their place and text as written.
+  QVector<Directive> next;
+  for (const auto& d : n->directives)
+    if (!d.key.startsWith("FORCEPV")) next.push_back(d);
+  next += replacement;
+  n->directives = keepDirectiveSources(n->directives, next);
   states[n].forceCurrent = -999;
   markForceDisabled(n, disabled);
   if (!startForce(n)) reapplyForce(n);
@@ -1253,19 +1258,32 @@ bool Engine::validShelfUsername(const QString& username) {
       !text.contains(QRegularExpression("[\\s\\x{0000}-\\x{001f}\\x{007f}\\x{2028}\\x{2029}]"));
 }
 int Engine::shelve(Node* n, int minutes, const QString& reason, const QString& username, bool replace) {
+  const qint64 time = now();
+  const qint64 duration = qint64(qBound(0, minutes, MaximumShelfMinutes + 1)) * 60000;
+  if (time > std::numeric_limits<qint64>::max() - duration)
+    throw ParseError("Shelving deadline is out of range.");
+  // Validate against the same reading: a later one could put a one-minute
+  // deadline just short of a minute ahead and refuse it.
+  return shelveAt(n, time, time + duration, reason, username, replace);
+}
+int Engine::shelveUntil(Node* n, qint64 until, const QString& reason, const QString& username,
+                        bool replace) {
+  return shelveAt(n, now(), until, reason, username, replace);
+}
+int Engine::shelveAt(Node* n, qint64 time, qint64 until, const QString& reason,
+                     const QString& username, bool replace) {
   const QString user = username.trimmed();
   if (!validShelfUsername(user))
     throw ParseError("Shelving requires a username (1–120 characters, without spaces or control characters).");
   const QString text = reason.trimmed();
-  if (minutes < 1 || minutes > MaximumShelfMinutes || text.isEmpty() || text.size() > 240 ||
+  // Deadlines are wall-clock times from 1 minute to 365 days after `time`.
+  if (until <= time || until - time < 60000 || until - time > qint64(MaximumShelfMinutes) * 60000 ||
+      text.isEmpty() || text.size() > 240 ||
       text.contains(QRegularExpression("[\\r\\n\\x{2028}\\x{2029}]")))
     throw ParseError("Shelving requires a duration from 1 minute to 365 days and a single-line reason (1–240 characters).");
   if (!n || (replace && n->group)) throw ParseError("Select one channel to change its shelf.");
   state(n); // Validate ownership before traversing.
-  const qint64 time = now();
-  const qint64 duration = qint64(minutes) * 60000;
-  if (time > std::numeric_limits<qint64>::max() - duration)
-    throw ParseError("Shelving deadline is out of range.");
+  const qint64 duration = until - time;
   int count = 0;
   eachChannel(n, [&](Node* c) {
     auto& s = states[c];

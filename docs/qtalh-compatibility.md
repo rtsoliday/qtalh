@@ -315,11 +315,12 @@ ALH already skips; silently ignored lines produce no entry.
 | Workflow | Qt implementation | Validation |
 | --- | --- | --- |
 | Compact runtime window, main tree/group panes, severity colors/letters, masks/counts | Window, AlarmModel, RowDelegate | Offscreen and real-display screenshots; alarm-cell click |
-| Acknowledge, guidance, related command, force PV, force mask, modify masks, beep severity, timed NoAck | Action menu and dialogs; timed NoAck toggles the selection at once, without ALH's Modify NoAck Mask dialog | Core action tests; dialog construction/lifecycle smoke tests |
+| Acknowledge, guidance, related command, force PV, force mask, modify masks, beep severity, timed NoAck | Action menu and dialogs, including ALH's Modify NoAck Mask dialog, which also shows the affected channel count for a group | Core action tests; dialog construction/lifecycle smoke tests |
 | Expand one level/branch/all, collapse branch | View menu / tree view | Implemented; manual workflow comparison remains |
 | History, config file, alarm/opmod log windows and search | View menu / text viewers | History dialog smoke test; file/log service tests |
 | All/active/unack display filters | AlarmModel | Membership and filtered selection/expansion regressions |
-| Global beep setting, silence interval, silence forever, log-file selection | Setup menu | Threshold/timer core tests; 5/10/15/30/60-minute choices, default 30; ALH's blue silence-interval display (footer and width scale, plus the panes without `-maskcolor`) checked against Motif screenshots and in UI tests |
+| QtALH notification directives (`$NOTIFY`, `$NOTIFY_EMAIL`, `$NOTIFY_WEBHOOK`) | Configuration file | Parsing, round trip and delivery tests; legacy ALH reports each as "Invalid Optional Line" and continues loading |
+| Global beep setting, silence interval, silence forever | Setup menu | Threshold/timer core tests; 5/10/15/30/60-minute choices, default 30; ALH's blue silence-interval display (footer and width scale, plus the panes without `-maskcolor`) checked against Motif screenshots and in UI tests; QtALH also shows it during Silence Forever, which ALH does not |
 | New/open/insert/save/save-as, multiple editor windows | Editor File and Insert menus | Editor save plus transaction tests |
 | Group/channel properties, cut/copy/paste/clear, undo/redo | Editor and snapshot model | Add/undo/redo/save and cross-window clipboard tests; properties dialog smoke test |
 | Reports and printing | Text report, QPrinter | Implemented; actual paper output unverified |
@@ -331,7 +332,7 @@ ALH already skips; silently ignored lines produce no entry.
 
 Action shortcuts: Ctrl+A acknowledge, Ctrl+G guidance, Ctrl+P related process,
 Ctrl+V force PV, Ctrl+M force mask, Ctrl+S modify mask, Ctrl+B beep severity,
-Ctrl+N timed NoAck (applied at once, without ALH's dialog). View shortcuts:
+Ctrl+N Modify NoAck Mask. View shortcuts:
 `+`, `*`, Ctrl+`*`, `-`. Editor supports
 Alt+Backspace undo, Ctrl+Y redo, Shift+Delete cut, Ctrl+Insert copy,
 Shift+Insert paste. File open uses Ctrl+O.
@@ -350,8 +351,9 @@ content-sized names and the reference initial expansion. See
 [the Radiation Monitors comparison](qtalh-appearance.md). Qt scroll bars, some
 dialog arrangements and menu labels still differ from Motif. Reports use a
 simpler indented text format.
-Current Alarm History lists the newest entry first in both appearances; ALH
-lists the oldest of its ten entries first and the newest last.
+Current Alarm History lists the newest entry first by default in both
+appearances, and clicking a column heading sorts by that column; ALH lists the
+oldest of its ten entries first and the newest last. QtALH keeps 100 entries.
 Font family/size/weight from XLFD are approximated where possible. Native file,
 print and font rendering differences are expected. These differences currently
 exceed a claim of pixel or complete arrangement parity and need operator review.
@@ -404,7 +406,9 @@ new browser and dialog/runtime lifetimes report zero errors and no lost blocks.
 
 ## Qt-specific timed shelving
 
-Runtime channels can be shelved for 1 minute to 365 days with a required
+Shelving is hidden unless the environment variable `USE_SHELVING` is `1`; the
+operators' shared change workflow for it is not implemented yet. Runtime
+channels can be shelved for 1 minute to 365 days with a required
 operator-entered username and reason.
 Group actions skip already shelved channels; group unshelving clears all
 remaining descendant shelves. Shelving is an independent presentation state,
@@ -662,10 +666,14 @@ The event-loop implementation follows the non-preemptive callback guidance in
 [EPICS CA](https://docs.epics-controls.org/en/latest/ca-ref/function-call-interface-general-guidelines.html)
 and [Qt QSocketNotifier](https://doc.qt.io/qt-6/qsocketnotifier.html). Callbacks
 are serialized on the GUI thread; polling is guarded against reentrancy and
-subscriptions are cancelled before model destruction. Reconfiguring Force PVs
-also releases obsolete numeric CA channels and their callbacks immediately.
-Connections explicitly prepared for output writes remain available, and other
-owners monitoring the same PV are unaffected.
+subscriptions are cancelled before model destruction. Force PV and CALC inputs
+that name the same PV share one channel and monitor, over Channel Access and
+pvAccess; legacy ALH opened one for every directive. An input added later, such
+as after a Force PV edit, receives the latest value as a new monitor would, and
+a connection or access failure is reported once per PV. Reconfiguring Force
+PVs releases an obsolete channel and its callbacks immediately once no input
+reads it. Connections explicitly prepared for output writes remain available,
+and other owners monitoring the same PV are unaffected.
 
 ## QtALH personal notification extension
 
@@ -863,7 +871,8 @@ command, because `READ` is the same status name as an IOC record READ alarm; suc
 record alarm has a severity no higher than INVALID.
 
 Repeated `GROUP NULL` declarations attach to the current group in both top-level and
-included configuration files, matching ALH. Saves normalize these parent references.
+included configuration files, matching ALH. Saves keep such a line while it still
+names the same group in place, and otherwise write the group's name.
 The Force PV `-999` initialization sentinel is intentionally retained: a first or
 reinitialized sample of `-999` is treated as unchanged, including when configured as
 the force value.
@@ -1073,9 +1082,9 @@ byte-for-byte identical.
 - **Startup operation-log records.** ALH writes `Setup Alarm Log File : <file>`
   and `Setup Config File : <file>` at startup, without the facility and node
   prefix and with the path as given. QtALH writes only
-  `<facility>: :  Setup Config File : <absolute path>`; it writes
-  `Setup Alarm Log File : <file>` only when the file is changed with
-  **Setup → New Alarm Log File…**.
+  `<facility>: :  Setup Config File : <absolute path>`. QtALH has no
+  command for changing log files while running, so it does not write
+  `Setup Alarm Log File : <file>`.
 - **Global-mode alarm-log records.** With `-global`, ALH writes a startup record
   for each initially cancelled or disabled channel (for example
   `<pv> NO_ALARM NO_ALARM NO_ALARM noackT` with an empty value). For a channel

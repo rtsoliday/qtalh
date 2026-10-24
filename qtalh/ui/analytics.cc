@@ -293,6 +293,8 @@ void Window::showAnalytics() {
   auto suppression = new QComboBox;
   suppression->setObjectName("analyticsSuppression");
   suppression->addItems({"All observed activity", "Unsuppressed activity", "Suppressed activity"});
+  // Masked, NoAck and shelved channels would otherwise lead the rankings.
+  suppression->setCurrentIndex(1);
   controls->addWidget(new QLabel("Range"), 0, 0);
   controls->addWidget(range, 0, 1);
   controls->addWidget(new QLabel("Scope"), 0, 2);

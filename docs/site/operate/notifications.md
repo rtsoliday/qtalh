@@ -28,12 +28,52 @@ PV wildcards match the entire PV name. `*` matches any number of characters and
 `?` matches one character, including `/` and `\`. Character classes such as
 `[a-c]` and `[!x]` are supported; separators entered literally match themselves.
 
-Every runtime starts **paused**, even when saved subscriptions are enabled.
+Every runtime starts **paused**, even when saved subscriptions are enabled,
+unless it is started with `-notifications`. That option enables them once at
+startup; afterwards the runtime's own toggle decides, including across reloads.
 When the open configuration has subscriptions, the status area shows
 **Notifications Enabled: YES** or **NO** for this runtime.
+The compact runtime window also shows **Notifications: ON** or **OFF**, so the
+state remains visible when the main window is hidden.
 Multiple enabled runtimes operate independently and can send duplicate messages.
 Notifications are available in local, global, and passive runtime modes, but not
 in the configuration editor. Closing the runtime stops its notification work.
+
+## Define notifications in the configuration file
+
+A configuration file can also define notifications, so every runtime that loads it
+has them without personal setup:
+
+```text
+GROUP NULL SR_Power_Supplies
+$NOTIFY_EMAIL   ops    oncall@example.org,sr-ps@example.org
+$NOTIFY_WEBHOOK pager  https://hooks.example.org/alh
+GROUP SR_Power_Supplies MPEOBs
+$NOTIFY MAJOR ops 600:pager
+```
+
+- `$NOTIFY_EMAIL name recipients` and `$NOTIFY_WEBHOOK name URL` define destinations
+  for the whole file. Recipients are comma-separated, without spaces. Optional
+  `from=` and `program=` set the email sender and sendmail program; the defaults
+  are `qtalh@` plus the host name, and the local `sendmail`. A webhook URL may
+  instead be `env:VARIABLE`, and `bearer=env:VARIABLE` supplies a bearer token.
+- `$NOTIFY` follows a group or channel and covers it and everything beneath it.
+  It gives the minimum severity, then the stages: the first stage's destinations
+  are notified at once, or after `delay:` seconds, and each later stage
+  (`600:pager`) after its delay if the episode continues. Optional `pv=` limits it
+  to matching PV names, `cooldown=` sets the repeat suppression in seconds
+  (default 1800), `resolution` also reports the episode's end, and `name=` sets
+  the name used in messages (default: the group or channel name).
+- Mistakes are reported with their line when the file is loaded or checked with
+  `--validate`, including a stage that names an undefined destination.
+
+These entries appear in **Setup → Notifications…** marked **[configuration file]**.
+They cannot be edited or removed there, and they are never saved to your personal
+settings; edit the file and reload instead. They follow the runtime's
+enable/pause state like personal subscriptions, so every runtime that loads the
+file and has notifications enabled sends its own messages. Legacy ALH reports each
+of these lines as an "Invalid Optional Line" but still loads the file. Editor
+saves keep them, and Phoebus export reports them as unconverted.
 
 ## Episode and suppression rules
 
@@ -88,6 +128,12 @@ on standard input. Install/configure a sendmail-compatible mailer; on Windows,
 provide a compatible executable explicitly. Exit 0 means **submitted to the
 mailer**, not delivered to an inbox. Exit 75 retries after 30 and then 120 seconds;
 other exits and the 30-second timeout are terminal. Timeout acceptance is uncertain.
+
+Email bodies group channels beneath their configuration groups, with each parent
+group shown once within its branch. Severity, status, and unacknowledged severity
+use readable names with their numeric values, such as **MAJOR (2)** and **HIHI (3)**.
+The final **Delivery details** line contains the stage and message ID for tracing
+a submission or retry; the alarm information appears first.
 
 Webhooks POST versioned JSON over HTTPS with TLS verification and no redirects.
 HTTP is permitted only for localhost/loopback testing. Configure a direct URL or

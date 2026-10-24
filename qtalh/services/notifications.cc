@@ -1,4 +1,5 @@
 #include "notifications.h"
+#include "process_limits.h"
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
@@ -10,6 +11,7 @@
 #include <QProcess>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QSysInfo>
 #include <QUrl>
 #include <stdexcept>
 namespace alh {
@@ -77,7 +79,8 @@ NotificationService::NotificationService(QObject* parent, QString path)
   monotonicNow = [this] { return clock.elapsed(); };
   policy.activity = [this](const QString& s) { record(s); };
   try {
-    policy.configure(store.load(), {});
+    personal_ = store.load();
+    policy.configure(personal_, {});
   } catch (const std::exception& e) {
     settingsError = QString::fromUtf8(e.what());
     record("Failed: " + settingsError);
@@ -137,15 +140,18 @@ void NotificationService::attach(Engine* e, const QVector<Node*>& n, const QStri
       record("Paused; configuration changed to " + configuration +
              "; pending notifications cancelled");
   }
-  policy.configure(policy.settings(), configuration);
+  policy.configure(merged(), configuration);
+  // Count the engine's cached identities, which these sets share instead of
+  // holding another copy of every channel's identity.
+  const auto all = channels();
   QHash<QString, int> counts;
-  for (auto n : nodes)
-    ++counts[Engine::nodeIdentity(n)];
+  for (const auto& s : all)
+    ++counts[s.identity];
   unique.clear();
   for (auto it = counts.begin(); it != counts.end(); ++it)
     if (it.value() == 1)
       unique << it.key();
-  policy.reconcile(channels());
+  policy.reconcile(all);
   watch();
   schedulePump();
 }
@@ -171,8 +177,51 @@ void NotificationService::enable(bool enabled) {
         policy.observe(s, monotonicNow());
   record(enabled ? "Enabled in this runtime" : "Paused; pending notifications cancelled");
 }
+NotificationSettings NotificationService::merged() const {
+  auto all = personal_;
+  all.destinations += configured_.destinations;
+  all.subscriptions += configured_.subscriptions;
+  return all;
+}
+void NotificationService::setConfiguration(const Document& doc) {
+  NotificationSettings defined;
+  if (!configuration.isEmpty()) {
+    try {
+      const auto program = QStandardPaths::findExecutable("sendmail", {"/usr/sbin", "/usr/lib", "/usr/bin"});
+      defined = configurationNotifications(doc, configuration, "qtalh@" + QSysInfo::machineHostName(),
+                                           program.isEmpty() ? QString("sendmail") : program);
+    } catch (const std::exception& e) {
+      // Loading validated the directives; report rather than block monitoring.
+      record(QString("Failed: configuration notifications: ") + e.what());
+      return;
+    }
+  }
+  if (defined.destinations.isEmpty() && defined.subscriptions.isEmpty() &&
+      configured_.destinations.isEmpty() && configured_.subscriptions.isEmpty())
+    return;
+  const auto previous = configured_;
+  configured_ = defined;
+  try {
+    policy.configure(merged(), configuration);
+  } catch (const std::exception& e) {
+    configured_ = previous;
+    record(QString("Failed: configuration notifications: ") + e.what());
+    return;
+  }
+  schedulePump();
+  for (const auto& channel : channels())
+    if (unique.contains(channel.identity))
+      policy.observe(channel, monotonicNow());
+  record(QString("Configuration file defines %1 subscription%2 and %3 destination%4")
+             .arg(configured_.subscriptions.size()).arg(configured_.subscriptions.size() == 1 ? "" : "s")
+             .arg(configured_.destinations.size()).arg(configured_.destinations.size() == 1 ? "" : "s"));
+}
 void NotificationService::apply(const NotificationSettings& s) {
-  policy.configure(s, configuration);
+  auto all = s;
+  all.destinations += configured_.destinations;
+  all.subscriptions += configured_.subscriptions;
+  policy.configure(all, configuration);
+  personal_ = s;
   schedulePump();
   for (const auto& channel : channels())
     if (unique.contains(channel.identity))
@@ -273,7 +322,8 @@ void NotificationService::sendTest(const QString& destination) {
   e.test = true;
   ChannelUpdate s;
   s.pv = "QTALH:TEST";
-  s.path = "Synthetic test / QTALH:TEST";
+  // Use the engine's path form so the email groups this channel normally.
+  s.path = "/Synthetic test/QTALH:TEST";
   s.value = "Test only";
   s.severity = s.unack = 2;
   s.initialized = true;
@@ -308,7 +358,7 @@ void NotificationService::dispatch(NotificationEnvelope e) {
       finish(e, false, false, "Invalid email headers");
       return;
     }
-    auto p = new QProcess(this);
+    QProcess* p = new ChildProcess(this);
     auto timeout = new QTimer(p);
     timeout->setSingleShot(true);
     timeout->setInterval(transportTimeoutMs);

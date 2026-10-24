@@ -79,6 +79,12 @@ timers and shelves, with current and configured values. Select rows and click **
 the configuration; each change is recorded in the operation log. Use it at shift
 handover to find forgotten disabled alarms.
 
+The alarm panes mark the same changes with a pencil (**✎**) after the group or
+channel name, and the name's tooltip lists them. The mark also appears when the
+Force Process Variable dialog has changed a node's Force PV settings in this
+runtime, and it disappears when the settings match the configuration again.
+The editor shows no marks.
+
 Restoring is an operator action, not only a display change. A Mask row returns
 the channel to its configured mask, as **Reset** in Force Mask does; a NoAck row
 ends **NoAck for One Hour**; a Force PV row enables the Force PV again, which

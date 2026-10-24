@@ -4,7 +4,9 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QSet>
 #include <QUuid>
+#include <algorithm>
 #include <stdexcept>
 namespace alh {
 namespace {
@@ -94,6 +96,33 @@ QByteArray signature(const NotificationSubscription& r, const NotificationSettin
         if (d.id == id)
           a.append(destinationJson(d));
   return QJsonDocument(a).toJson(QJsonDocument::Compact);
+}
+// Engine paths escape literal slashes and backslashes in group/channel names.
+// Decode one component at a time so those characters cannot create extra groups.
+QStringList pathComponents(const QString& path) {
+  QStringList parts;
+  QString part;
+  for (int i = path.startsWith('/') ? 1 : 0; i < path.size(); ++i) {
+    const auto c = path[i];
+    if (c == '\\' && i + 1 < path.size() && (path[i + 1] == '/' || path[i + 1] == '\\'))
+      part += path[++i];
+    else if (c == '/') {
+      parts << part;
+      part.clear();
+    } else
+      part += c;
+  }
+  parts << part;
+  return parts;
+}
+struct NotificationTextNode {
+  QString name;
+  const NotificationAlarm* alarm = nullptr;
+  QVector<NotificationTextNode> children;
+};
+QString namedValue(const QString& name, int value) {
+  const auto number = QString::number(value);
+  return name == number ? number : name + " (" + number + ")";
 }
 } // namespace
 QString notificationId() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
@@ -211,6 +240,170 @@ void validateNotifications(const NotificationSettings& s) {
     }
   }
 }
+namespace {
+QStringList directiveWords(const QString& value) {
+  return value.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+}
+bool directiveId(const QString& id) {
+  static const QRegularExpression valid("^[A-Za-z0-9_.-]{1,64}$");
+  return valid.match(id).hasMatch();
+}
+bool environmentName(const QString& name) {
+  static const QRegularExpression valid("^[A-Za-z_][A-Za-z0-9_]*$");
+  return valid.match(name).hasMatch();
+}
+// One parsed $NOTIFY value: severity, stages and options.
+struct NotifyDirective {
+  int severity = 2, cooldown = 1800;
+  bool resolution = false;
+  QString name, wildcard = "*";
+  QVector<NotificationStage> stages;
+};
+NotifyDirective parseNotify(const QString& value) {
+  const auto words = directiveWords(value);
+  if (words.size() < 2)
+    throw ParseError("$NOTIFY needs a minimum severity and at least one destination");
+  NotifyDirective result;
+  try {
+    result.severity = severityValue(words[0]);
+  } catch (const ParseError&) {
+    result.severity = 0;
+  }
+  if (result.severity < 1)
+    throw ParseError("$NOTIFY severity must be MINOR, MAJOR, INVALID or ERROR");
+  for (int i = 1; i < words.size(); ++i) {
+    const auto& word = words[i];
+    if (word == "resolution") {
+      result.resolution = true;
+    } else if (word.startsWith("pv=")) {
+      result.wildcard = word.mid(3);
+      if (result.wildcard.isEmpty()) throw ParseError("$NOTIFY pv= needs a PV wildcard");
+    } else if (word.startsWith("cooldown=")) {
+      bool ok = false;
+      result.cooldown = word.mid(9).toInt(&ok);
+      if (!ok || result.cooldown < 0) throw ParseError("$NOTIFY cooldown= needs whole seconds");
+    } else if (word.startsWith("name=")) {
+      result.name = word.mid(5);
+      if (result.name.isEmpty() || result.name.size() > 120)
+        throw ParseError("$NOTIFY name= needs 1 to 120 characters");
+    } else if (word.contains('=')) {
+      throw ParseError("Unknown $NOTIFY option " + word);
+    } else {
+      // [delay:]destination[,destination...]; only the first stage may omit its delay.
+      NotificationStage stage;
+      stage.id = QString("s%1").arg(result.stages.size() + 1);
+      QString targets = word;
+      const int colon = word.indexOf(':');
+      if (colon >= 0) {
+        bool ok = false;
+        stage.delaySeconds = word.left(colon).toInt(&ok);
+        if (!ok || stage.delaySeconds < 0) throw ParseError("$NOTIFY stage delay must be whole seconds: " + word);
+        targets = word.mid(colon + 1);
+      } else if (!result.stages.isEmpty()) {
+        throw ParseError("$NOTIFY escalation stages need a delay, as in 600:pager");
+      } else {
+        stage.delaySeconds = 0;
+      }
+      if (!result.stages.isEmpty() && stage.delaySeconds <= result.stages.last().delaySeconds)
+        throw ParseError("$NOTIFY stage delays must increase");
+      for (const auto& target : targets.split(',')) {
+        if (!directiveId(target)) throw ParseError("Invalid $NOTIFY destination name: " + target);
+        if (stage.destinations.contains(target)) throw ParseError("Repeated $NOTIFY destination: " + target);
+        stage.destinations << target;
+      }
+      result.stages << stage;
+    }
+  }
+  if (result.stages.isEmpty()) throw ParseError("$NOTIFY needs at least one destination");
+  return result;
+}
+NotificationDestination parseDestination(const QString& name, const QString& value) {
+  const auto words = directiveWords(value);
+  const bool email = name == "NOTIFY_EMAIL";
+  if (words.size() < 2)
+    throw ParseError(email ? "$NOTIFY_EMAIL needs a name and recipients"
+                           : "$NOTIFY_WEBHOOK needs a name and a URL or env:VARIABLE");
+  NotificationDestination d;
+  d.id = words[0];
+  if (!directiveId(d.id)) throw ParseError("Invalid notification destination name: " + d.id);
+  d.name = d.id;
+  d.kind = email ? "email" : "webhook";
+  if (email) {
+    for (const auto& recipient : words[1].split(','))
+      if (recipient.isEmpty()) throw ParseError("$NOTIFY_EMAIL has an empty recipient");
+      else d.recipients << recipient;
+  } else if (words[1].startsWith("env:")) {
+    d.urlEnvironment = words[1].mid(4);
+    if (!environmentName(d.urlEnvironment)) throw ParseError("Invalid environment variable: " + words[1]);
+  } else if (words[1].startsWith("https://") || words[1].startsWith("http://")) {
+    d.url = words[1];
+  } else {
+    throw ParseError("$NOTIFY_WEBHOOK needs an http(s) URL or env:VARIABLE");
+  }
+  for (int i = 2; i < words.size(); ++i) {
+    const auto& word = words[i];
+    if (email && word.startsWith("from=") && word.size() > 5) d.sender = word.mid(5);
+    else if (email && word.startsWith("program=") && word.size() > 8) d.program = word.mid(8);
+    else if (!email && word.startsWith("bearer=env:") && environmentName(word.mid(11)))
+      d.bearerEnvironment = word.mid(11);
+    else throw ParseError("Unknown or invalid " + name + " option " + word);
+  }
+  return d;
+}
+} // namespace
+bool isNotificationDirective(const QString& name) {
+  return name == "NOTIFY" || name == "NOTIFY_EMAIL" || name == "NOTIFY_WEBHOOK";
+}
+void checkNotificationDirective(const QString& name, const QString& value) {
+  if (name == "NOTIFY") parseNotify(value);
+  else parseDestination(name, value);
+}
+NotificationSettings configurationNotifications(const Document& doc, const QString& configuration,
+                                                const QString& sender, const QString& program) {
+  NotificationSettings result;
+  if (!doc.root) return result;
+  QSet<QString> destinations;
+  for (auto n : doc.nodes())
+    for (const auto& d : n->directives)
+      if (d.key == "NOTIFY_EMAIL" || d.key == "NOTIFY_WEBHOOK") {
+        auto destination = parseDestination(d.key, d.value);
+        if (destinations.contains(destination.id))
+          throw ParseError("Notification destination " + destination.id + " is defined twice");
+        destinations << destination.id;
+        destination.id = "file:" + destination.id;
+        if (destination.kind == "email") {
+          if (destination.sender.isEmpty()) destination.sender = sender;
+          if (destination.program.isEmpty()) destination.program = program;
+        }
+        result.destinations << destination;
+      }
+  for (auto n : doc.nodes()) {
+    int count = 0;
+    for (const auto& d : n->directives) {
+      if (d.key != "NOTIFY") continue;
+      const auto parsed = parseNotify(d.value);
+      NotificationSubscription r;
+      // Stable across reloads, so running episodes survive unchanged subscriptions.
+      r.id = "file:" + Engine::nodeIdentity(n) + '#' + QString::number(++count);
+      r.name = parsed.name.isEmpty() ? n->label().left(120) : parsed.name;
+      r.configuration = configuration;
+      r.scope = Engine::nodeIdentity(n);
+      r.wildcard = parsed.wildcard;
+      r.minimumSeverity = parsed.severity;
+      r.cooldownSeconds = parsed.cooldown;
+      r.resolution = parsed.resolution;
+      r.stages = parsed.stages;
+      for (auto& stage : r.stages)
+        for (auto& target : stage.destinations) {
+          if (!destinations.contains(target))
+            throw ParseError("$NOTIFY on " + n->name + " uses undefined destination " + target);
+          target = "file:" + target;
+        }
+      result.subscriptions << r;
+    }
+  }
+  return result;
+}
 QByteArray notificationPayload(const NotificationEnvelope& e) {
   QJsonArray alarms;
   for (const auto& a : e.alarms) {
@@ -239,17 +432,52 @@ QByteArray notificationPayload(const NotificationEnvelope& e) {
       .toJson(QJsonDocument::Compact);
 }
 QString notificationText(const NotificationEnvelope& e) {
-  QString text = QString("QtALH %1: %2\nConfiguration: %3\nStage: %4\nMessage ID: %5\n\n")
-                     .arg(e.kind, e.subscriptionName, e.configuration, e.stage, e.id);
+  // Append user/configuration values literally. QString::arg applied repeatedly
+  // can interpret placeholders inside names or PV values as format directives.
+  QString text = "QtALH " + e.kind + ": " + e.subscriptionName +
+                 "\nConfiguration: " + e.configuration + "\n\n";
+  NotificationTextNode root;
   for (const auto& a : e.alarms) {
-    const auto& s = a.state;
-    text += QString("%1 (%2)\n  Value: %3; severity: %4; status: %5; unacknowledged severity: %6\n")
-                .arg(s.path, s.pv, s.value, QString::number(s.severity), QString::number(s.status),
-                     QString::number(s.unack));
-    if (e.kind == "resolution")
-      text += s.severity ? "  Episode acknowledged; alarm was still active at acknowledgement.\n"
-                         : "  Alarm cleared / acknowledged for this episode.\n";
+    auto parts = a.state.path.isEmpty() ? QStringList{a.state.pv} : pathComponents(a.state.path);
+    auto* parent = &root;
+    for (int i = 0; i + 1 < parts.size(); ++i) {
+      auto child = std::find_if(parent->children.begin(), parent->children.end(),
+                                [&](const NotificationTextNode& n) {
+                                  return !n.alarm && n.name == parts[i];
+                                });
+      if (child == parent->children.end()) {
+        parent->children.append(NotificationTextNode{parts[i], nullptr, {}});
+        parent = &parent->children.last();
+      } else
+        parent = &*child;
+    }
+    parent->children.append(NotificationTextNode{parts.last(), &a, {}});
   }
+  std::function<void(const NotificationTextNode&, int)> append =
+      [&](const NotificationTextNode& node, int depth) {
+        const QString indent(depth * 2, ' ');
+        text += indent + node.name;
+        if (!node.alarm) {
+          text += ":\n";
+          for (const auto& child : node.children)
+            append(child, depth + 1);
+          return;
+        }
+        const auto& s = node.alarm->state;
+        if (node.name != s.pv)
+          text += " (" + s.pv + ")";
+        text += "\n" + indent + "  Value: " + s.value +
+                "; severity: " + namedValue(severityName(s.severity), s.severity) +
+                "; status: " + namedValue(statusName(s.status), s.status) +
+                "; unacknowledged severity: " + namedValue(severityName(s.unack), s.unack) + "\n";
+        if (e.kind == "resolution")
+          text += indent + (s.severity
+                      ? "  Episode acknowledged; alarm was still active at acknowledgement.\n"
+                      : "  Alarm cleared / acknowledged for this episode.\n");
+      };
+  for (const auto& child : root.children)
+    append(child, 0);
+  text += "\nDelivery details: stage " + e.stage + "; message ID " + e.id + "\n";
   return text;
 }
 const NotificationSubscription* NotificationPolicy::subscription(const QString& id) const {

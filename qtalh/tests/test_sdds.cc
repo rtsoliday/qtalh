@@ -286,7 +286,8 @@ private slots:
     auto dialog = w->findChild<QDialog*>("analyticsDialog"); QVERIFY(dialog);
     auto table = dialog->findChild<QTableView*>("analyticsTable0");
     QTRY_COMPARE(table->model()->rowCount(), 3);
-    auto input = report(); input.query = AnalyticsQuery{};
+    // A report for the dialog's default query, which shows unsuppressed activity.
+    auto input = report(); input.query = AnalyticsQuery{}; input.query.suppression = 1;
     service->reportReady(input); table->sortByColumn(0, Qt::DescendingOrder);
     QCOMPARE(table->model()->rowCount(), 2);
     const auto first = table->model()->index(0, 0).data(Qt::UserRole).toString();

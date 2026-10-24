@@ -28,6 +28,18 @@ QString notificationConfiguration(const QString&);
 QJsonObject notificationJson(const NotificationSettings&);
 NotificationSettings parseNotifications(const QByteArray&);
 void validateNotifications(const NotificationSettings&);
+// Configuration files may define notifications with $NOTIFY_EMAIL and
+// $NOTIFY_WEBHOOK destinations and $NOTIFY subscriptions on a group or channel.
+// checkNotificationDirective() throws ParseError for a malformed value.
+bool isNotificationDirective(const QString& name);
+void checkNotificationDirective(const QString& name, const QString& value);
+// The settings a document defines, bound to its canonical configuration. IDs
+// start with "file:", so they never collide with personal settings. Email
+// destinations without from= or program= use the given defaults. Throws
+// ParseError for an undefined or repeated destination.
+NotificationSettings configurationNotifications(const Document&, const QString& configuration,
+                                                const QString& sender, const QString& program);
+inline bool fromConfigurationFile(const QString& id) { return id.startsWith(QLatin1String("file:")); }
 struct NotificationAlarm {
   QString episode;
   ChannelUpdate state;

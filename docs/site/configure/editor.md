@@ -21,6 +21,14 @@ Use **Save As** to save your own file. To start an empty document instead, run `
 3. In Properties, set the channel's actual EPICS PV name. Use an alias for a readable display label.
 4. Repeat for the remaining channels and subgroups.
 
+**Insert → Group…** and **Insert → Channel…** place the new node right after
+the selection. With a channel or subgroup selected in a group's contents, it
+follows that node. With a group selected in the tree, it becomes the group's
+first entry. The new node is then selected, so nodes inserted one after another
+keep their order; a new group becomes the group shown, ready for its channels.
+Pasted nodes and **Insert → Configuration File…** are still added at the end
+of the destination group.
+
 There must be one root. Group names must not repeat an ancestor or use the reserved name `NULL`. See the [configuration reference](/reference/configuration) for parent lookup and nesting rules.
 
 ## Edit properties and guidance
@@ -72,8 +80,42 @@ bin/Linux-x86_64/qtalh --validate /path/to/facility.alhConfig
 
 Use **File → Activate ALH** to open an independent runtime copy of the current edits. An unnamed document must first be saved to establish a filename. Runtime mask changes do not edit the source document; a later runtime reload reads the named disk configuration.
 
-::: info Saving changes the textual representation
-Save expands includes, canonicalizes masks, places channels before child groups, and discards comments and original formatting. Keep the original source configuration if those details matter to your editing workflow.
-:::
+## Save comments and INCLUDE files
+
+Save keeps the file as you wrote it: comments, blank lines, spacing and line
+order stay, and each INCLUDE line stays an INCLUDE line. Only the lines you
+changed are rewritten, in the standard form legacy ALH writes, which drops a
+comment at the end of a changed line. A deleted group or channel takes the
+comments directly above it. Directives you add follow the existing directives of
+their group or channel; inserted groups and channels go where described above.
+Directives with no effect are not kept: a value replaced by a later one of the
+same kind, and later `$SEVRPV` or `$HEARTBEATPV` lines that ALH ignores.
+
+Groups and channels you add or paste into a group read from an INCLUDE file,
+or insert right after a node read from one,
+belong to that file. When an edit changes an included file, **Save** lists every
+included file it will rewrite and asks before writing them, because other
+configurations that include a file read the change too. Included files you did
+not change are never rewritten. Removing everything an included file declared
+removes its INCLUDE line and leaves the file as it is.
+
+**Save As** keeps the INCLUDE lines: they are read from the configuration
+directory (`-f`, otherwise `ALARMHANDLER` or the working directory), not from the
+saved file's directory. If they would name other files from the new file, Save
+As instead saves one file that contains the included files, and the document
+then refers to that file only. Pasted nodes and
+**Insert → Configuration File…** add their text, including that of their
+INCLUDE files, to the file of the destination group.
+
+Before writing, QtALH reads the saved text back and refuses to save if it would
+load as a different configuration; nothing is written then.
+
+In a runtime, **View → Configuration File** shows the running configuration as
+read-only text with search, with the comments and blank lines of its source
+files. Each INCLUDE line is followed by its file, indented three spaces per
+level as in ALH. Runtime changes such as **Beep Severity** and **ALH Beep
+Severity**, and unsaved editor changes in a runtime activated from the editor,
+appear in place. The view shows what was read when the configuration was loaded;
+a later change to a file on disk appears after a reload.
 
 Continue with [masks and automatic forcing](/configure/masks) or [logging setup](/configure/logging).

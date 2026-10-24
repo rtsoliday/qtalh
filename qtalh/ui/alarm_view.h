@@ -11,6 +11,8 @@
 #include <QTimer>
 #include <array>
 namespace alh {
+// Model role: the highest severity a row shows, current or unacknowledged.
+constexpr int AlarmSeverityRole = Qt::UserRole + 20;
 class MotifButton : public QPushButton {
 public:
   using QPushButton::QPushButton;
@@ -53,6 +55,7 @@ protected:
   void drawStyledRow(QPainter*, const QStyleOptionViewItem&, const QModelIndex&) const;
   void drawRow(QPainter*, const QStyleOptionViewItem&, const QModelIndex&) const override;
   void drawBranches(QPainter*, const QRect&, const QModelIndex&) const override {}
+  void resizeEvent(QResizeEvent*) override;
 
 private:
   QPersistentModelIndex hovered, pressed;
@@ -62,6 +65,14 @@ private:
   bool tree;
   // The region being painted; rows skip cells outside it.
   QRegion paintRegion;
+  // Rows with alarms scrolled out of view: a bar along the bottom counts those
+  // above and below, and each count scrolls to the nearest such row.
+  QWidget* offscreenBar = nullptr;
+  MotifButton *alarmsAbove = nullptr, *alarmsBelow = nullptr;
+  QPersistentModelIndex nearestAbove, nearestBelow;
+  QTimer offscreenTimer;
+  void scheduleOffscreen() { if (!offscreenTimer.isActive()) offscreenTimer.start(); }
+  void updateOffscreen();
   bool extentPending = false;
   // Data-only changes repaint their own rows; other triggers repaint everything.
   bool extentRepaint = true;

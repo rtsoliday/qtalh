@@ -6,6 +6,7 @@ QtALH reads its own path/font settings and uses EPICS Base (Channel Access and p
 | --- | --- |
 | `ALARMHANDLER` | Configuration directory and default log directory; defaults to `.`. All relative INCLUDE paths use this directory unless `-f` overrides it. |
 | `ALHMAINFONT` | Runtime button font, overridden by `-fn` or `-font`. XLFD fonts are approximated. |
+| `USE_SHELVING` | `1` shows [timed shelving](/operate/shelving): **Action → Shelve Alarms…** and **Unshelve Alarms**, **View → Shelved Alarms…** and the right-click **Shelve** command. Any other value, or none, hides them. |
 | `EPICS_CA_AUTO_ADDR_LIST` | EPICS Base automatic address discovery; set to `NO` in the isolated tutorial. |
 | `EPICS_CA_ADDR_LIST` | EPICS Base CA server search addresses. |
 | `EPICS_CA_SERVER_PORT` | CA server port used by the client/IOC. |

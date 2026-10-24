@@ -25,6 +25,7 @@ Options parseOptions(const QStringList& arguments) {
   bool explicitLogDir = false, explicitMaxRecords = false;
   o.configDir = qEnvironmentVariable("ALARMHANDLER", ".");
   o.font = qEnvironmentVariable("ALHMAINFONT");
+  o.shelving = qgetenv("USE_SHELVING") == "1";
   auto need = [&](int& i) -> QString {
     if (i + 1 >= args.size())
       throw ParseError("Missing value for " + args[i]);
@@ -70,6 +71,8 @@ Options parseOptions(const QStringList& arguments) {
       o.noErrorPopup = true;
     else if (a == "-maskcolor")
       o.maskColor = true;
+    else if (a == "-notifications")
+      o.notifications = true;
     else if (a == "-help" || a == "--help" || a == "-h")
       o.help = true;
     else if (a == "-v" || a == "-version" || a == "--version")
@@ -191,6 +194,8 @@ QString usage() {
   -s -p sound        Silent / audio file (formats depend on Qt media backend)
   -filter no|active|unack
   -mainwindow -maskcolor -noerrorpopup -desc_field -debug
+  -notifications     Start with saved notification subscriptions enabled
+                     (otherwise every runtime starts paused)
   -style name, -style=name
                      Widget appearance: modern (default), motif (classic ALH),
                      fusion, or an installed Qt style

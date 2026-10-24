@@ -1,5 +1,13 @@
 # Shelve alarms temporarily
 
+::: info Shelving is hidden unless you turn it on
+Start QtALH with the environment variable `USE_SHELVING` set to `1`, for example
+`USE_SHELVING=1 qtalh facility.alhConfig`, to show the shelving commands
+described here. Otherwise the Action, View and right-click menus omit them.
+Shelving stays off by default until the shared, attributed change workflow
+that operators requested for it exists.
+:::
+
 Shelving temporarily removes selected channels from **this runtime's active
 alarm presentation, sound, and personal notifications**. Monitoring and logging
 continue, and alarms return automatically when their shelves expire.
@@ -12,7 +20,9 @@ continue, and alarms return automatically when their shelves expire.
 2. Choose **15 minutes**, **30 minutes**, **1 hour**, **4 hours**, **8 hours**, or
    **Custom minutes**, **Custom hours**, or **Custom days**. Enter a whole number
    in the selected unit, up to **365 days** (8,760 hours or 525,600 minutes).
-   One hour is selected by default.
+   To shelve until a known time, such as the end of a user run, choose **Until
+   date and time** and pick the local date and time; it must be between 1 minute
+   and 365 days ahead. One hour is selected by default.
 3. Enter your **Username** (up to 120 characters, without spaces or control
    characters) and a single-line **Reason** (up to 240 characters), then click **Shelve**.
    Both fields are required. Username is entered by the operator; QtALH does not
@@ -25,7 +35,8 @@ main selection changes. Choosing a different target through the context menu
 replaces the open shelving dialog with a fresh dialog for that target.
 
 Unfiltered views show **[Shelved]** beside affected channels and shelved counts
-on their parent groups. Active and unacknowledged filters exclude those channels.
+on their parent groups. Their channel and parent-group names have a lavender
+background in every appearance. Active and unacknowledged filters exclude those channels.
 Shelved channels do not contribute to alarm counts or sound, including the
 compact facility indicator.
 

@@ -22,7 +22,8 @@ Changes that operators and site maintainers should review before deployment:
 - Phoebus alarm XML import and export (`--to-phoebus`, `--from-phoebus`).
   The File menu commands are hidden unless `QTALH_PHOEBUS_MENU` is set.
 - Timed shelving of channels and groups with automatic re-enable. Shelving
-  requires a username, and the operation log records it.
+  requires a username, and the operation log records it. It is hidden unless
+  the environment variable `USE_SHELVING` is `1`.
 - Personal notification subscriptions with escalation, and session alarm
   analytics.
 - Commands starting with `medm` launch `qtedm` from `PATH` instead.
@@ -42,6 +43,11 @@ Changes that operators and site maintainers should review before deployment:
   `$HEARTBEATPV` are still accepted there.
 - Configuration files that are not valid in the locale encoding are read as
   ISO-8859-1 and saved without changing their non-ASCII text.
+- The configuration tool's Save keeps comments, blank lines, formatting and
+  INCLUDE lines, rewriting only changed lines. It saves edited INCLUDE files
+  after listing them for confirmation; ALH's Save wrote one expanded file
+  without comments. View → Configuration File shows comments with runtime
+  changes in place.
 - As in ALH, runtime File → Open replaces the monitored configuration, and with
   `-B` SIGINT (Ctrl-C) exits without confirmation once this instance's
   broadcast has been delivered.

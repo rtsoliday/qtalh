@@ -134,7 +134,10 @@ void writeItem(QXmlStreamWriter& xml, const Node& n, Notes& notes) {
       {"SEVRCOMMAND", "SEVRCOMMAND has no Phoebus equivalent"},
       {"STATCOMMAND", "STATCOMMAND has no Phoebus equivalent"},
       {"FORCEPV", "FORCEPV (and its CALC inputs) not converted; consider a Phoebus enabling filter"},
-      {"BEEPSEVR", "BEEPSEVR has no Phoebus equivalent"}};
+      {"BEEPSEVR", "BEEPSEVR has no Phoebus equivalent"},
+      {"NOTIFY", "QtALH notification directives have no Phoebus equivalent"},
+      {"NOTIFY_EMAIL", "QtALH notification directives have no Phoebus equivalent"},
+      {"NOTIFY_WEBHOOK", "QtALH notification directives have no Phoebus equivalent"}};
   for (const auto& item : unsupported)
     if (!n.option(item.first).isEmpty() && n.option(item.first) != "-") notes.add(item.second, &n);
   if (!n.parent && !n.option("HEARTBEATPV").isEmpty())

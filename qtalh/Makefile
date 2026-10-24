@@ -20,7 +20,7 @@ ifeq ($(OS),Windows)
 # Native Windows Base uses DLL import libraries, including pvData static data.
 CPPFLAGS += -DEPICS_CALL_DLL
 CORE = core/analytics.cc core/model.cc core/config.cc core/engine.cc core/notifications.cc core/phoebus.cc
-SERVICES = services/sdds_export.cc services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/pv_access.cc services/pv_router.cc services/options.cc services/logging.cc services/ipc.cc
+SERVICES = services/sdds_export.cc services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/pv_access.cc services/pv_router.cc services/options.cc services/logging.cc services/ipc.cc services/process_limits.cc
 GUI = ui/analytics.cc ui/notifications.cc ui/appearance.cc ui/workflows.cc ui/tools.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc ui/help.cc ui/about_banner.cc
 OBJECTS = $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.obj) $(SERVICES:.cc=.obj) $(GUI:.cc=.obj)) $(OBJ_DIR)/resources.obj
 # MSVC does not emit GCC-style .d files. Rebuild on project header changes.
@@ -87,7 +87,7 @@ test-ui-motif: $(OBJ_DIR)/test_ui.exe
 else
 INCLUDES = -I. -I$(OBJ_DIR) -I$(EPICS_BASE)/include -I$(EPICS_BASE)/include/compiler/$(EPICS_COMPILER) -I$(EPICS_BASE)/include/os/$(OS)
 CORE = core/analytics.cc core/model.cc core/config.cc core/engine.cc core/notifications.cc core/phoebus.cc
-SERVICES = services/sdds_export.cc services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/pv_access.cc services/pv_router.cc services/options.cc services/logging.cc services/ipc.cc
+SERVICES = services/sdds_export.cc services/analytics.cc services/notifications.cc services/log_browser.cc services/channel_access.cc services/pv_access.cc services/pv_router.cc services/options.cc services/logging.cc services/ipc.cc services/process_limits.cc
 GUI = ui/analytics.cc ui/notifications.cc ui/appearance.cc ui/workflows.cc ui/tools.cc ui/window.cc ui/alarm_view.cc ui/dialogs.cc ui/help.cc ui/about_banner.cc main.cc
 OBJECTS = $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o) $(SERVICES:.cc=.o) $(GUI:.cc=.o)) $(OBJ_DIR)/resources.o
 PROD = qtalh qtalh_printer qtalh_DB
@@ -167,7 +167,7 @@ $(OBJ_DIR)/test_analytics.moc: tests/test_analytics.cc
 	@mkdir -p $(OBJ_DIR)
 	$(MOC) $(INCLUDES) $(QT_CFLAGS) $< -o $@
 $(OBJ_DIR)/tests/test_analytics.o: $(OBJ_DIR)/test_analytics.moc
-$(OBJ_DIR)/test_analytics: $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o)) $(OBJ_DIR)/services/analytics.o $(OBJ_DIR)/services/notifications.o $(OBJ_DIR)/tests/test_analytics.o
+$(OBJ_DIR)/test_analytics: $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o)) $(OBJ_DIR)/services/analytics.o $(OBJ_DIR)/services/notifications.o $(OBJ_DIR)/services/process_limits.o $(OBJ_DIR)/tests/test_analytics.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(call qt_libs,Test Core Network)
 .PHONY: test-analytics
 test-analytics: $(OBJ_DIR)/test_analytics
@@ -177,7 +177,7 @@ $(OBJ_DIR)/test_notifications.moc: tests/test_notifications.cc
 	@mkdir -p $(OBJ_DIR)
 	$(MOC) $(INCLUDES) $(QT_CFLAGS) $< -o $@
 $(OBJ_DIR)/tests/test_notifications.o: $(OBJ_DIR)/test_notifications.moc
-$(OBJ_DIR)/test_notifications: $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o)) $(OBJ_DIR)/services/notifications.o $(OBJ_DIR)/tests/test_notifications.o
+$(OBJ_DIR)/test_notifications: $(addprefix $(OBJ_DIR)/,$(CORE:.cc=.o)) $(OBJ_DIR)/services/notifications.o $(OBJ_DIR)/services/process_limits.o $(OBJ_DIR)/tests/test_notifications.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(EPICS_LDFLAGS) $(EPICS_LIBS) $(EPICS_SYS_LIBS) $(call qt_libs,Test Core Network)
 .PHONY: test-notifications
 test-notifications: $(OBJ_DIR)/test_notifications

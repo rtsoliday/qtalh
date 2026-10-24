@@ -51,7 +51,7 @@ The engine's 200 ms tick handles due filter/NoAck work. Heartbeats use a separat
 
 ## Documents and runtime windows
 
-Parsing and insertion are transactional. Save uses `QSaveFile`; includes are expanded and formatting is normalized. Editor activation copies the current configuration into an independent runtime. Runtime Save As exports masks while retaining the original monitoring/reload/lock identity.
+Parsing and insertion are transactional. Save uses `QSaveFile`. The parser keeps each statement's preceding comments, its text as written and the INCLUDE file that declared it; writers emit unchanged statements as read and the rest in legacy form, either as separate files (`writeConfigFiles`) or expanded. Editor round trips use `ConfigText::Edit` text, which marks INCLUDE file boundaries. Every save reads its text back first and refuses one that would load differently. Editor activation copies the current configuration into an independent runtime. Runtime Save As exports masks while retaining the original monitoring/reload/lock identity.
 
 ## Platform boundaries
 

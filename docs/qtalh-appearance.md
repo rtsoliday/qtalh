@@ -32,7 +32,7 @@ Main window:
   Disabled forcePVs and Shelved counts, the filename (selectable), and the
   collapsible **Alarm legend** on the left; silence controls, Silence Forever,
   ALH Beep Severity, and the notification indicator on the right.
-  **Silence Forever: On** is shown in bold amber so a permanently silenced
+  **Silence Forever: On** has a bold amber background so a permanently silenced
   handler is obvious.
 - Errors appear in a dismissible warning strip at the bottom of the window,
   as well as in the ALH Message popup.
@@ -60,8 +60,9 @@ Dialogs keep their names, fields and buttons, with clearer layouts:
   two columns, so the whole form fits without scrolling.
 - **Beep Severity** shows a color sample beside each severity.
 - **Current Alarm History** is a table with Time, Process Variable, Status,
-  Severity and Value columns; severity cells use the alarm colors.
-- Guidance, configuration, live log and log-browser text share one find bar:
+  Severity and Value columns; severity cells use the alarm colors. Click a
+  heading to sort by that column.
+- Configuration, live log and log-browser text share one find bar:
   type, then press Enter (next) or Shift+Enter (previous), or use the Previous
   and Next buttons. The log browser's ShowSelected button is labeled **Search**.
 - Send Message, Stop Alarm Logging and Reload Facility have task-specific
@@ -148,6 +149,9 @@ buttons. The pane divider, width slider, menu height and footer placement follow
 the reference display. Button labels are shifted down two pixels to center them
 in their bevels, and the four silence/beep lines occupy equally spaced rows. Normal rows omit alarm summaries; disabled and cancelled
 channels omit active severity indicators. Timed NoAck is shown as H in the mask.
+The severity letters in the indicator boxes are bold, full width and drawn
+without antialiasing, so they stay crisp on the colored boxes, as ALH's bitmap
+fonts were; other row text keeps the condensed 12-pixel monospace.
 
 Rendering and hit testing share the same row geometry. The existing item model
 continues to own selection data and alarm updates. Single-clicking a group name
@@ -195,13 +199,15 @@ The following windows received layout changes:
   AckT/NoAckT, and Log/NoLog action rows, each with Reset.
 - Force Mask: mask summary, checkbox panel, and Apply/Reset/Dismiss/Help.
 - Force Process Variable: narrow stacked form with mask toggles, force/reset
-  values, and CALC A–F inputs. Cancel restores the current applied settings;
+  values, and CALC A–L inputs in two columns. Cancel restores the current applied settings;
   Dismiss closes the form.
 - Beep Severity: compact MINOR/MAJOR/INVALID/ERROR radio selection.
-- Current Alarm History: compact gray text window with column headings.
+- Modify NoAck Mask: group or channel name, the affected channel count for a
+  group, the NoAck For One Hour toggle, and Dismiss/Help.
+- Current Alarm History: compact table with aligned, sortable column headings and scrollbars.
 - Guidance, configuration/log viewers, and broadcast/reload/stop-logging
   message entry: compact text layouts and ALH-style action rows.
-- Open, Save As, report, and log-file selection: shared Motif-style file chooser.
+- Open, Save As, and report: shared Motif-style file chooser.
 
 The main and compact runtime windows retain their earlier layout work. Setup
 filter and beep choices now appear as submenus like ALH. Generic confirmation,

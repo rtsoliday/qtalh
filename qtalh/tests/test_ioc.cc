@@ -826,6 +826,47 @@ private slots:
     QTest::qWait(200);
     QCOMPARE(values, before + 1 + tail.size());
   }
+  void forceInputsShareOneChannel() {
+    // Inputs reading one PV share its channel. One added later receives the
+    // latest value after the call returns, as a new monitor would.
+    const auto name = prefix + "force";
+    ChannelAccess driver;
+    driver.prepare(name);
+    QTRY_VERIFY(driver.put(name, 2));
+    ChannelAccess ca;
+    QStringList errors;
+    ca.error = [&](const QString& e) { errors << e; };
+    int a = 0, b = 0, c = 0;
+    QVector<double> first, second, third;
+    ca.number(name, [&](double v) { first << v; }, &a);
+    ca.number(name, [&](double v) { second << v; }, &b);
+    QCOMPARE(ChannelAccessTestAccess::channelCount(ca), 1);
+    QTRY_COMPARE(second, QVector<double>{2});
+    QCOMPARE(first, QVector<double>{2});
+    ca.number(name, [&](double v) { third << v; }, &c);
+    QVERIFY(third.isEmpty());
+    QTRY_COMPARE(third, QVector<double>{2});
+    QCOMPARE(ChannelAccessTestAccess::channelCount(ca), 1);
+    // Cancelling one input keeps the monitor for the others.
+    ca.cancelNumbers(&a);
+    QVERIFY(driver.put(name, 5));
+    QTRY_COMPARE(third, (QVector<double>{2, 5}));
+    QCOMPARE(second, (QVector<double>{2, 5}));
+    QCOMPARE(first, QVector<double>{2});
+    ca.cancelNumbers(&b);
+    ca.cancelNumbers(&c);
+    QCOMPARE(ChannelAccessTestAccess::channelCount(ca), 0);
+    // A missing PV is reported once, however many inputs read it.
+    const auto missing = prefix + "missing_shared_force";
+    int unavailable = 0;
+    ca.number(missing, [&](double v) { unavailable += std::isnan(v); }, &a);
+    ca.number(missing, [&](double v) { unavailable += std::isnan(v); }, &b);
+    QCOMPARE(ChannelAccessTestAccess::channelCount(ca), 1);
+    QTRY_COMPARE_WITH_TIMEOUT(unavailable, 2, 3000);
+    QCOMPARE(errors.filter(missing).size(), 1);
+    for (const auto& e : errors) QVERIFY2(!e.endsWith(": " + name), qPrintable(e));
+    QVERIFY(driver.put(name, 0));
+  }
   void alarmCallbackCanDestroyService() {
     QFETCH(bool, disconnect);
     const auto name = prefix + "alarm";
@@ -1432,10 +1473,9 @@ private slots:
     QVERIFY(driver.put(input, 6)); QTRY_COMPARE(e.state(n).forceCurrent, 0.0);
     QTRY_COMPARE(validInputs, 2); QVERIFY(!e.state(n).mask[Disable]);
     QVERIFY(driver.put(prefix + "readPermit", 0)); QTRY_VERIFY(unavailable > 0);
-    // The observer and engine use independent CA subscriptions. Wait until
-    // both have seen the gap before restoring access; their callbacks can
-    // arrive in separate event-loop iterations.
-    QTRY_COMPARE(unreadableSubscriptions, 2);
+    // The observer and the engine's input share one CA subscription, so the
+    // gap is reported once and reaches both before access is restored.
+    QTRY_COMPARE(unreadableSubscriptions, 1);
     QCOMPARE(e.state(n).forceCurrent, 0.0);
     QVERIFY(driver.put(prefix + "readPermit", 1));
     QTRY_COMPARE(e.state(n).forceCurrent, 1.0); // Same 6 after a gap must evaluate once.

@@ -38,7 +38,7 @@ to PVs. Environment style settings do not change the appearance.
   selects it.
 - Drag the divider between the panes to resize them.
 - The status area keeps ALH's lines. Expand **Alarm legend** to read the mask
-  and alarm-count notation. **Silence Forever: On** is shown in bold amber.
+  and alarm-count notation. **Silence Forever: On** has a bold amber background.
 - Errors also appear in a warning strip at the bottom of the window; dismiss it
   with its **✕** button.
 - The palette is light, or dark when the desktop palette is dark.
@@ -97,9 +97,11 @@ Dialogs keep their names, fields and buttons. In the modern appearance:
 - [Properties](/configure/editor#edit-properties-and-guidance) uses four tabs:
   General, Force PV, Commands, and Guidance. In the runtime, unset fields read
   *Not set*.
-- **Current Alarm History** is a table with severity cells in alarm colors.
-- Text viewers and log browsers share a find bar: press Enter for the next
-  match or Shift+Enter for the previous one.
+- **Current Alarm History** is a table with severity cells in alarm colors;
+  click a heading to sort by that column.
+- The configuration viewer, live log viewers and log browsers share a find bar:
+  press Enter for the next match or Shift+Enter for the previous one.
+- Guidance omits search and sizes to its content within the available screen.
 - Send Message, Stop Alarm Logging and Reload Facility use task-specific
   buttons (Send, Stop Logging, Reload).
 

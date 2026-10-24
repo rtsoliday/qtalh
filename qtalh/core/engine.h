@@ -150,6 +150,9 @@ public:
   // Group operations skip existing shelves; replacement is channel-only.
   static bool validShelfUsername(const QString&);
   int shelve(Node*, int minutes, const QString& reason, const QString& username, bool replace = false);
+  // As shelve(), with a wall-clock deadline (ms since the epoch) 1 minute to 365 days ahead.
+  int shelveUntil(Node*, qint64 until, const QString& reason, const QString& username,
+                  bool replace = false);
   void unshelve(Node*);
   QVector<ShelfSnapshot> shelves() const;
   void restoreShelves(const QVector<ShelfSnapshot>&);
@@ -206,6 +209,9 @@ private:
   bool externalStateAccess = false;
   bool dispatchingDeadlines = false;
   void processDeadlines(qint64 wall, qint64 elapsed);
+  // shelve() and shelveUntil() with the wall time `time` they read once.
+  int shelveAt(Node*, qint64 time, qint64 until, const QString& reason, const QString& username,
+               bool replace);
   void noteDeadline(qint64);
   void noteShelfDeadline(qint64);
   qint64 historySecond = 0;

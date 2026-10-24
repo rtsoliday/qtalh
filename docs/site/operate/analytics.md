@@ -15,6 +15,8 @@ Choose **Last 15 minutes**, **Last hour** (the default), **Last 8 hours**,
 **Last 24 hours**, or **Since Session Start**. Select a group/channel scope or
 search for part of a channel name or full path. The suppression filter selects
 all observed activity, activity while unsuppressed, or activity while suppressed.
+Unsuppressed activity is shown by default, so masked, NoAck, and shelved
+channels do not lead the rankings.
 Historical counts and durations use the suppression state at the time of each
 observation; suppression labels in rows describe the channel's current state.
 
@@ -61,7 +63,9 @@ IOC recovery is excluded rather than assumed to be an operator acknowledgement.
 Completed samples belong to the range containing their confirmation time; their
 observed onset may precede that range.
 
-Shelved, disabled, and NoAck channels continue contributing observed process
+Channels disabled or cancelled in the configuration file itself are left out of
+analytics entirely. Channels shelved, disabled, or set to NoAck while running
+continue contributing observed process
 activity, with suppression labels and filters. Mask changes and unshelving do
 not create activations. Silence, display filters, and NoLog do not affect
 collection. Analytics never acknowledge alarms, modify masks or shelves, send

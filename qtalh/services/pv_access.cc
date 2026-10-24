@@ -406,10 +406,12 @@ void PvAccess::writeFailed(Channel* c, const QString& message) {
   }
 }
 void PvAccess::numericUnavailable(Channel* c, const QString& reason) {
-  if (!c->numeric)
+  if (c->numbers.empty())
     return;
+  c->haveNumber = false;
   const auto id = c->id;
   QPointer<PvAccess> self(this);
+  // One diagnostic per PV, however many inputs read it.
   if (c->numericError != reason) {
     c->numericError = reason;
     report(reason + ": " + c->name);
@@ -417,9 +419,27 @@ void PvAccess::numericUnavailable(Channel* c, const QString& reason) {
   }
   // A diagnostic can clear the service or remove this Force/CALC input.
   c = channelsById.value(id);
-  if (c && !c->cancelled && c->numeric) {
-    const auto callback = c->numeric;
-    callback(std::numeric_limits<double>::quiet_NaN());
+  if (c && !c->cancelled)
+    deliverNumber(c, std::numeric_limits<double>::quiet_NaN());
+}
+void PvAccess::deliverNumber(Channel* c, double value) {
+  // A callback may cancel inputs, remove the channel or clear this service:
+  // visit the inputs present now, revalidating each, and call copies.
+  const auto id = c->id;
+  QVector<quint64> inputs;
+  for (const auto& number : c->numbers)
+    inputs << number.id;
+  QPointer<PvAccess> self(this);
+  for (auto input : inputs) {
+    if (!self || !(c = channelsById.value(id)) || c->cancelled)
+      return;
+    auto found = std::find_if(c->numbers.begin(), c->numbers.end(),
+                              [&](const auto& n) { return n.id == input; });
+    if (found == c->numbers.end())
+      continue;
+    const auto callback = found->callback;
+    if (callback)
+      callback(value);
   }
 }
 PvAccess::Channel* PvAccess::add(const QString& name) {
@@ -460,7 +480,7 @@ void PvAccess::createChannel(Channel* c) {
 }
 void PvAccess::subscribe(Channel* c) {
   auto& ops = *c->ops;
-  if (c->cancelled || !ops.channel || ops.monitor || (!c->alarm && !c->numeric && !c->text))
+  if (c->cancelled || !ops.channel || ops.monitor || (!c->alarm && c->numbers.empty() && !c->text))
     return;
   // Alarm monitors follow value and alarm changes; force inputs use value
   // changes only (see sample()). QSRV marks the value changed on every alarm
@@ -602,10 +622,35 @@ void PvAccess::text(const QString& name, std::function<void(QString)> callback) 
   subscribe(c);
 }
 void PvAccess::number(const QString& n, std::function<void(double)> callback, const void* tag) {
+  // Inputs reading the same PV share its channel and monitor.
+  for (auto c : channelsByName.value(n))
+    if (!c->numbers.empty() && !c->cancelled) {
+      auto found = tag ? std::find_if(c->numbers.begin(), c->numbers.end(),
+                                      [&](const auto& number) { return number.tag == tag; })
+                       : c->numbers.end();
+      if (found != c->numbers.end())
+        found->callback = std::move(callback);
+      else
+        c->numbers.push_back({tag, std::move(callback), ++nextId});
+      // This input missed the monitor's first sample; give it the latest one
+      // later, as a new monitor would, not during this call.
+      if (c->haveNumber && tag) {
+        const auto id = c->id;
+        QTimer::singleShot(0, this, [this, id, tag] {
+          auto c = channelsById.value(id);
+          if (!c || c->cancelled || !c->haveNumber) return;
+          auto found = std::find_if(c->numbers.begin(), c->numbers.end(),
+                                    [&](const auto& number) { return number.tag == tag; });
+          if (found == c->numbers.end()) return;
+          const auto callback = found->callback;
+          if (callback) callback(c->number);
+        });
+      }
+      return;
+    }
   auto c = add(n);
   if (!c) return;
-  c->numeric = std::move(callback);
-  c->tag = tag;
+  c->numbers.push_back({tag, std::move(callback), ++nextId});
   subscribe(c);
 }
 void PvAccess::prepare(const QString& n) {
@@ -747,13 +792,18 @@ void PvAccess::cancelNumbers(const void* tag) {
   QVector<Channel*> obsolete;
   for (auto& p : channels) {
     auto c = p.get();
-    if (!c->numeric || c->tag != tag)
+    const auto before = c->numbers.size();
+    c->numbers.erase(std::remove_if(c->numbers.begin(), c->numbers.end(),
+                                    [&](const auto& number) { return number.tag == tag; }),
+                     c->numbers.end());
+    // A shared monitor stays while another input still reads the PV.
+    if (c->numbers.size() == before || !c->numbers.empty())
       continue;
     c->ops->stopMonitor();
-    c->numeric = {};
+    c->haveNumber = false;
+    c->numericError.clear();
     if (c->prepared) {
       // Retain a severity/heartbeat/ACK write connection, as ChannelAccess.
-      c->tag = nullptr;
       c->cancelled = false;
     } else {
       obsolete.push_back(c);
@@ -913,7 +963,7 @@ void PvAccess::monitorFailed(Channel* c, const QString& message) {
   if (!self) return;
   if (!(c = channelsById.value(id)))
     return;
-  if (c->numeric)
+  if (!c->numbers.empty())
     numericUnavailable(c, "Monitor failed: " + message);
   else
     report("Monitor " + c->name + ": " + message);
@@ -925,7 +975,7 @@ void PvAccess::sample(Channel* c, const Sample& s) {
     callback(s.text);
     return;
   }
-  if (c->numeric) {
+  if (!c->numbers.empty()) {
     // Updates the server marks as alarm-only must not advance stateful CALC
     // inputs; the engine also ignores repeated values.
     if (!s.valueChanged)
@@ -935,8 +985,9 @@ void PvAccess::sample(Channel* c, const Sample& s) {
       return;
     }
     c->numericError.clear();
-    const auto callback = c->numeric;
-    callback(s.number);
+    c->number = s.number;
+    c->haveNumber = true;
+    deliverNumber(c, s.number);
     return;
   }
   if (!c->alarm)

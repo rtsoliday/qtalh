@@ -872,8 +872,8 @@ private slots:
     QCOMPARE(fields.value("pv"), d.channels()[0]->name);
     QCOMPARE(fields.value("value"), state.value);
   }
-  // As in ALH (fopen "w+" unless -T or -L), opening an alarm log at startup or
-  // through Setup -> New Alarm Log File empties it; -T and -L keep its records.
+  // As in ALH (fopen "w+" unless -T or -L), opening an alarm log empties it;
+  // -T and -L keep its records.
   // The user guide documents this; keep the documented modes pinned.
   void alarmLogOpenModes_data() {
     QTest::addColumn<bool>("dated"); QTest::addColumn<bool>("lock"); QTest::addColumn<int>("maximum");

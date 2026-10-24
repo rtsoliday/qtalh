@@ -112,6 +112,7 @@ private slots:
         capture("Force Mask...", "qt-force-mask");
         capture("Force Process Variable...", "qt-force");
         capture("Beep Severity...", "qt-beep");
+        capture("NoAck for One Hour...", "qt-noack");
         auto channel = window->document().channels()[0];
         window->alarmEngine().event(channel, {3, 2, 2, 1, "20"});
         capture("Current Alarm History", "qt-history");

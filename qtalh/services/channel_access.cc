@@ -109,10 +109,12 @@ void ChannelAccess::report(int status, const QString& context) {
       callback(context + ": " + ca_message(status));
 }
 void ChannelAccess::numericUnavailable(Channel* c, const QString& reason) {
-  if (!c->numeric)
+  if (c->numbers.empty())
     return;
+  c->haveNumber = false;
   const auto serial = c->serial;
   QPointer<ChannelAccess> self(this);
+  // One diagnostic per PV, however many inputs read it.
   if (c->numericError != reason) {
     c->numericError = reason;
     if (const auto callback = error)
@@ -123,11 +125,39 @@ void ChannelAccess::numericUnavailable(Channel* c, const QString& reason) {
   // A diagnostic can remove this input; revalidate it, as PvAccess does.
   // CALC inputs must become unavailable, while scalar force masks retain the
   // last valid value until the connection recovers.
-  c = channelsBySerial.value(serial);
-  if (c && c->numeric) {
-    const auto callback = c->numeric;
-    callback(std::numeric_limits<double>::quiet_NaN());
+  if ((c = channelsBySerial.value(serial)))
+    deliverNumber(c, std::numeric_limits<double>::quiet_NaN());
+}
+void ChannelAccess::deliverNumber(Channel* c, double value) {
+  // A callback may cancel inputs, remove the channel or destroy this adapter:
+  // visit the inputs present now, revalidating each, and call copies.
+  const auto serial = c->serial;
+  QVector<quint64> inputs;
+  for (const auto& number : c->numbers)
+    inputs << number.id;
+  QPointer<ChannelAccess> self(this);
+  for (auto id : inputs) {
+    if (!self || !(c = channelsBySerial.value(serial)))
+      return;
+    auto found = std::find_if(c->numbers.begin(), c->numbers.end(),
+                              [&](const auto& n) { return n.id == id; });
+    if (found == c->numbers.end())
+      continue;
+    const auto callback = found->callback;
+    if (callback)
+      callback(value);
   }
+}
+void ChannelAccess::replayNumber(Channel* c, const void* tag) {
+  if (c->cancelled || !c->haveNumber)
+    return;
+  auto found = std::find_if(c->numbers.begin(), c->numbers.end(),
+                            [&](const auto& n) { return n.tag == tag; });
+  if (found == c->numbers.end())
+    return;
+  const auto callback = found->callback;
+  if (callback)
+    callback(c->number);
 }
 ChannelAccess::Channel* ChannelAccess::add(const QString& name) {
   debugLog(options.debug, "CA", "create " + name);
@@ -196,11 +226,34 @@ void ChannelAccess::text(const QString& name, std::function<void(QString)> callb
 }
 void ChannelAccess::number(const QString& n, std::function<void(double)> callback,
                            const void* tag) {
+  // Inputs reading the same PV share its channel: ALH opened one for every
+  // $FORCEPV line, and srps names each of its Force PVs on several lines.
+  const auto named = channelsByName.constFind(n);
+  if (named != channelsByName.cend())
+    for (auto c : *named)
+      if (!c->numbers.empty() && !c->cancelled) {
+        auto found = tag ? std::find_if(c->numbers.begin(), c->numbers.end(),
+                                        [&](const auto& number) { return number.tag == tag; })
+                         : c->numbers.end();
+        if (found != c->numbers.end())
+          found->callback = std::move(callback);
+        else
+          c->numbers.push_back({tag, std::move(callback), ++nextSerial});
+        // This input missed the monitor's first event; give it the latest
+        // value later, as a new monitor would, not during this call.
+        if (c->haveNumber && tag) {
+          Callback replay;
+          replay.kind = Callback::NumberReplay;
+          replay.channel = c->serial;
+          replay.tag = tag;
+          defer(std::move(replay));
+        }
+        return;
+      }
   auto c = add(n);
   if (!c)
     return;
-  c->numeric = std::move(callback);
-  c->tag = tag;
+  c->numbers.push_back({tag, std::move(callback), ++nextSerial});
   c->numericError.clear();
   if (!c->id || ca_state(c->id) != cs_conn)
     c->connectionDeadline = monotonicNow() + 1000;
@@ -224,7 +277,8 @@ void ChannelAccess::setInitialAckT(const QString& n, bool v) {
   initialAckTargets.insert(n);
   // ACKT belongs to the record, even when CA addresses .VAL or another field.
   // Unrelated server-side aliases cannot be resolved from the client PV name.
-  initialAckT[n.section('.', 0, 0)] = v;
+  // A name without a field is its record; keep sharing it rather than copying.
+  initialAckT[n.contains('.') ? n.section('.', 0, 0) : n] = v;
 }
 void ChannelAccess::configureInitialAckT(const Document& document) {
   initialAckT.clear();
@@ -243,13 +297,13 @@ void ChannelAccess::configureInitialAckT(const Document& document) {
 }
 void ChannelAccess::subscribe(Channel* c) {
   if (!c->id || c->cancelled || c->subscription || ca_state(c->id) != cs_conn ||
-      (!c->alarm && !c->numeric && !c->text))
+      (!c->alarm && c->numbers.empty() && !c->text))
     return;
-  chtype type = c->numeric ? DBR_DOUBLE : c->text ? DBR_STRING : DBR_STSACK_STRING;
+  chtype type = !c->numbers.empty() ? DBR_DOUBLE : c->text ? DBR_STRING : DBR_STSACK_STRING;
   // Force inputs follow numeric value changes, as in ALH. Alarm-only events
   // must not advance stateful CALCs; connection/access callbacks still mark
   // inputs unavailable and subscription recovery supplies a fresh value.
-  const long events = c->numeric ? DBE_VALUE : DBE_VALUE | DBE_ALARM;
+  const long events = !c->numbers.empty() ? DBE_VALUE : DBE_VALUE | DBE_ALARM;
   report(ca_create_subscription(type, 1, c->id, events, update, c, &c->subscription),
          "Subscribe " + c->name);
 }
@@ -285,7 +339,9 @@ void ChannelAccess::dispatch() {
     auto c = channelsBySerial.value(callback.channel);
     if (!c)
       continue;
-    if (callback.kind == Callback::Connection)
+    if (callback.kind == Callback::NumberReplay)
+      replayNumber(c, callback.tag);
+    else if (callback.kind == Callback::Connection)
       connected(c, callback.op);
     else if (callback.kind == Callback::Access)
       rightsChanged(c);
@@ -434,7 +490,7 @@ void ChannelAccess::updated(Channel* c, const Callback& a) {
   if (clearing || c->cancelled)
     return;
   if (!a.data) {
-    if (c->numeric)
+    if (!c->numbers.empty())
       numericUnavailable(c, "Monitor failed: " + QString::fromLocal8Bit(ca_message(a.status)));
     else if (c->alarm) {
       // A monitor failure ends the observation just like a read-access gap.
@@ -472,7 +528,7 @@ void ChannelAccess::updated(Channel* c, const Callback& a) {
         callback(a.text);
     return;
   }
-  if (c->numeric) {
+  if (!c->numbers.empty()) {
     if (a.type != DBR_DOUBLE)
       return;
     if (!ca_read_access(c->id)) {
@@ -480,8 +536,9 @@ void ChannelAccess::updated(Channel* c, const Callback& a) {
       return;
     }
     c->numericError.clear();
-    if (const auto callback = c->numeric)
-      callback(a.number);
+    c->number = a.number;
+    c->haveNumber = true;
+    deliverNumber(c, a.number);
     return;
   }
   if (a.type != DBR_STSACK_STRING)
@@ -576,7 +633,12 @@ void ChannelAccess::cancel(const QString& n, const void* tag) {
 void ChannelAccess::cancelNumbers(const void* tag) {
   for (auto it = channels.begin(); it != channels.end();) {
     auto c = it->get();
-    if (!c->numeric || c->tag != tag) {
+    const auto before = c->numbers.size();
+    c->numbers.erase(std::remove_if(c->numbers.begin(), c->numbers.end(),
+                                    [&](const auto& number) { return number.tag == tag; }),
+                     c->numbers.end());
+    // A shared monitor stays while another input still reads the PV.
+    if (c->numbers.size() == before || !c->numbers.empty()) {
       ++it;
       continue;
     }
@@ -586,11 +648,11 @@ void ChannelAccess::cancelNumbers(const void* tag) {
       c->subscription = nullptr;
       ++c->epoch;
     }
-    c->numeric = {};
+    c->haveNumber = false;
+    c->numericError.clear();
     if (c->prepared) {
       // prepare() may have reused this input for a severity/heartbeat/ACK PV.
-      // Retain that write connection, but release the obsolete input callback.
-      c->tag = nullptr;
+      // Retain that write connection, but release the obsolete input callbacks.
       c->cancelled = false;
       noteDeadline(c);
       ++it;

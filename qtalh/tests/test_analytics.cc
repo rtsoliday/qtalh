@@ -542,6 +542,32 @@ private slots:
     service.poll();
     QVERIFY(!report(service.analytics, now).rows[0].channel.available);
   }
+  void configuredDisabledChannelsAreExcluded() {
+    auto doc = parseConfig("GROUP NULL root\nCHANNEL root on\nCHANNEL root off -D---\nCHANNEL root gone C----\n");
+    Engine e(doc);
+    qint64 now = 0;
+    AnalyticsService service;
+    service.monotonicNow = [&] { return now; };
+    service.utcNow = [&] { return 1700000000000 + now; };
+    service.attach(&e, "/test.alh");
+    for (auto n : doc.channels()) e.event(n, {0, 0, 0, 1, "0"});
+    now = 1000;
+    for (auto n : doc.channels()) e.event(n, {3, 2, 2, 1, "2"});
+    auto names = [&] {
+      QStringList result;
+      for (const auto& row : report(service.analytics, now + 1000).rows) result << row.channel.pv;
+      return result;
+    };
+    // Disabled or cancelled in the file: never collected, so never ranked.
+    QCOMPARE(names(), QStringList{"on"});
+    service.reset();
+    QCOMPARE(names(), QStringList{"on"});
+    // A runtime Disable is still observed and labeled as suppression.
+    e.setMask(doc.channels()[0], Mask::parse("-D---"));
+    now = 2000;
+    e.event(doc.channels()[0], {0, 0, 0, 1, "0"});
+    QCOMPARE(names(), QStringList{"on"});
+  }
   void tenThousandChannelsAndPressure() {
     AlarmAnalytics a;
     QVector<ChannelUpdate> all;

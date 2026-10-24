@@ -2,6 +2,7 @@
 #include "core/phoebus.h"
 #include "core/version.h"
 #include "services/options.h"
+#include "services/process_limits.h"
 #include "ui/window.h"
 #include "ui/dialogs.h"
 #include <QApplication>
@@ -12,6 +13,8 @@
 #include <epicsVersion.h>
 #include <clocale>
 int main(int argc, char** argv) {
+  // Before any thread starts: large configurations can exceed a 1024-file limit.
+  alh::raiseOpenFileLimit();
   try {
     QStringList args;
     for (int i = 0; i < argc; ++i)
@@ -31,6 +34,8 @@ int main(int argc, char** argv) {
     }
     if (options.validate) {
       auto doc = alh::loadConfig(options.config, options.configDir);
+      for (const auto& warning : doc.warnings)
+        QTextStream(stderr) << "qtalh: warning: " << warning << '\n';
       alh::debugLog(options.debug, "config", QString("validated %1 channels").arg(doc.channels().size()));
       QTextStream(stdout) << "Valid configuration: " << doc.channels().size() << " channels, "
                           << doc.nodes().size() - doc.channels().size() << " groups\n";

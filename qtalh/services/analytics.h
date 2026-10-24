@@ -1,5 +1,6 @@
 #pragma once
 #include "core/analytics.h"
+#include <QSet>
 #include <QElapsedTimer>
 #include <QObject>
 #include <QTimer>
@@ -34,6 +35,9 @@ private:
   Engine* engine = nullptr;
   AlarmSubscription observer;
   QString configuration;
+  // Identities of channels whose configured mask has Disable or Cancel.
+  QSet<QString> excluded;
+  QVector<ChannelUpdate> included() const;
   qint64 lastMono = 0, lastUtc = 0, lastRequest = -1000;
 };
 } // namespace alh

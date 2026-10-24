@@ -50,7 +50,17 @@ private:
     chid id = nullptr;
     evid subscription = nullptr;
     std::function<void(Event)> alarm;
-    std::function<void(double)> numeric;
+    // Force PV and CALC inputs of every owner reading this PV share the
+    // channel and its monitor. An owner of null always adds another input.
+    struct Number {
+      const void* tag;
+      std::function<void(double)> callback;
+      quint64 id; // Unique per input, as owners may be null.
+    };
+    std::vector<Number> numbers;
+    // The latest value, for an input added after the monitor's first event.
+    double number = 0;
+    bool haveNumber = false;
     std::function<void(QString)> text;
     bool cancelled = false, prepared = false;
     bool recheckAccess = false;
@@ -80,6 +90,8 @@ private:
   void subscribe(Channel*);
   void report(int, const QString&);
   void numericUnavailable(Channel*, const QString&);
+  void deliverNumber(Channel*, double);
+  void replayNumber(Channel*, const void* tag);
   struct Read;
   struct ReadItem {
     ChannelAccess* owner = nullptr;
@@ -102,9 +114,11 @@ private:
   // ca_poll(). They only copy their arguments here; dispatch() applies them on
   // the Qt thread after ca_poll() returns, so Engine and UI code never run on CA threads.
   struct Callback {
-    enum Kind { Connection, Access, Update, ReadConnection, ReadValue } kind = Connection;
+    // NumberReplay gives a channel's latest value to a newly added input.
+    enum Kind { Connection, Access, Update, ReadConnection, ReadValue, NumberReplay } kind = Connection;
     quint64 channel = 0, epoch = 0, read = 0;
     ReadItem* item = nullptr;
+    const void* tag = nullptr;
     long op = 0;
     int status = 0;
     long type = 0;

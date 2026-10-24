@@ -28,8 +28,8 @@ QThread* startLogSearch(QObject* receiver, LogSearch,
                        LogSearchReader reader = searchLogs);
 
 // Each poll runs in a worker. The GUI retains only this cursor and a bounded tail.
-constexpr int LiveLogMaximumRecords = 1000;
-constexpr int LiveLogMaximumBytes = 256 * 1024;
+constexpr int LiveLogMaximumRecords = 10000;
+constexpr int LiveLogMaximumBytes = 2560 * 1024;
 struct LiveLogCursor {
   QString path;
   qint64 offset = -1;

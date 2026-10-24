@@ -75,6 +75,16 @@ static QSet<Window*> applicationWindows() {
     if (auto window = dynamic_cast<Window*>(widget)) found.insert(window);
   return found;
 }
+// Opens a fresh View → Configuration File dialog.
+static QDialog* configurationViewer(Window* w) {
+  for (auto dialog : w->findChildren<QDialog*>())
+    if (dialog->windowTitle() == "Configuration File") dialog->close();
+  QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+  w->findChild<QAction*>("Configuration File")->trigger();
+  for (auto dialog : w->findChildren<QDialog*>())
+    if (dialog->windowTitle() == "Configuration File") return dialog;
+  return nullptr;
+}
 #ifdef Q_OS_MACOS
 // AVFoundation needs Cocoa's event dispatcher for both playback and errors.
 static void nativeMediaCase(const QString& name) {
@@ -119,6 +129,7 @@ class UiTests : public QObject {
     o.noLog = true;
     o.noErrorPopup = true;
     o.mainWindow = true;
+    o.shelving = true; // Hidden by default; see shelvingHiddenUnlessEnabled.
     return o;
   }
   Document sample() {
@@ -151,8 +162,9 @@ private slots:
     QVERIFY(browser->toPlainText().contains("Auto ack of transient alarms on enable"));
     QVERIFY(browser->toPlainText().contains("mask changes also write to the IOC"));
     QVERIFY(!browser->toPlainText().contains(":::"));
-    // Log-file switching, editor reports and the notification indicator are documented.
-    QVERIFY(browser->toPlainText().contains("Use Log Series"));
+    // Startup log choice, editor reports and the notification indicator are documented.
+    QVERIFY(browser->toPlainText().contains("To log to different files, restart the runtime with new options."));
+    QVERIFY(!browser->toPlainText().contains("Use Log Series"));
     QVERIFY(browser->toPlainText().contains("writes an indented text outline"));
     QVERIFY(browser->toPlainText().contains("Notifications Enabled: YES"));
     QHash<QString, int> anchors;
@@ -247,38 +259,76 @@ private slots:
     QVERIFY(text.contains("This happens without -caputackt and can change an ACKT that other clients share."));
     help->close();
   }
-  void noAckShortcutTogglesWithoutDialogAsDocumented() {
-    // ALH's Ctrl+N opens a Modify NoAck Mask dialog. QtALH toggles the timer on
-    // the selection at once, and the selection starts at the facility root.
+  void noAckShortcutOpensModifyNoAckMaskDialog() {
+    // As in ALH, Ctrl+N opens Modify NoAck Mask for the selection, which starts
+    // at the facility root. The toggle applies at once and follows the selection.
     auto w = std::make_unique<Window>(sample(), options(false), false);
     w->show(); w->activateWindow();
     QVERIFY(QTest::qWaitForWindowActive(w.get()));
     auto& engine = w->alarmEngine();
     auto root = w->document().root.get();
-    auto dialogShown = [&] {
-      for (auto widget : QApplication::topLevelWidgets())
-        if (qobject_cast<QDialog*>(widget) && widget->isVisible()) return true;
+    const auto channels = w->document().channels();
+    auto noAckDialogs = [&] { return w->findChildren<QDialog*>("noAckDialog"); };
+    auto shows = [](QDialog* dialog, const QString& text) {
+      for (auto label : dialog->findChildren<QLabel*>()) if (label->text() == text) return true;
       return false;
     };
     QTest::keyClick(w.get(), Qt::Key_N, Qt::ControlModifier);
+    QCOMPARE(noAckDialogs().size(), 1);
+    auto dialog = noAckDialogs().first(); QVERIFY(dialog->isVisible());
+    QCOMPARE(dialog->windowTitle(), QString("Modify NoAck Mask"));
+    QVERIFY(shows(dialog, "Group:")); QVERIFY(shows(dialog, root->label()));
+    QCOMPARE(dialog->findChild<QLabel*>("noAckChannelCount")->text(),
+             QString("Channels affected: %1").arg(channels.size()));
+    auto buttons = dialog->findChild<QDialogButtonBox*>(); QVERIFY(buttons);
+    QVERIFY(buttons->button(QDialogButtonBox::Close)); QVERIFY(buttons->button(QDialogButtonBox::Help));
+    // Opening the dialog changes nothing; its toggle starts and ends the timer.
+    auto toggle = dialog->findChild<QCheckBox*>("noAckOneHour"); QVERIFY(toggle);
+    QVERIFY(!toggle->isChecked()); QCOMPARE(engine.state(root).noAckUntil, qint64(0));
+    for (auto n : channels) QVERIFY(!engine.state(n).mask[Ack]);
+    toggle->click();
     QVERIFY(engine.state(root).noAckUntil);
-    for (auto n : w->document().channels()) QVERIFY(engine.state(n).mask[Ack]);
-    QVERIFY(!dialogShown());
+    for (auto n : channels) QVERIFY(engine.state(n).mask[Ack]);
+    QTRY_VERIFY(dialog->findChild<QCheckBox*>("noAckOneHour") &&
+                dialog->findChild<QCheckBox*>("noAckOneHour")->isChecked());
+    // Ctrl+N raises the open dialog rather than toggling or duplicating it.
     QTest::keyClick(w.get(), Qt::Key_N, Qt::ControlModifier);
+    QCOMPARE(noAckDialogs().size(), 1); QVERIFY(engine.state(root).noAckUntil);
+    dialog->findChild<QCheckBox*>("noAckOneHour")->click();
     QCOMPARE(engine.state(root).noAckUntil, qint64(0));
-    for (auto n : w->document().channels()) QVERIFY(!engine.state(n).mask[Ack]);
-    QVERIFY(!dialogShown());
-    // The guide must not promise ALH's dialog and must describe the toggle.
+    for (auto n : channels) QVERIFY(!engine.state(n).mask[Ack]);
+    // The dialog follows a group, then a channel, which shows no count.
+    auto tree = w->findChild<QTreeView*>("alarmTree");
+    auto group = w->findChild<QTreeView*>("groupContents");
+    tree->expand(tree->model()->index(0, 0));
+    tree->setCurrentIndex(tree->model()->index(0, 2, tree->model()->index(0, 0)));
+    QTRY_VERIFY(shows(dialog, "Power_Supplies"));
+    QCOMPARE(dialog->findChild<QLabel*>("noAckChannelCount")->text(), QString("Channels affected: 1"));
+    group->setCurrentIndex(group->model()->index(0, 2));
+    QTRY_VERIFY(shows(dialog, "Channel:"));
+    QVERIFY(shows(dialog, "test:power")); QVERIFY(!dialog->findChild<QLabel*>("noAckChannelCount"));
+    auto channel = channels[0]; QCOMPARE(channel->name, QString("test:power"));
+    dialog->findChild<QCheckBox*>("noAckOneHour")->click();
+    QVERIFY(engine.state(channel).noAckUntil); QVERIFY(engine.state(channel).mask[Ack]);
+    for (auto n : channels) if (n != channel) QVERIFY(!engine.state(n).mask[Ack]);
+    // Ending the timer elsewhere, as expiry or Runtime Overrides does, updates it.
+    QTRY_VERIFY(dialog->findChild<QCheckBox*>("noAckOneHour")->isChecked());
+    engine.noAck(channel, false);
+    QTRY_VERIFY(!dialog->findChild<QCheckBox*>("noAckOneHour")->isChecked());
+    QVERIFY(!engine.state(channel).mask[Ack]);
+    buttons = dialog->findChild<QDialogButtonBox*>();
+    QPointer<QDialog> lifetime = dialog; buttons->button(QDialogButtonBox::Close)->click();
+    QTRY_VERIFY(!lifetime);
+    // The guide describes ALH's dialog and the root selection at startup.
     QWidget owner;
     auto help = showHelp(&owner);
     auto browser = help->findChild<QTextBrowser*>("helpBrowser");
     QVERIFY(browser);
     const auto text = browser->toPlainText().simplified();
-    QVERIFY(!text.contains("and the actions of every dialog, with"));
-    QVERIFY(text.contains("Neither appearance has ALH's Modify NoAck Mask dialog"));
-    QVERIFY(text.contains("QtALH has no such dialog and asks for no confirmation"));
-    QVERIFY(text.contains("Ctrl+N before you select another row removes the "
-                          "acknowledgement requirement from every channel"));
+    QVERIFY(!text.contains("Neither appearance has ALH's Modify NoAck Mask dialog"));
+    QVERIFY(text.contains("opens the Modify NoAck Mask dialog, as in ALH"));
+    QVERIFY(text.contains("turning the toggle on before you select another row "
+                          "affects every channel"));
     help->close();
   }
   void helpSurvivesConfigurationReplacement() {
@@ -572,23 +622,23 @@ private slots:
     action("Active Alarms Only")->trigger();
     QVERIFY(group->currentIndex().isValid());
     QCOMPARE(group->currentIndex().data().toString(), QString("pv"));
-    QVERIFY(action("NoAck for One Hour")->isEnabled());
+    QVERIFY(action("NoAck for One Hour...")->isEnabled());
     action("Properties Window")->trigger();
     QPointer<QDialog> properties = w->findChild<QDialog*>("propertiesDialog"); QVERIFY(properties);
     // An alarm which clears and is acknowledged disappears on the next refresh.
     engine.event(n, {}); engine.acknowledge(n);
     QTRY_VERIFY(!group->currentIndex().isValid());
     QVERIFY(!tree->currentIndex().isValid());
-    QVERIFY(!action("NoAck for One Hour")->isEnabled());
+    QVERIFY(!action("NoAck for One Hour...")->isEnabled());
     QVERIFY(!action("Force Mask...")->isEnabled());
     QTRY_VERIFY(!properties);
-    action("NoAck for One Hour")->trigger(); QVERIFY(!engine.state(n).mask[Ack]);
+    action("NoAck for One Hour...")->trigger(); QVERIFY(!engine.state(n).mask[Ack]);
     // A new alarm must not silently reselect the old target.
     engine.event(n, {3, 2, 2, 1, "again"});
     QTRY_COMPARE(group->model()->rowCount(), 1);
     QVERIFY(!group->currentIndex().isValid());
     group->setCurrentIndex(group->model()->index(0, 2));
-    QVERIFY(action("NoAck for One Hour")->isEnabled());
+    QVERIFY(action("NoAck for One Hour...")->isEnabled());
     action("No filter")->trigger();
     QCOMPARE(group->currentIndex().data().toString(), QString("pv"));
     // Explicitly selecting a filter which hides the target also clears actions.
@@ -596,6 +646,167 @@ private slots:
     action("Unacknowledged Alarms Only")->trigger();
     QVERIFY(!group->currentIndex().isValid());
     QVERIFY(!action("Acknowledge Alarm")->isEnabled());
+  }
+  void statusWarningsFollowRuntimeSettings() {
+    auto o = options(false); o.silent = false;
+    auto w = std::make_unique<BellTestWindow>(sample(), o, false);
+    w->resize(1100, 650); w->show();
+    QVERIFY(QTest::qWaitForWindowExposed(w.get()));
+    auto footer = w->findChild<QWidget*>("statusFooter");
+    auto foreverStatus = w->findChild<QLabel*>("silenceForever");
+    auto beep = w->findChild<QLabel*>("beepSeverity");
+    auto filter = w->findChild<QLabel*>("displayFilterStatus");
+    auto interval = w->findChild<QCheckBox*>("silenceInterval");
+    auto tree = w->findChild<QTreeView*>("alarmTree");
+    auto timer = w->findChild<QTimer*>("alarmBeepTimer");
+    QVERIFY(footer && foreverStatus && beep && filter && interval && tree && timer);
+    QCOMPARE(timer->interval(), 2000);
+    timer->stop();
+    auto trigger = [&](const QString& name) {
+      for (auto action : w->findChildren<QAction*>())
+        if (action->text() == name) { action->trigger(); return true; }
+      return false;
+    };
+    auto corner = [](QWidget* widget) {
+      const auto capture = widget->grab().toImage();
+      return capture.pixelColor(QPoint(1, 1) * capture.devicePixelRatio());
+    };
+    const auto normalFooter = corner(footer);
+    QVERIFY(normalFooter != QColor(Qt::blue));
+    QVERIFY(!foreverStatus->autoFillBackground());
+    QVERIFY(!beep->autoFillBackground());
+    QVERIFY(filter->isHidden());
+    QVERIFY(trigger("Silence Forever"));
+    QVERIFY(w->alarmEngine().silenceForever);
+    QCOMPARE(corner(footer), QColor(Qt::blue));
+    QVERIFY(foreverStatus->autoFillBackground());
+    QCOMPARE(corner(foreverStatus), QColor("#fbbf24"));
+    QCOMPARE(foreverStatus->palette().color(QPalette::WindowText), QColor(Qt::black));
+    // Rich-text links must retain visible ink on the blue silence footer.
+    auto channel = w->document().channels()[0];
+    QCOMPARE(w->alarmEngine().shelve(channel, 1, "contrast check", "tester"), 1);
+    auto shelves = w->findChild<QLabel*>("shelvedCount"); QVERIFY(shelves);
+    QTRY_VERIFY(shelves->isVisible());
+    const auto shelfImage = shelves->grab().toImage();
+    bool whiteInk = false;
+    for (int y = 0; y < shelfImage.height(); ++y)
+      for (int x = 0; x < shelfImage.width(); ++x)
+        whiteInk |= shelfImage.pixelColor(x, y) == QColor(Qt::white);
+    QVERIFY(whiteInk);
+    w->alarmEngine().unshelve(channel);
+    const auto pane = tree->viewport()->grab().toImage();
+    QCOMPARE(pane.pixelColor(pane.width() - 2, pane.height() - 2), QColor(Qt::blue));
+    // Permanent silence can be cleared while timed silence remains visible.
+    interval->setChecked(true);
+    QVERIFY(trigger("Silence Forever"));
+    QCOMPARE(corner(footer), QColor(Qt::blue));
+    QVERIFY(!foreverStatus->autoFillBackground());
+    interval->setChecked(false);
+    QCOMPARE(corner(footer), normalFooter);
+    QVERIFY(trigger("MAJOR"));
+    QCOMPARE(w->document().beepSeverity, 2);
+    QVERIFY(beep->autoFillBackground());
+    QCOMPARE(corner(beep), QColor("#fbbf24"));
+    QVERIFY(trigger("Silence Forever"));
+    QCOMPARE(corner(beep), QColor("#fbbf24"));
+    QVERIFY(trigger("Silence Forever"));
+    QVERIFY(trigger("MINOR"));
+    QVERIFY(!beep->autoFillBackground());
+    for (const auto& mode : {QString("Active Alarms Only"), QString("Unacknowledged Alarms Only")}) {
+      QVERIFY(trigger(mode));
+      QVERIFY(!filter->isHidden());
+      QVERIFY(filter->text().contains(mode));
+      QVERIFY(filter->font().bold());
+      QCOMPARE(corner(filter), QColor("#fbbf24"));
+      QTRY_VERIFY(filter->width() >= filter->fontMetrics().horizontalAdvance(filter->text()));
+    }
+    QDir().mkpath(TEST_OUTPUT);
+    QVERIFY(w->grab().save(QString(TEST_OUTPUT) + "/" + artifactStyle() + "-status-warnings.png"));
+    QVERIFY(trigger("No filter"));
+    QVERIFY(filter->isHidden());
+    QCOMPARE(corner(footer), normalFooter);
+  }
+  void displayFilterWarningAtStartup() {
+    for (int mode : {0, 1, 2}) {
+      auto o = options(false); o.filter = mode;
+      auto w = std::make_unique<Window>(sample(), o, false);
+      auto status = w->findChild<QLabel*>("displayFilterStatus");
+      QVERIFY(status);
+      QCOMPARE(status->isHidden(), mode == 0);
+      QCOMPARE(status->autoFillBackground(), mode != 0);
+    }
+  }
+  void configurationViewerPreservesSource_data() {
+    QTest::addColumn<QByteArray>("source");
+    const auto text = QString::fromUtf8("# caf\xc3\xa9 comment\n\nGROUP NULL root\n\n# separate channels\nCHANNEL root pv\n");
+    QTest::newRow("utf8") << text.toUtf8();
+    QTest::newRow("latin1") << text.toLatin1();
+    // As in ALH and the parser, a NUL ends the text of its line only.
+    auto embeddedNul = text.toUtf8();
+    embeddedNul.insert(embeddedNul.indexOf('\n'), QByteArray("\0ignored", 8));
+    QTest::newRow("embedded-nul") << embeddedNul;
+    QTest::newRow("crlf") << text.toUtf8().replace("\n", "\r\n");
+  }
+  void configurationViewerPreservesSource() {
+    QFETCH(QByteArray, source);
+    const auto expected = QString::fromUtf8("# caf\xc3\xa9 comment\n\nGROUP NULL root\n\n# separate channels\nCHANNEL root pv\n");
+    QTemporaryDir dir;
+    const auto path = dir.filePath("source.alhConfig");
+    QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write(source), qint64(source.size())); file.close();
+    auto w = std::make_unique<Window>(loadConfig(path), options(false), false);
+    w->show();
+    auto dialog = configurationViewer(w.get()); QVERIFY(dialog);
+    auto text = dialog->findChild<QPlainTextEdit*>(); QVERIFY(text);
+    QCOMPARE(text->toPlainText(), expected);
+    QVERIFY(text->isReadOnly());
+    QVERIFY(dialog->findChild<QLineEdit*>("findText")); // Search is retained.
+    QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(), source); file.close();
+    // The view shows the configuration as it was read; the file is not read again.
+    QVERIFY(file.remove());
+    dialog = configurationViewer(w.get()); QVERIFY(dialog);
+    QCOMPARE(dialog->findChild<QPlainTextEdit*>()->toPlainText(), expected);
+    QVERIFY(dialog->findChild<QLineEdit*>("findText"));
+    QVERIFY(w->findChild<QLabel*>("messageArea")->text().isEmpty());
+  }
+  void configurationViewerFollowsRunningConfiguration() {
+    QTemporaryDir dir;
+    auto write = [&](const QString& name, const QByteArray& text, QIODevice::OpenMode mode = QIODevice::WriteOnly) {
+      QFile file(dir.filePath(name));
+      return file.open(mode) && file.write(text) == text.size();
+    };
+    QVERIFY(write("part.alhConfig", "# included part\nGROUP NULL branch\n\nCHANNEL branch inner\n"));
+    QVERIFY(write("main.alhConfig", "# facility\nGROUP NULL root\n\nINCLUDE root part.alhConfig # shared\n"
+                                    "# after the include\nCHANNEL root pv\n"));
+    auto w = std::make_unique<Window>(loadConfig(dir.filePath("main.alhConfig")), options(false), false);
+    w->show();
+    auto shown = [&] {
+      auto dialog = configurationViewer(w.get());
+      return dialog ? dialog->findChild<QPlainTextEdit*>()->toPlainText() : QString();
+    };
+    // Included files follow their INCLUDE line, indented as in ALH.
+    const QString source = "# facility\nGROUP NULL root\n\nINCLUDE root part.alhConfig # shared\n"
+                           "   # included part\n   GROUP NULL branch\n\n   CHANNEL branch inner\n"
+                           "# after the include\nCHANNEL root pv\n";
+    QCOMPARE(shown(), source);
+    // Runtime changes appear in place among the comments.
+    auto trigger = [&](const QString& name) {
+      for (auto action : w->findChildren<QAction*>())
+        if (action->text() == name) { action->trigger(); return true; }
+      return false;
+    };
+    QVERIFY(trigger("MAJOR")); QCOMPARE(w->document().beepSeverity, 2);
+    QCOMPARE(shown(), "$BEEPSEVERITY MAJOR\n" + source);
+    QVERIFY(trigger("MINOR"));
+    QCOMPARE(shown(), source);
+    auto inner = w->document().channels().at(0);
+    w->alarmEngine().setBeep(inner, 3);
+    QCOMPARE(shown(), QString(source).replace("   CHANNEL branch inner\n",
+                                              "   CHANNEL branch inner\n   $BEEPSEVR INVALID\n"));
+    w->alarmEngine().setBeep(inner, 1);
+    // A source edited on disk after it was loaded is not what is running.
+    QVERIFY(write("part.alhConfig", "CHANNEL branch later\n", QIODevice::Append));
+    QVERIFY(!shown().contains("later"));
   }
   void silenceControlsAndAudit() {
     QTemporaryDir dir; auto o = options(false); o.noLog = false; o.silent = false;
@@ -670,6 +881,7 @@ private slots:
     // silencing masks and the panes keep their color.
     QFETCH(bool, maskColor);
     auto o = options(false);
+    o.silent = false; // Exercise timed silence independently of permanent silence.
     o.maskColor = maskColor;
     auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root pv\n"), o, false);
     w->resize(900, 500);
@@ -681,7 +893,7 @@ private slots:
     auto label = w->findChild<QLabel*>("executionStatus");
     auto tree = w->findChild<QTreeView*>("alarmTree");
     auto interval = w->findChild<QCheckBox*>("silenceInterval");
-    auto timer = w->findChild<QTimer*>("alarmBeepTimer");
+    auto timer = w->findChild<QTimer*>("runtimeStatusTimer");
     QVERIFY(footer && label && tree && interval && timer);
     timer->stop();
     const QColor blue(Qt::blue);
@@ -1027,7 +1239,7 @@ private slots:
       for (auto n : w->document().channels()) QCOMPARE(w->alarmEngine().state(n).mask[Disable], n->name == "target");
     } else {
       QTRY_VERIFY(!force && !mask);
-      trigger("Acknowledge Alarm"); trigger("NoAck for One Hour"); trigger("Display Guidance"); trigger("Start Related Process");
+      trigger("Acknowledge Alarm"); trigger("NoAck for One Hour..."); trigger("Display Guidance"); trigger("Start Related Process");
       trigger("Force Process Variable..."); QVERIFY(!w->findChild<QDialog*>("forcePvDialog"));
       for (auto n : w->document().channels()) QCOMPARE(w->alarmEngine().state(n).mask.text(), QString("-----"));
       view->setCurrentIndex(view->model()->index(0, 2)); trigger("Force Process Variable...");
@@ -1068,16 +1280,17 @@ private slots:
     const auto time = QDateTime(QDate(2026, 9, 13), QTime(12, 0));
     auto row = [&](int id) {
       return (QLocale::c().toString(time.addSecs(id), "dd-MMM-yyyy HH:mm:ss") +
-              QString(" : id=%1 ").arg(id, 4, 10, QChar('0'))).toLocal8Bit() +
+              QString(" : id=%1 ").arg(id, 6, 10, QChar('0'))).toLocal8Bit() +
               QByteArray(byteLimit ? 400 : 0, 'x') + '\n';
     };
-    for (int id = 1001; id <= 1500; ++id) file.write(row(id));
-    for (int id = 1; id <= 1000; ++id) file.write(row(id));
+    const int total = LiveLogMaximumRecords + 500;
+    for (int id = LiveLogMaximumRecords + 1; id <= total; ++id) file.write(row(id));
+    for (int id = 1; id <= LiveLogMaximumRecords; ++id) file.write(row(id));
     QVERIFY(file.flush());
     if (stale) {
       QByteArray slot(64, 0); slot.replace(0, 8, "ALHPOS01");
-      qToBigEndian<quint64>(1501, slot.data() + 8);
-      qToBigEndian<quint64>(1500, slot.data() + 16);
+      qToBigEndian<quint64>(total + 1, slot.data() + 8);
+      qToBigEndian<quint64>(total, slot.data() + 16);
       qToBigEndian<quint64>(1, slot.data() + 24); // Valid structure, stale fingerprint.
       slot += QCryptographicHash::hash(slot, QCryptographicHash::Sha256);
       QFile checkpoint(path + ".qtalh-position"); QVERIFY(checkpoint.open(QIODevice::WriteOnly));
@@ -1088,7 +1301,7 @@ private slots:
     const int retained = qMin<qint64>(LiveLogMaximumRecords, LiveLogMaximumBytes / row(1).size());
     QCOMPARE(live.lines.size(), retained);
     for (int i = 0; i < retained; ++i)
-      QCOMPARE(live.lines[i] + '\n', QString::fromLocal8Bit(row(1501 - retained + i)));
+      QCOMPARE(live.lines[i] + '\n', QString::fromLocal8Bit(row(total + 1 - retained + i)));
     const auto idle = readLiveLog(live.cursor, path);
     QVERIFY(idle.lines.isEmpty()); QVERIFY(idle.bytesRead <= 128);
     int polls = 0;
@@ -1421,120 +1634,10 @@ private slots:
       QTRY_VERIFY(text->toPlainText().contains("event-C"));
       QVERIFY(text->toPlainText().indexOf("event-B") < text->toPlainText().indexOf("event-C"));
     }
-    const auto newPath = dir.filePath("new-log");
-    QTimer::singleShot(0, w.get(), [&] {
-      auto chooser = w->findChild<QDialog*>("fileSelectionDialog"); QVERIFY(chooser);
-      if (auto native = qobject_cast<QFileDialog*>(chooser)) { native->selectFile(newPath); QMetaObject::invokeMethod(native, "accept"); }
-      else { auto selection = chooser->findChild<QLineEdit*>("fileSelection"); QVERIFY(selection); selection->setText(newPath); QMetaObject::invokeMethod(selection, "returnPressed"); }
-    });
-    trigger(alarm ? "New Alarm Log File..." : "New Operation Modification Log File...");
-    e.event(n, {4, 1, 0, 1, "new-destination"}); e.modifyMask(n, Log, 1);
-    const auto actual = newPath + (dated ? QDate::currentDate().toString(".yyyy-MM-dd") : QString());
-    QTRY_COMPARE(dialog->findChild<QLabel*>("liveLogPath")->text(), "File: " + actual);
-    QTRY_VERIFY(text->toPlainText().contains(alarm ? "new-destination" : "Modify Mask"));
-    QVERIFY(!text->toPlainText().contains("event-B"));
+    const auto actual = (alarm ? o.alarmFile : o.opmodFile) +
+        (dated ? QDate::currentDate().toString(".yyyy-MM-dd") : QString());
+    QCOMPARE(dialog->findChild<QLabel*>("liveLogPath")->text(), "File: " + actual);
     QPointer<QDialog> lifetime = dialog; dialog->close(); QTRY_VERIFY(!lifetime);
-  }
-  void datedLogSelection_data() {
-    QTest::addColumn<bool>("alarm");
-    QTest::addColumn<QString>("selection");
-    for (bool alarm : {true, false})
-      for (const auto& selection : {"unchanged", "today", "older", "basename", "cancel",
-                                    "current-date-base", "new-date-base", "invalid-date"}) {
-        const auto row = QByteArray(alarm ? "alarm-" : "opmod-") + selection;
-        QTest::newRow(row.constData()) << alarm << QString(selection);
-      }
-  }
-  void datedLogSelection() {
-    QFETCH(bool, alarm); QFETCH(QString, selection);
-    QTemporaryDir dir;
-    auto o = options(false); o.noLog = false; o.maxRecords = 0; o.dated = true;
-    o.alarmFile = dir.filePath("alarm"); o.opmodFile = dir.filePath("opmod");
-    if (selection == "current-date-base") {
-      o.alarmFile += ".2000-01-01"; o.opmodFile += ".2000-01-01";
-    }
-    const auto base = alarm ? o.alarmFile : o.opmodFile;
-    const auto suffix = QDate::currentDate().toString(".yyyy-MM-dd");
-    auto chosen = base, expected = base;
-    bool ambiguous = false;
-    if (selection == "today") {
-      chosen = base + suffix; ambiguous = true;
-    } else if (selection == "older" || selection == "basename" || selection == "cancel") {
-      chosen = dir.filePath("other.2000-01-01"); ambiguous = true;
-      if (selection != "cancel")
-        expected = selection == "basename" ? chosen : dir.filePath("other");
-    } else if (selection == "new-date-base") {
-      chosen = expected = dir.filePath("new.2000-01-01");
-    } else if (selection == "invalid-date") {
-      chosen = expected = dir.filePath("other.2000-02-30");
-    }
-    if (ambiguous || selection == "current-date-base" || selection == "invalid-date") {
-      QFile file(chosen); QVERIFY(file.open(QIODevice::WriteOnly));
-      file.write("preserved-existing-record\n");
-    }
-    auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root pv\n"), o, false);
-    auto trigger = [&](const QString& name) {
-      for (auto a : w->findChildren<QAction*>()) if (a->text() == name) a->trigger();
-    };
-    trigger(alarm ? "Alarm Log File" : "Operation Log File");
-    auto live = w->findChild<QDialog*>(alarm ? "liveAlarmLog" : "liveOperationLog");
-    QVERIFY(live);
-    QString prefilled;
-    bool submitted = false, sawChoice = false, timedOut = false;
-    QElapsedTimer deadline; deadline.start();
-    QTimer responder;
-    connect(&responder, &QTimer::timeout, w.get(), [&] {
-      auto modal = qobject_cast<QDialog*>(qApp->activeModalWidget());
-      if (!modal) return;
-      if (deadline.elapsed() > 5000) { timedOut = true; modal->reject(); return; }
-      if (auto message = qobject_cast<QMessageBox*>(modal)) {
-        // macOS omits QMessageBox window titles, including offscreen dialogs.
-        if (message->objectName() == "datedLogFileChoice") {
-          sawChoice = true;
-          const auto label = selection == "basename" ? "Use as Basename" : "Use Log Series";
-          if (selection == "cancel") message->button(QMessageBox::Cancel)->click();
-          else for (auto button : message->buttons()) if (button->text() == label) button->click();
-        } else if (message->button(QMessageBox::Yes)) {
-          message->button(QMessageBox::Yes)->click();
-        }
-      } else if (!submitted && modal->objectName() == "fileSelectionDialog") {
-        submitted = true;
-        // Accept outside this timer callback so it can also answer any nested
-        // overwrite prompt from either the Motif or Fusion chooser.
-        QTimer::singleShot(0, &responder, [&, modal] {
-          if (auto chooser = qobject_cast<QFileDialog*>(modal)) {
-            prefilled = chooser->selectedFiles().value(0);
-            // selectFile() can leave a focused filename editor unchanged.
-            // Enter the path as the operator would in the visible dialog.
-            auto field = chooser->findChild<QLineEdit*>("fileNameEdit");
-            if (!field) { timedOut = true; modal->reject(); return; }
-            field->setText(chosen);
-            QMetaObject::invokeMethod(chooser, "accept");
-          } else {
-            auto field = modal->findChild<QLineEdit*>("fileSelection");
-            if (!field) { timedOut = true; modal->reject(); return; }
-            prefilled = field->text(); field->setText(chosen);
-            QMetaObject::invokeMethod(field, "returnPressed");
-          }
-        });
-      }
-    });
-    responder.start(10);
-    trigger(alarm ? "New Alarm Log File..." : "New Operation Modification Log File...");
-    responder.stop();
-    QVERIFY(!timedOut); QVERIFY(submitted); QCOMPARE(prefilled, base);
-    QCOMPARE(sawChoice, ambiguous);
-    auto& engine = w->alarmEngine(); auto n = w->document().channels()[0];
-    engine.event(n, {}); engine.event(n, {3, 2, 0, 1, "after-selection"});
-    engine.modifyMask(n, Log, 1);
-    QTRY_COMPARE(live->findChild<QLabel*>("liveLogPath")->text(), "File: " + expected + suffix);
-    QFile output(expected + suffix); QVERIFY(output.open(QIODevice::ReadOnly));
-    QVERIFY(output.readAll().contains(alarm ? "after-selection" : "Modify Mask"));
-    if (ambiguous) {
-      QFile original(chosen); QVERIFY(original.open(QIODevice::ReadOnly));
-      QVERIFY(original.readAll().contains("preserved-existing-record"));
-    }
-    if (ambiguous && selection != "basename") QVERIFY(!QFileInfo::exists(chosen + suffix));
   }
   void filteredAlarmAcrossMidnight_data() {
     QTest::addColumn<bool>("xml");
@@ -1584,6 +1687,13 @@ private slots:
     suiteEnvironment.set("EPICS_PVAS_INTF_ADDR_LIST", "127.0.0.1");
     for (const auto& setting : isolatedEpicsSettings(port))
       suiteEnvironment.set(setting.first, setting.second);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    // Decode audio without the desktop's output route. A remote session can
+    // leave PULSE_SERVER naming a vanished socket, and GStreamer then fails
+    // before decoding. Set this variable explicitly to test a real sink.
+    if (qEnvironmentVariableIsEmpty("QT_GSTREAMER_PLAYBIN_AUDIOSINK"))
+      suiteEnvironment.set("QT_GSTREAMER_PLAYBIN_AUDIOSINK", "fakesink");
+#endif
     QVERIFY(suiteRepeater.start(EPICS_TEST_BIN, port + 1));
     QCoreApplication::setApplicationName("qtalh-ui-tests-" + QString::number(QCoreApplication::applicationPid()));
     initializeAppearance(qEnvironmentVariable("QTALH_TEST_STYLE"));
@@ -1712,6 +1822,8 @@ private slots:
     QTRY_COMPARE(table->model()->rowCount(),3);
     QCOMPARE(table->model()->index(0,1).data().toString(),QString("5"));
     QCOMPARE(dialog->findChild<QComboBox*>("analyticsRange")->currentIndex(),1);
+    // Unsuppressed activity is the default, so masked and shelved channels do not lead.
+    QCOMPARE(dialog->findChild<QComboBox*>("analyticsSuppression")->currentIndex(),1);
     // Every title must fit when its column becomes the sort column.
     for (int t = 0; t < 4; ++t) {
       tabs->setCurrentIndex(t); QCoreApplication::processEvents();
@@ -1873,6 +1985,20 @@ private slots:
     auto notificationIndicator = w->findChild<QLabel*>("notificationsEnabledStatus");
     QVERIFY(notificationIndicator); QVERIFY(!notificationIndicator->isHidden());
     QCOMPARE(notificationIndicator->text(), QString("Notifications Enabled: NO"));
+    auto footer = w->findChild<QWidget*>("statusFooter"); QVERIFY(footer);
+    QTRY_VERIFY(footer->rect().contains(QRect(notificationIndicator->mapTo(footer, QPoint()),
+                                            notificationIndicator->size())));
+    QWidget* compact = nullptr;
+    for (auto widget : QApplication::topLevelWidgets())
+      if (widget->objectName() == "runtimeWindow") compact = widget;
+    QVERIFY(compact);
+    auto compactIndicator = compact->findChild<QLabel*>("runtimeNotificationsEnabledStatus");
+    QVERIFY(compactIndicator); QVERIFY(!compactIndicator->isHidden());
+    QCOMPARE(compactIndicator->text(), QString("Notifications: OFF"));
+    // Every appearance, including classic's fixed-size window, grows to show it.
+    compact->show();
+    QTRY_VERIFY(compact->rect().contains(QRect(compactIndicator->mapTo(compact, QPoint()),
+                                               compactIndicator->sizeHint())));
     auto rules = dialog->findChild<QListWidget*>("notificationSubscriptions");
     auto destinations = dialog->findChild<QListWidget*>("notificationDestinations");
     QCOMPARE(rules->count(), 1); QCOMPARE(destinations->count(), 1);
@@ -1897,8 +2023,16 @@ private slots:
     QCOMPARE(store.load().subscriptions.first().name, QString("Updated subscription"));
     enable->setChecked(true);
     QTRY_COMPARE(notificationIndicator->text(), QString("Notifications Enabled: YES"));
+    QTRY_COMPARE(compactIndicator->text(), QString("Notifications: ON"));
+    compact->show();
+    w->close();
+    QVERIFY(w->isHidden());
+    QVERIFY(compactIndicator->isVisible());
+    QCOMPARE(compactIndicator->text(), QString("Notifications: ON"));
+    w->show(); dialog->show();
     enable->setChecked(false);
     QTRY_COMPARE(notificationIndicator->text(), QString("Notifications Enabled: NO"));
+    QTRY_COMPARE(compactIndicator->text(), QString("Notifications: OFF"));
     enable->setChecked(true);
     QTest::qWait(550);
     QVERIFY(dialog->findChild<QLabel*>("notificationStatus")->text().contains("enabled"));
@@ -1915,6 +2049,80 @@ private slots:
     store.save(NotificationSettings{});
     dialog->findChild<QPushButton*>("reloadNotifications")->click();
     QTRY_VERIFY(notificationIndicator->isHidden());
+    QTRY_VERIFY(compactIndicator->isHidden());
+  }
+  void notificationsOptionStartsEnabled() {
+    QTemporaryDir dir;
+    NotificationSettings settings;
+    NotificationDestination destination;
+    destination.id = "ops"; destination.name = "Operators";
+    destination.kind = "webhook"; destination.url = "http://127.0.0.1:1/test";
+    settings.destinations << destination;
+    NotificationSubscription subscription;
+    subscription.id = "rule"; subscription.name = "Startup";
+    subscription.configuration = notificationConfiguration(dir.filePath("alarms.alh"));
+    subscription.stages = {{"initial", 60, {"ops"}}};
+    settings.subscriptions << subscription;
+    NotificationStore store; store.load(); store.save(settings);
+    auto restore = qScopeGuard([&] { store.save(NotificationSettings{}); });
+    for (bool option : {false, true}) {
+      auto document = sample(); document.filename = dir.filePath("alarms.alh");
+      auto o = options(false); o.notifications = option;
+      auto w = std::make_unique<Window>(std::move(document), o, false);
+      auto status = w->findChild<QLabel*>("notificationsEnabledStatus"); QVERIFY(status);
+      QTRY_VERIFY(!status->isHidden());
+      QCOMPARE(status->text(), QString("Notifications Enabled: %1").arg(option ? "YES" : "NO"));
+    }
+  }
+  void configurationNotificationsAreReadOnly() {
+    QTemporaryDir dir;
+    const QString text = "GROUP NULL root\n$NOTIFY_WEBHOOK hook http://127.0.0.1:1/x\n"
+                         "GROUP root section\n$NOTIFY MAJOR hook\nCHANNEL section pv\n";
+    auto document = parseConfig(text); document.filename = dir.filePath("alarms.alh");
+    NotificationStore store; store.load(); store.save(NotificationSettings{});
+    auto restore = qScopeGuard([&] { NotificationStore reset; reset.load(); reset.save(NotificationSettings{}); });
+    auto w = std::make_unique<Window>(std::move(document), options(false), false);
+    w->show();
+    // A subscription from the file alone shows the runtime's notification state.
+    auto status = w->findChild<QLabel*>("notificationsEnabledStatus"); QVERIFY(status);
+    QTRY_VERIFY(!status->isHidden());
+    QCOMPARE(status->text(), QString("Notifications Enabled: NO"));
+    for (auto action : w->findChildren<QAction*>())
+      if (action->text() == "Notifications...") action->trigger();
+    auto dialog = w->findChild<QDialog*>("notificationsDialog"); QVERIFY(dialog);
+    auto rules = dialog->findChild<QListWidget*>("notificationSubscriptions");
+    auto destinations = dialog->findChild<QListWidget*>("notificationDestinations");
+    QCOMPARE(rules->count(), 1);
+    QCOMPARE(rules->item(0)->text(), QString("section — 1 stages [configuration file]"));
+    QCOMPARE(destinations->count(), 1);
+    QCOMPARE(destinations->item(0)->text(), QString("hook (webhook) [configuration file]"));
+    rules->setCurrentRow(0); destinations->setCurrentRow(0);
+    for (auto name : {"editNotificationSubscription", "removeNotificationSubscription",
+                      "editNotificationDestination", "removeNotificationDestination"}) {
+      auto button = dialog->findChild<QPushButton*>(name); QVERIFY2(button, name);
+      QVERIFY2(!button->isEnabled(), name);
+      button->click(); // Refused even if invoked.
+    }
+    QCOMPARE(rules->count(), 1); QCOMPARE(destinations->count(), 1);
+    // Saving writes personal settings only.
+    dialog->findChild<QPushButton*>("saveNotifications")->click();
+    QFile saved(NotificationStore().path()); QVERIFY(saved.open(QIODevice::ReadOnly));
+    QVERIFY(!saved.readAll().contains("file:"));
+    QCOMPARE(rules->count(), 1);
+    // The editor's Properties form has no notification fields, but keeps the directives.
+    auto editor = std::make_unique<Window>(parseConfig(text), options(true), false);
+    auto tree = editor->findChild<QTreeView*>("alarmTree");
+    tree->expand(tree->model()->index(0, 0));
+    tree->setCurrentIndex(tree->model()->index(0, 2, tree->model()->index(0, 0)));
+    for (auto action : editor->findChildren<QAction*>())
+      if (action->text() == "Properties Window") action->trigger();
+    auto properties = editor->findChild<QDialog*>("propertiesDialog"); QVERIFY(properties);
+    properties->findChild<QLineEdit*>("propertyALIAS")->setText("Section alias");
+    properties->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Apply)->click();
+    const auto written = writeConfig(editor->document());
+    QVERIFY(written.contains("$ALIAS Section alias"));
+    QVERIFY(written.contains("$NOTIFY MAJOR hook"));
+    QVERIFY(written.contains("$NOTIFY_WEBHOOK hook http://127.0.0.1:1/x"));
   }
   void notificationsUnavailableInEditor() {
     auto w = std::make_unique<Window>(sample(), options(true), false);
@@ -1967,6 +2175,34 @@ private slots:
              text.contains("\nActivations: 1\n"), qPrintable(text));
   }
 
+  void shelvingHiddenUnlessEnabled() {
+    // Without USE_SHELVING=1 neither the menus nor the context menu offer shelving.
+    const auto config = parseConfig("GROUP NULL root\nCHANNEL root one\n");
+    auto o = options(false);
+    o.shelving = false;
+    auto w = std::make_unique<Window>(config, o, false);
+    w->show();
+    auto texts = [](QWidget* window) {
+      QStringList result;
+      for (auto action : window->findChildren<QAction*>()) result << action->text();
+      return result;
+    };
+    const QStringList shelving{"Shelve Alarms...", "Unshelve Alarms", "Shelved Alarms..."};
+    for (const auto& name : shelving) QVERIFY2(!texts(w.get()).contains(name), qPrintable(name));
+    QVERIFY(texts(w.get()).contains("NoAck for One Hour..."));
+    auto contents = w->findChild<QTreeView*>("groupContents");
+    QCoreApplication::processEvents();
+    const auto point = contents->visualRect(contents->model()->index(0, 2)).center();
+    QContextMenuEvent context(QContextMenuEvent::Mouse, point, contents->viewport()->mapToGlobal(point));
+    QApplication::sendEvent(contents->viewport(), &context);
+    auto menu = contents->findChild<QMenu*>("alarmContextMenu"); QVERIFY(menu);
+    QVERIFY(!menu->findChild<QAction*>("shelveContextTarget"));
+    QCOMPARE(menu->actions().size(), 1);
+    menu->close();
+    // With it, they are offered.
+    auto enabled = std::make_unique<Window>(config, options(false), false);
+    for (const auto& name : shelving) QVERIFY2(texts(enabled.get()).contains(name), qPrintable(name));
+  }
   void shelvingContextMenu() {
     auto w = std::make_unique<Window>(parseConfig(
         "GROUP NULL root\nCHANNEL root one\nCHANNEL root two\n"
@@ -2103,6 +2339,43 @@ private slots:
     QVERIFY(shelfList);
     auto table = shelfList->findChild<QTableWidget*>("shelvedAlarmsTable");
     QCOMPARE(table->rowCount(), w->document().channels().size());
+  }
+  void shelvingUntilDateTime() {
+    auto w = std::make_unique<Window>(sample(), options(false), false);
+    auto& engine = w->alarmEngine();
+    const qint64 now = QDateTime(QDate(2026, 10, 23), QTime(14, 37, 25)).toMSecsSinceEpoch();
+    engine.now = engine.monotonicNow = [=] { return now; };
+    for (auto action : w->findChildren<QAction*>())
+      if (action->text() == "Shelve Alarms...") action->trigger();
+    auto dialog = w->findChild<QDialog*>("shelveDialog"); QVERIFY(dialog);
+    auto duration = dialog->findChild<QComboBox*>("shelfDuration");
+    auto custom = dialog->findChild<QSpinBox*>("shelfCustomMinutes");
+    auto until = dialog->findChild<QDateTimeEdit*>("shelfUntil"); QVERIFY(until);
+    QVERIFY(!until->isEnabled());
+    duration->setCurrentText("Until date and time");
+    QVERIFY(until->isEnabled()); QVERIFY(!custom->isEnabled());
+    if (!legacyAppearance()) { QVERIFY(!until->isHidden()); QVERIFY(custom->isHidden()); }
+    QCOMPARE(until->maximumDateTime(), QDateTime::fromMSecsSinceEpoch(now).addDays(365));
+    QVERIFY(until->dateTime() > QDateTime::fromMSecsSinceEpoch(now));
+    // The end of a run: the deadline is exact rather than a rounded duration.
+    const QDateTime deadline(QDate(2026, 10, 27), QTime(8, 0));
+    until->setDateTime(deadline);
+    dialog->findChild<QLineEdit*>("shelfUsername")->setText("ui_tester");
+    dialog->findChild<QLineEdit*>("shelfReason")->setText("Until the end of the run");
+    dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Ok)->click();
+    const auto channels = w->document().channels();
+    for (auto n : channels) QCOMPARE(engine.state(n).shelf.until, deadline.toMSecsSinceEpoch());
+    // The engine keeps the 1-minute to 365-day bounds for deadlines too.
+    auto rejected = [&](qint64 until) {
+      try { engine.shelveUntil(channels[0], until, "bounds", "tester", true); }
+      catch (const ParseError&) { return true; }
+      return false;
+    };
+    QVERIFY(rejected(now + 30000));
+    QVERIFY(rejected(now - 60000));
+    QVERIFY(rejected(now + 366LL * 86400000));
+    QCOMPARE(engine.shelveUntil(channels[0], now + 365LL * 86400000, "maximum", "tester", true), 1);
+    QCOMPARE(engine.state(channels[0]).shelf.until, now + 365LL * 86400000);
   }
   void shelvingHelpMatchesDialog() {
     // The embedded Timed shelving topic must state the limits and fields the dialog enforces.
@@ -3012,12 +3285,30 @@ private slots:
   }
   void rejectAmbiguousGroupInsertion() {
     auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\n"), options(true), false);
+    auto tree = w->findChild<QTreeView*>("alarmTree");
+    auto contents = w->findChild<QTreeView*>("groupContents");
+    // Select the root in the tree, or one of the groups among its contents.
+    auto showRoot = [&] { tree->setCurrentIndex(tree->model()->index(0, 2)); };
+    auto pick = [&](const QString& name) {
+      auto model = static_cast<AlarmModel*>(contents->model());
+      for (int row = 0; row < model->rowCount(); ++row)
+        if (model->node(model->index(row, 2))->name == name) {
+          contents->setCurrentIndex(model->index(row, 2));
+          return true;
+        }
+      return false;
+    };
     w->addNode(true, "first");
+    showRoot();
+    QVERIFY(pick("first"));
     // As in ALH a group may repeat an ancestor's name; written last, it reloads in place.
     w->addNode(true, "root");
     QCOMPARE(w->document().root->children.size(), size_t(2));
+    QCOMPARE(w->document().root->children[1]->name, QString("root"));
     const auto original = writeConfig(w->document());
     // A later sibling would be written after the inner root and reload under it.
+    showRoot();
+    QVERIFY(pick("root"));
     QVERIFY_THROWS_EXCEPTION(ParseError, w->addNode(true, "second"));
     QCOMPARE(writeConfig(w->document()), original);
     for (const auto& child : w->document().root->children)
@@ -3027,8 +3318,65 @@ private slots:
     w->redoEdit();
     QCOMPARE(w->document().root->children.size(), size_t(2));
     // The root's channels are written before its groups, so this is unambiguous.
+    showRoot();
+    QVERIFY(pick("root"));
     w->addNode(false, "pv");
     QCOMPARE(w->document().root->children.size(), size_t(3));
+  }
+  void editorInsertsAfterSelection() {
+    auto w = std::make_unique<Window>(
+        parseConfig("GROUP NULL root\nCHANNEL root a\nCHANNEL root z\nGROUP root g\nCHANNEL g g1\n"),
+        options(true), false);
+    auto tree = w->findChild<QTreeView*>("alarmTree");
+    auto contents = w->findChild<QTreeView*>("groupContents");
+    auto model = [&] { return static_cast<AlarmModel*>(contents->model()); };
+    auto pick = [&](const QString& name) {
+      for (int row = 0; row < model()->rowCount(); ++row)
+        if (model()->node(model()->index(row, 2))->name == name) {
+          contents->setCurrentIndex(model()->index(row, 2));
+          return true;
+        }
+      return false;
+    };
+    auto names = [](const Node* n) {
+      QStringList result;
+      for (const auto& child : n->children) result << child->name;
+      return result.join(' ');
+    };
+    auto picked = [&] {
+      auto n = model()->node(contents->currentIndex());
+      return n ? n->name : QString();
+    };
+    // After a selected channel; the new channel is then selected, so the
+    // next one follows it.
+    tree->setCurrentIndex(tree->model()->index(0, 2));
+    QVERIFY(pick("a"));
+    w->addNode(false, "b");
+    QCOMPARE(picked(), QString("b"));
+    w->addNode(false, "c");
+    QCOMPARE(names(w->document().root.get()), QString("a b c z g"));
+    QCOMPARE(picked(), QString("c"));
+    // First in a group selected in the tree.
+    tree->setCurrentIndex(tree->model()->index(0, 2, tree->model()->index(0, 0)));
+    w->addNode(false, "g0");
+    auto g = w->document().root->children.back().get();
+    QCOMPARE(names(g), QString("g0 g1"));
+    // A new group becomes the group shown, so channels go into it.
+    w->addNode(true, "sub");
+    g = w->document().root->children.back().get();
+    QCOMPARE(names(g), QString("g0 sub g1"));
+    QCOMPARE(static_cast<AlarmModel*>(tree->model())->node(tree->currentIndex())->name, QString("sub"));
+    w->addNode(false, "s1");
+    w->addNode(false, "s2");
+    g = w->document().root->children.back().get();
+    QCOMPARE(names(g->children[1].get()), QString("s1 s2"));
+    // The text keeps that order.
+    QVERIFY(writeConfig(w->document(), ConfigText::Source)
+                .contains("CHANNEL g g0 -----\nGROUP g sub\nCHANNEL sub s1 -----\nCHANNEL sub s2 -----\n"
+                          "CHANNEL g g1\n"));
+    w->undoEdit();
+    g = w->document().root->children.back().get();
+    QCOMPARE(names(g->children[1].get()), QString("s1"));
   }
   void boundedEditorUndo() {
     auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\n"), options(true), false);
@@ -3103,8 +3451,112 @@ private slots:
       w->saveTo(path);
       QFile saved(path);
       QVERIFY(saved.open(QIODevice::ReadOnly));
-      QCOMPARE(saved.readAll(), editor ? latin1 + "CHANNEL root added -----\n" : latin1);
+      // The editor inserts a channel first in the selected group.
+      QCOMPARE(saved.readAll(), editor ? QByteArray(latin1).replace("GROUP NULL root\n",
+                                                                    "GROUP NULL root\nCHANNEL root added -----\n")
+                                       : latin1);
     }
+  }
+  void editorSaveKeepsCommentsAndIncludeFiles() {
+    QTemporaryDir dir;
+    auto write = [&](const QString& name, const QByteArray& text) {
+      QFile file(dir.filePath(name));
+      return file.open(QIODevice::WriteOnly) && file.write(text) == text.size();
+    };
+    auto read = [](const QString& path) {
+      QFile file(path);
+      return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    };
+    const QByteArray main = "# main\nGROUP NULL root\n$COMMAND   show root   # display\n"
+                            "INCLUDE root part.alhConfig   # parts\n"
+                            "INCLUDE root other.alhConfig\n\nCHANNEL root top   # top\n";
+    const QByteArray part = "# part\nGROUP NULL part\nCHANNEL part a\n";
+    const QByteArray other = "# other\nGROUP NULL other\nCHANNEL other b\n";
+    QVERIFY(write("main.alhConfig", main));
+    QVERIFY(write("part.alhConfig", part));
+    QVERIFY(write("other.alhConfig", other));
+    const auto path = dir.filePath("main.alhConfig");
+    auto w = std::make_unique<Window>(loadConfig(path), options(true), false);
+    // Properties keeps the comments and text of the directives it leaves unchanged.
+    auto tree = w->findChild<QTreeView*>("alarmTree");
+    tree->setCurrentIndex(tree->model()->index(0, 2));
+    for (auto action : w->findChildren<QAction*>())
+      if (action->text() == "Properties Window") action->trigger();
+    auto properties = w->findChild<QDialog*>("propertiesDialog"); QVERIFY(properties);
+    properties->findChild<QLineEdit*>("propertyALIAS")->setText("Facility");
+    properties->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Apply)->click();
+    properties->close();
+    // An edit in the top-level file saves only that file.
+    w->addNode(false, "added");
+    w->saveTo(path);
+    // The new channel is the root's first entry, after the INCLUDE line that
+    // follows the root's directives.
+    QByteArray expected = main;
+    expected.replace("$COMMAND   show root   # display\n", "$COMMAND   show root   # display\n$ALIAS Facility\n");
+    expected.replace("INCLUDE root part.alhConfig   # parts\n",
+                     "INCLUDE root part.alhConfig   # parts\nCHANNEL root added -----\n");
+    QCOMPARE(read(path), expected);
+    QCOMPARE(read(dir.filePath("part.alhConfig")), part);
+    QCOMPARE(read(dir.filePath("other.alhConfig")), other);
+    // An edit inside an INCLUDE file asks before saving that file too.
+    tree->expand(tree->model()->index(0, 0));
+    tree->setCurrentIndex(tree->model()->index(0, 2, tree->model()->index(0, 0)));
+    w->addNode(false, "c");
+    const QByteArray partWithC = QByteArray(part).replace("GROUP NULL part\n", "GROUP NULL part\nCHANNEL part c -----\n");
+    QString asked;
+    auto answer = [&](QMessageBox::StandardButton button) {
+      asked.clear();
+      QTimer::singleShot(0, w.get(), [&, button] {
+        auto box = qobject_cast<QMessageBox*>(qApp->activeModalWidget());
+        if (!box) return;
+        asked = box->objectName() + '\n' + box->text();
+        if (box->defaultButton() != box->button(QMessageBox::Cancel)) asked += "\nnot Cancel by default";
+        box->button(button)->click();
+      });
+    };
+    answer(QMessageBox::Cancel);
+    w->saveTo(path);
+    QVERIFY(asked.startsWith("includeSaveConfirmation\n"));
+    QVERIFY(asked.contains(dir.filePath("part.alhConfig")));
+    QVERIFY(!asked.contains("other.alhConfig"));
+    QVERIFY(!asked.contains("not Cancel"));
+    QCOMPARE(read(dir.filePath("part.alhConfig")), part); // Cancel writes nothing.
+    answer(QMessageBox::Save);
+    w->saveTo(path);
+    QVERIFY(!asked.isEmpty());
+    QCOMPARE(read(dir.filePath("part.alhConfig")), partWithC);
+    QCOMPARE(read(dir.filePath("other.alhConfig")), other);
+    QCOMPARE(read(path), expected);
+    // Saved INCLUDE files are not asked about again.
+    answer(QMessageBox::Cancel);
+    w->saveTo(path);
+    QTest::qWait(0);
+    QVERIFY(asked.isEmpty());
+    // Save As beside the original keeps the INCLUDE lines.
+    const auto beside = dir.filePath("copy.alhConfig");
+    w->saveTo(beside);
+    QCOMPARE(read(beside), expected);
+    QCOMPARE(w->document().filename, beside);
+    // Elsewhere, the relative INCLUDE lines would name other files: the copy contains them.
+    QTemporaryDir elsewhere;
+    const auto copy = elsewhere.filePath("copy.alhConfig");
+    w->saveTo(copy);
+    QCOMPARE(read(copy), QByteArray("# main\nGROUP NULL root\n$COMMAND   show root   # display\n"
+                                    "$ALIAS Facility\n# part\nGROUP NULL part\nCHANNEL part c -----\n"
+                                    "CHANNEL part a\nCHANNEL root added -----\n# other\nGROUP NULL other\n"
+                                    "CHANNEL other b\n\nCHANNEL root top   # top\n"));
+    QCOMPARE(w->document().filename, copy);
+    QVERIFY(w->findChild<QLabel*>("messageArea")->text().contains("as one file"));
+    QCOMPARE(read(dir.filePath("part.alhConfig")), partWithC);
+    // The document is now that one file.
+    w->addNode(false, "more");
+    answer(QMessageBox::Cancel);
+    w->saveTo(copy);
+    QTest::qWait(0);
+    QVERIFY(asked.isEmpty());
+    QVERIFY(read(copy).contains(" more -----\n"));
+    QVERIFY(!read(copy).contains("INCLUDE"));
+    QCOMPARE(read(dir.filePath("part.alhConfig")), partWithC);
   }
   void editorBeepSeverityUndoAndSave() {
     auto w = std::make_unique<Window>(sample(), options(true), false);
@@ -4555,7 +5007,7 @@ private slots:
       if (action->text() == "Current Alarm History") action->trigger();
     auto history = w->findChild<QDialog*>("historyDialog");
     QVERIFY(history);
-    // Classic history is a text view; the modern history is a table.
+    // Both appearances share a table whose headings track the cell columns.
     QAbstractScrollArea* reader = history->findChild<QPlainTextEdit*>();
     if (!reader) reader = history->findChild<QTableWidget*>("historyTable");
     QVERIFY(reader);
@@ -4618,6 +5070,153 @@ private slots:
     auto largest = QApplication::font();
     QTest::keyClick(view, Qt::Key_Plus, Qt::ControlModifier);
     QCOMPARE(QApplication::font(), largest);
+  }
+  void shelvedNameBackgroundsAndRestoration() {
+    struct RestorePalette {
+      QPalette palette = QApplication::palette();
+      ~RestorePalette() { QApplication::setPalette(palette); }
+    } restore;
+    auto d = parseConfig("GROUP NULL root\nGROUP root section\n"
+                         "CHANNEL section shelved_pv\nCHANNEL section active_pv\n");
+    Engine engine(d); qint64 time = 1000;
+    engine.now = engine.monotonicNow = [&] { return time; };
+    const auto channels = d.channels();
+    for (auto channel : channels) engine.event(channel, {3, 2, 2, 1, "1"});
+    engine.setMask(channels[0], Mask::parse("D"));
+    AlarmModel tree(&d, &engine, true), group(&d, &engine, false);
+    group.setGroup(channels[0]->parent); tree.coloredMasks = group.coloredMasks = true;
+    engine.changed = [&] { tree.refresh(); group.refresh(); };
+    AlarmView treeView(true), groupView(false);
+    treeView.setModel(&tree); groupView.setModel(&group);
+    treeView.resize(600, 180); groupView.resize(600, 180);
+    treeView.expandAll(); treeView.show(); groupView.show();
+    const auto root = tree.index(0, 2), section = tree.index(0, 2, root.sibling(0, 0));
+    const auto first = group.index(0, 2), second = group.index(1, 2);
+    const auto rootDefault = root.data(Qt::BackgroundRole).value<QColor>();
+    const auto sectionDefault = section.data(Qt::BackgroundRole).value<QColor>();
+    const auto channelDefault = first.data(Qt::BackgroundRole).value<QColor>();
+    QCOMPARE(engine.shelve(channels[0], 1, "Background verification", "tester"), 1);
+    const auto shelf = first.data(Qt::BackgroundRole).value<QColor>();
+    QVERIFY(shelf.isValid()); QVERIFY(shelf != channelDefault); QVERIFY(shelf != rootDefault);
+    QCOMPARE(root.data(Qt::BackgroundRole).value<QColor>(), shelf);
+    QCOMPARE(section.data(Qt::BackgroundRole).value<QColor>(), shelf);
+    QVERIFY(first.data().toString().contains("[Shelved]"));
+    QVERIFY(root.data().toString().contains("1 shelved"));
+    QVERIFY(section.data().toString().contains("1 shelved"));
+    QCOMPARE(second.data(Qt::BackgroundRole).value<QColor>(), channelDefault);
+    QCOMPARE(second.sibling(1, 0).data(Qt::BackgroundRole).value<QColor>(), severityColor(2));
+    QCOMPARE(second.sibling(1, 1).data(Qt::BackgroundRole).value<QColor>(), severityColor(2));
+    QCOMPARE(first.sibling(0, 6).data(Qt::BackgroundRole).value<QColor>(), QColor("blue"));
+    for (bool darkPalette : {false, true}) {
+      auto palette = restore.palette;
+      if (darkPalette) {
+        palette.setColor(QPalette::Base, QColor("#202020"));
+        palette.setColor(QPalette::Text, Qt::white);
+        palette.setColor(QPalette::Window, QColor("#303030"));
+        palette.setColor(QPalette::WindowText, Qt::white);
+      }
+      QApplication::setPalette(palette);
+      for (const auto& target : {qMakePair(&treeView, root), qMakePair(&treeView, section),
+                                 qMakePair(&groupView, first)})
+        for (bool selected : {false, true}) {
+          auto view = target.first;
+          view->setCurrentIndex(selected ? target.second : QModelIndex());
+          QCoreApplication::processEvents();
+          const auto image = view->viewport()->grab().toImage();
+          const auto rect = view->visualRect(target.second);
+          auto pixel = [&](QPoint point) { return image.pixelColor(point * image.devicePixelRatio()); };
+          QCOMPARE(pixel(QPoint(rect.left() + 3, rect.center().y())), shelf);
+          if (legacyAppearance())
+            QCOMPARE(pixel(rect.topLeft() + QPoint(5, 0)),
+                     QColor(selected ? "#5f696d" : "#dde6e9"));
+          else if (selected)
+            QCOMPARE(pixel(QPoint(1, rect.center().y())), view->palette().color(QPalette::Highlight));
+        }
+      QDir().mkpath(TEST_OUTPUT);
+      QVERIFY(groupView.grab().save(QString(TEST_OUTPUT) + "/" + artifactStyle() +
+                                   (darkPalette ? "-shelved-background-dark.png" : "-shelved-background.png")));
+    }
+    QCOMPARE(engine.shelve(channels[1], 2, "Parent count verification", "tester"), 1);
+    QVERIFY(root.data().toString().contains("2 shelved"));
+    engine.unshelve(channels[0]);
+    QCOMPARE(first.data(Qt::BackgroundRole).value<QColor>(), channelDefault);
+    QCOMPARE(root.data(Qt::BackgroundRole).value<QColor>(), shelf);
+    QVERIFY(section.data().toString().contains("1 shelved"));
+    time += 120000; engine.tick();
+    QCOMPARE(root.data(Qt::BackgroundRole).value<QColor>(), rootDefault);
+    QCOMPARE(section.data(Qt::BackgroundRole).value<QColor>(), sectionDefault);
+    QCOMPARE(second.data(Qt::BackgroundRole).value<QColor>(), channelDefault);
+    QVERIFY(!first.data().toString().contains("[Shelved]"));
+    QVERIFY(!root.data().toString().contains("shelved"));
+    for (const auto& target : {qMakePair(&treeView, root), qMakePair(&treeView, section),
+                               qMakePair(&groupView, first), qMakePair(&groupView, second)}) {
+      auto view = target.first; view->setCurrentIndex(QModelIndex());
+      QEvent leave(QEvent::Leave); QApplication::sendEvent(view->viewport(), &leave);
+      QCoreApplication::processEvents();
+      const auto image = view->viewport()->grab().toImage();
+      const auto rect = view->visualRect(target.second);
+      const auto background = target.second.data(Qt::BackgroundRole).value<QColor>();
+      QCOMPARE(image.pixelColor(QPoint(rect.left() + 3, rect.center().y()) * image.devicePixelRatio()),
+               background.isValid() ? background : view->palette().color(QPalette::Base));
+    }
+  }
+  void matchedCurrentAndLatchedIndicatorGeometry() {
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n");
+    Engine engine(d);
+    auto channel = d.channels()[0];
+    engine.event(channel, {3, 2, 2, 1, "1"});
+    AlarmModel model(&d, &engine, false);
+    AlarmView view(false); view.setModel(&model); view.resize(500, 120); view.show();
+    QCoreApplication::processEvents();
+    const auto latchedIndex = model.index(0, 0), currentIndex = model.index(0, 1);
+    const auto latched = view.visualRect(latchedIndex), current = view.visualRect(currentIndex);
+    QVERIFY(!latched.isEmpty());
+    QCOMPARE(current.size(), latched.size());
+    QCOMPARE(current.top(), latched.top());
+    QCOMPARE(currentIndex.data(Qt::DisplayRole), latchedIndex.data(Qt::DisplayRole));
+    const auto major = severityColor(2);
+    for (bool selected : {false, true})
+      for (bool silenced : {false, true}) {
+        view.setCurrentIndex(selected ? model.index(0, 2) : QModelIndex());
+        view.setSilenced(silenced);
+        QCoreApplication::processEvents();
+        // QTreeView may scroll its hidden header sections to the selection;
+        // keep the custom-painted chips and name inside this capture.
+        view.horizontalScrollBar()->setValue(0);
+        const auto image = view.viewport()->grab().toImage();
+        auto pixel = [&](QPoint point) { return image.pixelColor(point * image.devicePixelRatio()); };
+        if (legacyAppearance()) {
+          // Current severity fills the same visible height as the latched
+          // bevel, including the two pixels previously missing at each edge.
+          for (const auto point : {current.topLeft(), current.topRight(),
+                                   current.bottomLeft(), current.bottomRight()})
+            QCOMPARE(pixel(point), major);
+          const auto pane = view.palette().color(QPalette::Base);
+          QCOMPARE(pixel(current.topLeft() - QPoint(0, 1)), pane);
+          QCOMPARE(pixel(current.bottomLeft() + QPoint(0, 1)), pane);
+          QCOMPARE(pixel(latched.topLeft() + QPoint(5, 0)), QColor("#dde6e9"));
+          QCOMPARE(pixel(latched.bottomLeft() + QPoint(5, 0)), QColor("#5f696d"));
+          QCOMPARE(pixel(latched.topLeft() + QPoint(2, 2)), major);
+          const auto name = view.visualRect(model.index(0, 2));
+          QVERIFY(view.viewport()->rect().contains(name.topLeft() + QPoint(5, 0)));
+          QCOMPARE(pixel(name.topLeft() + QPoint(5, 0)),
+                   QColor(selected ? "#5f696d" : "#dde6e9"));
+        } else {
+          // Both styled chips use the same shape, color and label; selection
+          // and the silenced pane must leave their pixels identical.
+          for (int y = 0; y < current.height(); ++y)
+            for (int x = 0; x < current.width(); ++x)
+              QCOMPARE(pixel(current.topLeft() + QPoint(x, y)),
+                       pixel(latched.topLeft() + QPoint(x, y)));
+        }
+      }
+    // A recovered current alarm retains the major latch independently.
+    engine.event(channel, {}); model.refresh();
+    QCOMPARE(latchedIndex.data(Qt::BackgroundRole).value<QColor>(), major);
+    QCOMPARE(currentIndex.data(Qt::BackgroundRole).value<QColor>(), severityColor(0));
+    QCOMPARE(view.visualRect(currentIndex).size(), view.visualRect(latchedIndex).size());
+    QDir().mkpath(TEST_OUTPUT);
+    QVERIFY(view.grab().save(QString(TEST_OUTPUT) + "/" + artifactStyle() + "-matched-alarm-indicators.png"));
   }
   void styledRowGeometryAndPalette() {
     if (legacyAppearance()) QSKIP("Styled presentation contract; run without QTALH_TEST_STYLE=motif");
@@ -5771,6 +6370,403 @@ private slots:
     QCOMPARE(w->alarmEngine().state(w->document().root.get()).counts[2], 10000);
     qInfo() << "10000-row window and alarm burst (ms):" << timer.elapsed();
     QVERIFY(timer.elapsed() < 10000);
+  }
+  void expandedHistoryKeepsNewestAndAlignedColumns() {
+    const QString pv = "history:" + QString(180, 'x');
+    auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root " + pv + '\n'),
+                                      options(false), false);
+    w->show();
+    auto& engine = w->alarmEngine();
+    auto channel = w->document().channels()[0];
+    qint64 time = 1000;
+    engine.now = engine.monotonicNow = [&] { return time; };
+    engine.event(channel, {0, 0, 0, 1, "initial"});
+    for (int i = 0; i < 125; ++i) {
+      time += 1000;
+      engine.event(channel, {3, i % 2 + 1, i % 2 + 1, 1, QString::number(i)});
+    }
+    QCOMPARE(engine.history.size(), 100);
+    QVERIFY(engine.history.front().endsWith(" 124"));
+    QVERIFY(engine.history.back().endsWith(" 25"));
+    w->findChild<QAction*>("Current Alarm History")->trigger();
+    auto dialog = w->findChild<QDialog*>("historyDialog"); QVERIFY(dialog);
+    auto table = dialog->findChild<QTableWidget*>("historyTable"); QVERIFY(table);
+    QTRY_COMPARE(table->rowCount(), 100);
+    QCOMPARE(table->item(0, 1)->text(), pv);
+    QCOMPARE(table->item(0, 4)->text(), QString("124"));
+    QCOMPARE(table->item(99, 4)->text(), QString("25"));
+    QVERIFY(!dialog->findChild<QLineEdit*>("findText"));
+    QTRY_VERIFY(table->verticalScrollBar()->maximum() > 0);
+    QTRY_VERIFY(table->horizontalScrollBar()->maximum() > 0);
+    table->scrollToItem(table->item(99, 4));
+    QTRY_VERIFY(table->visualRect(table->model()->index(99, 4)).intersects(table->viewport()->rect()));
+    for (int position : {0, table->horizontalScrollBar()->maximum()}) {
+      table->horizontalScrollBar()->setValue(position);
+      for (int column = 0; column < table->columnCount(); ++column)
+        QCOMPARE(table->horizontalHeader()->sectionViewportPosition(column),
+                 table->visualRect(table->model()->index(99, column)).left());
+    }
+  }
+#ifndef Q_OS_WIN
+  void openFileHeadroom() {
+    OpenFileMonitor monitor;
+    QVERIFY(monitor.check({100, 1000}).isEmpty());
+    QVERIFY(monitor.check({800, 1000}).contains("800 of 1000 descriptors"));
+    QVERIFY(monitor.check({900, 1000}).isEmpty()); // Once per crossing.
+    QVERIFY(monitor.check({750, 1000}).isEmpty()); // Not yet re-armed.
+    QVERIFY(monitor.check({650, 1000}).isEmpty());
+    QVERIFY(!monitor.check({820, 1000}).isEmpty());
+    QVERIFY(OpenFileMonitor().check({-1, 1000}).isEmpty());
+    const auto before = openFiles();
+    QVERIFY(before.open > 0); QVERIFY(before.limit > 0);
+    {
+      QTemporaryFile files[4];
+      for (auto& file : files) QVERIFY(file.open());
+      QCOMPARE(openFiles().open, before.open + 4);
+    }
+    struct rlimit original{};
+    QCOMPARE(getrlimit(RLIMIT_NOFILE, &original), 0);
+    auto restore = qScopeGuard([&] { setrlimit(RLIMIT_NOFILE, &original); });
+    QTemporaryDir dir;
+    auto o = options(false); o.noLog = false;
+    o.alarmFile = dir.filePath("alarm"); o.opmodFile = dir.filePath("opmod");
+    auto w = std::make_unique<Window>(sample(), o, false);
+    // Near the limit, a runtime warns in its message area and operation log.
+    const auto used = openFiles().open;
+    struct rlimit tight = original;
+    tight.rlim_cur = rlim_t(used + used / 4);
+    QCOMPARE(setrlimit(RLIMIT_NOFILE, &tight), 0);
+    auto timer = w->findChild<QTimer*>("runtimeStatusTimer"); QVERIFY(timer);
+    for (int i = 0; i < 10; ++i)
+      QVERIFY(QMetaObject::invokeMethod(timer, "timeout", Qt::DirectConnection));
+    QCOMPARE(setrlimit(RLIMIT_NOFILE, &original), 0);
+    QVERIFY(w->findChild<QLabel*>("messageArea")->text().contains("Open files are near"));
+    QFile operations(dir.filePath("opmod"));
+    QVERIFY(operations.open(QIODevice::ReadOnly));
+    QCOMPARE(operations.readAll().count("Open files are near"), 1);
+    // Starting from a 1024-file soft limit, startup raises it to the hard limit,
+    // and children, including the mailer's ChildProcess and shell commands, get 1024.
+    if (original.rlim_max <= 1024) QSKIP("The hard open-file limit is too low to raise");
+    struct rlimit desktop = original;
+    desktop.rlim_cur = 1024;
+    QCOMPARE(setrlimit(RLIMIT_NOFILE, &desktop), 0);
+    QVERIFY(raiseOpenFileLimit());
+    struct rlimit now{};
+    QCOMPARE(getrlimit(RLIMIT_NOFILE, &now), 0);
+    QCOMPARE(now.rlim_cur, now.rlim_max);
+    QCOMPARE(inheritedOpenFileLimit(), qint64(1024));
+    QCOMPARE(inheritedLimitShellPrefix(), QString("ulimit -S -n 1024 2>/dev/null; "));
+    ChildProcess child;
+    child.start("/bin/sh", {"-c", "ulimit -S -n"});
+    QVERIFY(child.waitForFinished(5000));
+    QCOMPARE(child.readAllStandardOutput().trimmed(), QByteArray("1024"));
+    w->alarmEngine().command("ulimit -S -n > '" + dir.filePath("limit") + "'");
+    QFile limit(dir.filePath("limit"));
+    QTRY_VERIFY(limit.exists() && limit.size() > 0);
+    QVERIFY(limit.open(QIODevice::ReadOnly));
+    QCOMPARE(limit.readAll().trimmed(), QByteArray("1024"));
+  }
+#endif
+  void modifiedMarkerFollowsRuntimeChanges() {
+    auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\n$FORCEPV gate -D--- 1 NE\n"
+                                                  "GROUP root section\nCHANNEL section pv\n"),
+                                      options(false), false);
+    w->show();
+    auto& engine = w->alarmEngine();
+    auto root = w->document().root.get();
+    auto section = root->children[0].get();
+    auto channel = w->document().channels()[0];
+    auto tree = w->findChild<QTreeView*>("alarmTree");
+    auto group = w->findChild<QTreeView*>("groupContents");
+    const auto rootIndex = tree->model()->index(0, 2);
+    tree->expand(tree->model()->index(0, 0));
+    const auto sectionIndex = tree->model()->index(0, 2, tree->model()->index(0, 0));
+    tree->setCurrentIndex(sectionIndex);
+    QTRY_COMPARE(group->model()->rowCount(), 1);
+    const auto pvIndex = group->model()->index(0, 2);
+    const QString mark = QStringLiteral(" ✎");
+    auto marked = [](const QModelIndex& i) { return i.data().toString().contains(QStringLiteral("✎")); };
+    auto tip = [](const QModelIndex& i) { return i.data(Qt::ToolTipRole).toString(); };
+    QVERIFY(!marked(rootIndex)); QVERIFY(!marked(sectionIndex)); QVERIFY(!marked(pvIndex));
+    QVERIFY(!tip(pvIndex).contains("Changed in this runtime"));
+    // A runtime mask differs from the configured one until it is restored.
+    engine.setMask(channel, Mask::parse("-D---"));
+    QTRY_COMPARE(pvIndex.data().toString(), "pv" + mark);
+    QVERIFY(tip(pvIndex).contains("Changed in this runtime:\nMask -D--- (configured -----)"));
+    engine.resetMask(channel);
+    QTRY_VERIFY(!marked(pvIndex));
+    // Node beep thresholds, the facility threshold and Force PV state count too.
+    engine.setBeep(section, 2);
+    QTRY_VERIFY(marked(sectionIndex));
+    QVERIFY(tip(sectionIndex).contains("Beep severity MAJOR (configured MINOR)"));
+    engine.setBeep(section, 1);
+    QTRY_VERIFY(!marked(sectionIndex));
+    auto trigger = [&](const QString& name) {
+      for (auto action : w->findChildren<QAction*>()) if (action->text() == name) { action->trigger(); return true; }
+      return false;
+    };
+    QVERIFY(trigger("MAJOR"));
+    QTRY_VERIFY(marked(rootIndex));
+    QVERIFY(tip(rootIndex).contains("ALH beep severity MAJOR (configured MINOR)"));
+    QVERIFY(trigger("MINOR"));
+    QTRY_VERIFY(!marked(rootIndex));
+    // Through the Force PV dialog: disabling, then edited settings, each
+    // until they match the file again. The name repaints though no alarm changed.
+    tree->setCurrentIndex(rootIndex);
+    QVERIFY(trigger("Force Process Variable..."));
+    auto force = w->findChild<QDialog*>("forcePvDialog"); QVERIFY(force);
+    auto apply = [&](const QString& value, bool disable) {
+      QTRY_VERIFY(force->findChild<QLineEdit*>("forceValue"));
+      force->findChild<QLineEdit*>("forceValue")->setText(value);
+      for (auto box : force->findChildren<QCheckBox*>())
+        if (box->text() == "ForcePV Disabled") box->setChecked(disable);
+      force->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Apply)->click();
+    };
+    QSignalSpy repaint(tree->model(), &QAbstractItemModel::dataChanged);
+    apply("1", true);
+    QVERIFY(engine.state(root).forceDisabled);
+    QTRY_VERIFY(!repaint.isEmpty());
+    QVERIFY(marked(rootIndex));
+    QVERIFY(tip(rootIndex).contains("Force PV disabled"));
+    QVERIFY(!tip(rootIndex).contains("Force PV settings edited"));
+    apply("1", false);
+    QTRY_VERIFY(!marked(rootIndex));
+    apply("2", false);
+    QTRY_VERIFY(marked(rootIndex));
+    QVERIFY(tip(rootIndex).contains("Force PV settings edited"));
+    apply("1", false);
+    QTRY_VERIFY(!marked(rootIndex));
+    // NoAck marks the timed group and each channel whose mask it changed;
+    // the marker precedes a shelf label.
+    engine.noAck(section, true);
+    QTRY_VERIFY(marked(sectionIndex)); QTRY_VERIFY(marked(pvIndex));
+    QVERIFY(tip(sectionIndex).contains("NoAck for one hour"));
+    engine.noAck(section, false);
+    QCOMPARE(engine.shelve(channel, 30, "marker order", "tester"), 1);
+    QTRY_COMPARE(pvIndex.data().toString(), "pv" + mark + " [Shelved]");
+    QVERIFY(tip(pvIndex).contains("Shelved"));
+    engine.unshelve(channel);
+    QTRY_COMPARE(pvIndex.data().toString(), QString("pv"));
+    // The editor shows its configuration, not runtime state, so it marks nothing.
+    auto editor = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root pv\n"), options(true), false);
+    auto editorGroup = editor->findChild<QTreeView*>("groupContents");
+    QCOMPARE(editorGroup->model()->index(0, 2).data().toString(), QString("pv"));
+  }
+  void offscreenAlarmBarCountsHiddenAlarms() {
+    QString text = "GROUP NULL root\n";
+    for (int i = 0; i < 60; ++i) text += QString("CHANNEL root pv%1\n").arg(i, 2, 10, QChar('0'));
+    for (int i = 0; i < 40; ++i) text += QString("GROUP root g%1\nCHANNEL g%1 c%1\n").arg(i, 2, 10, QChar('0'));
+    auto w = std::make_unique<Window>(parseConfig(text), options(false), false);
+    w->resize(900, 420); w->show();
+    QVERIFY(QTest::qWaitForWindowExposed(w.get()));
+    auto& engine = w->alarmEngine();
+    auto find = [&](const QString& name) {
+      for (auto n : w->document().nodes()) if (n->name == name) return n;
+      return static_cast<Node*>(nullptr);
+    };
+    auto tree = w->findChild<QTreeView*>("alarmTree");
+    auto group = w->findChild<QTreeView*>("groupContents");
+    auto bar = [](QTreeView* view) { return view->findChild<QWidget*>("offscreenAlarmBar"); };
+    auto above = [](QTreeView* view) { return view->findChild<QPushButton*>("offscreenAlarmsAbove"); };
+    auto below = [](QTreeView* view) { return view->findChild<QPushButton*>("offscreenAlarmsBelow"); };
+    QVERIFY(bar(group) && bar(tree));
+    // Unconnected channels report an error; start every channel without an alarm.
+    for (auto n : w->document().channels()) engine.event(n, {0, 0, 0, 1, "0"});
+    QTRY_VERIFY(group->verticalScrollBar()->maximum() > 0);
+    QTRY_VERIFY(bar(group)->isHidden()); QTRY_VERIFY(bar(tree)->isHidden());
+    auto rowOf = [&](QTreeView* view, Node* n) {
+      for (auto i = view->model()->index(0, 0, view->rootIndex()); i.isValid(); i = view->indexBelow(i))
+        if (static_cast<AlarmModel*>(view->model())->node(i) == n) return i;
+      return QModelIndex();
+    };
+    auto shown = [&](QTreeView* view, Node* n) {
+      const auto rect = view->QTreeView::visualRect(rowOf(view, n));
+      return rect.top() >= 0 && rect.bottom() < view->viewport()->height() - bar(view)->height();
+    };
+    // A MAJOR alarm below the visible rows.
+    auto low = find("pv55");
+    engine.event(low, {3, 2, 2, 1, "x"});
+    QTRY_VERIFY(bar(group)->isVisible());
+    QVERIFY(below(group)->isVisible()); QVERIFY(!above(group)->isVisible());
+    QCOMPARE(below(group)->text(), QStringLiteral("▼ 1 MAJOR"));
+    QCOMPARE(bar(group)->geometry().bottom(), group->viewport()->geometry().bottom());
+    QVERIFY(bar(group)->height() >= below(group)->sizeHint().height());
+    QTRY_VERIFY(below(group)->width() > 12);
+    const auto chip = below(group)->grab().toImage();
+    QCOMPARE(chip.pixelColor(QPoint(6, chip.height() / 2) * chip.devicePixelRatio()), severityColor(2));
+    QDir().mkpath(TEST_OUTPUT);
+    QVERIFY(w->grab().save(QString(TEST_OUTPUT) + "/" + artifactStyle() + "-offscreen-alarms.png"));
+    // The facility row showing the same alarm is visible, so the tree has no bar.
+    QVERIFY(bar(tree)->isHidden());
+    below(group)->click();
+    QTRY_VERIFY(bar(group)->isHidden());
+    QVERIFY(shown(group, low));
+    // After the alarm clears and is acknowledged, a MINOR alarm above.
+    engine.event(low, {}); engine.acknowledge(low);
+    auto high = find("pv00");
+    engine.event(high, {4, 1, 1, 1, "x"});
+    group->verticalScrollBar()->setValue(group->verticalScrollBar()->maximum());
+    QTRY_VERIFY(above(group)->isVisible());
+    QCOMPARE(above(group)->text(), QStringLiteral("▲ 1 MINOR"));
+    QVERIFY(!below(group)->isVisible());
+    above(group)->click();
+    QTRY_VERIFY(bar(group)->isHidden());
+    QVERIFY(shown(group, high));
+    // Shelved channels do not count.
+    group->verticalScrollBar()->setValue(group->verticalScrollBar()->maximum());
+    QTRY_VERIFY(bar(group)->isVisible());
+    QCOMPARE(engine.shelve(high, 30, "not counted", "tester"), 1);
+    QTRY_VERIFY(bar(group)->isHidden());
+    // The group tree counts group rows; a collapsed branch counts only its row.
+    engine.event(find("c39"), {3, 2, 2, 1, "x"});
+    QTRY_VERIFY(bar(tree)->isVisible());
+    QCOMPARE(below(tree)->text(), QStringLiteral("▼ 1 MAJOR"));
+    tree->collapse(tree->model()->index(0, 0));
+    QTRY_VERIFY(bar(tree)->isHidden());
+  }
+  void forceDialogShowsTwelveCalcInputs() {
+    QTemporaryDir dir;
+    const auto path = dir.filePath("calc.alhConfig");
+    QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("GROUP NULL root\nCHANNEL root pv\n$FORCEPV CALC D 1 0\n$FORCEPV_CALC A+G\n"
+               "$FORCEPV_CALC_A 1\n$FORCEPV_CALC_G 0\n");
+    file.close();
+    auto w = std::make_unique<Window>(loadConfig(path), options(false), false);
+    w->show();
+    // Loading reports the legacy-ALH difference in the message area.
+    QVERIFY(w->findChild<QLabel*>("messageArea")->text().contains("Line 6: $FORCEPV_CALC_G is a QtALH extension"));
+    auto group = w->findChild<QTreeView*>("groupContents");
+    group->setCurrentIndex(group->model()->index(0, 2));
+    for (auto action : w->findChildren<QAction*>())
+      if (action->text() == "Force Process Variable...") action->trigger();
+    auto dialog = w->findChild<QDialog*>("forcePvDialog"); QVERIFY(dialog);
+    // Every input is fully visible without scrolling.
+    QTRY_VERIFY(dialog->isVisible());
+    QCoreApplication::processEvents();
+    for (int i = 0; i < ForceCalcInputs; ++i) {
+      auto field = dialog->findChild<QLineEdit*>("forceInput" + QString(QChar('A' + i)));
+      QVERIFY2(field && field->isVisibleTo(dialog), qPrintable(QString(QChar('A' + i))));
+      QVERIFY2(field->visibleRegion().boundingRect() == field->rect(), qPrintable(QString(QChar('A' + i))));
+    }
+    QCOMPARE(dialog->findChild<QLineEdit*>("forceInputG")->text(), QString("0"));
+    dialog->findChild<QLineEdit*>("forceInputL")->setText("5");
+    dialog->findChild<QDialogButtonBox*>()->button(QDialogButtonBox::Apply)->click();
+    QCOMPARE(w->document().channels()[0]->option("FORCEPV_CALC_L"), QString("5"));
+    QDir().mkpath(TEST_OUTPUT);
+    QVERIFY(dialog->grab().save(QString(TEST_OUTPUT) + "/" + artifactStyle() + "-force-twelve-inputs.png"));
+  }
+  void historySortsByClickedHeading() {
+    auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root pv\n"), options(false), false);
+    w->show();
+    auto& engine = w->alarmEngine();
+    auto channel = w->document().channels()[0];
+    qint64 time = 1000;
+    engine.now = engine.monotonicNow = [&] { return time; };
+    // Text order would put "10" before "9" and the severity names alphabetically.
+    const QVector<Event> events = {{3, 2, 2, 1, "10"}, {4, 1, 1, 1, "9"},
+                                          {0, 0, 0, 1, "100"}, {17, 3, 3, 1, "abc"}};
+    for (const auto& event : events) { time += 1000; engine.event(channel, event); }
+    QCOMPARE(engine.history.size(), 4);
+    auto open = [&] {
+      w->findChild<QAction*>("Current Alarm History")->trigger();
+      return w->findChild<QDialog*>("historyDialog")->findChild<QTableWidget*>("historyTable");
+    };
+    auto table = open(); QVERIFY(table);
+    auto column = [&](int c) {
+      QStringList values;
+      for (int row = 0; row < table->rowCount(); ++row) values << table->item(row, c)->text();
+      return values;
+    };
+    auto click = [&](int c) {
+      auto header = table->horizontalHeader();
+      QTest::mouseClick(header->viewport(), Qt::LeftButton, Qt::NoModifier,
+                        QPoint(header->sectionViewportPosition(c) + header->sectionSize(c) / 2,
+                               header->height() / 2));
+    };
+    QTRY_COMPARE(table->rowCount(), 4);
+    QCOMPARE(column(4), (QStringList{"abc", "100", "9", "10"})); // Newest first by default.
+    QVERIFY(table->horizontalHeader()->isSortIndicatorShown());
+    click(0); QCOMPARE(column(4), (QStringList{"10", "9", "100", "abc"}));
+    click(0); QCOMPARE(column(4), (QStringList{"abc", "100", "9", "10"}));
+    click(3); QCOMPARE(column(3), (QStringList{"NO_ALARM", "MINOR", "MAJOR", "INVALID"}));
+    click(4); QCOMPARE(column(4), (QStringList{"9", "10", "100", "abc"}));
+    QCOMPARE(table->item(0, 3)->background().color(), severityColor(1)); // Colors move with rows.
+    // A new transition joins the chosen order, which also survives reopening.
+    time += 1000; engine.event(channel, {4, 1, 1, 1, "50"});
+    QTRY_COMPARE(table->rowCount(), 5);
+    QCOMPARE(column(4), (QStringList{"9", "10", "50", "100", "abc"}));
+    QPointer<QDialog> dialog = w->findChild<QDialog*>("historyDialog");
+    dialog->close(); QTRY_VERIFY(!dialog);
+    table = open(); QVERIFY(table);
+    QTRY_COMPARE(table->rowCount(), 5);
+    QCOMPARE(table->horizontalHeader()->sortIndicatorSection(), 4);
+    QCOMPARE(column(4), (QStringList{"9", "10", "50", "100", "abc"}));
+  }
+  void expandedLiveLogBounds() {
+    QCOMPARE(LiveLogMaximumRecords, 10000);
+    QCOMPARE(LiveLogMaximumBytes, 2560 * 1024);
+    QTemporaryDir dir;
+    const auto path = dir.filePath("log");
+    QFile file(path); QVERIFY(file.open(QIODevice::WriteOnly));
+    for (int i = 0; i <= LiveLogMaximumRecords; ++i)
+      file.write(QByteArray::number(i).rightJustified(6, '0') + '\n');
+    file.close();
+    const auto records = readLiveLog({}, path);
+    QVERIFY(records.error.isEmpty()); QVERIFY(records.limited);
+    QCOMPARE(records.lines.size(), 10000);
+    QCOMPARE(records.lines.front(), QString("000001"));
+    QCOMPARE(records.lines.back(), QString("010000"));
+    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    for (int i = 0; i <= 3000; ++i)
+      file.write(QByteArray::number(i).rightJustified(6, '0') + QByteArray(1017, 'x') + '\n');
+    file.close();
+    const auto bytes = readLiveLog({}, path);
+    QVERIFY(bytes.error.isEmpty()); QVERIFY(bytes.limited);
+    QCOMPARE(bytes.lines.size(), 2560);
+    QVERIFY(bytes.lines.front().startsWith("000441"));
+    QVERIFY(bytes.lines.back().startsWith("003000"));
+    int retainedBytes = 0;
+    for (const auto& line : bytes.lines) retainedBytes += line.toUtf8().size() + 1;
+    QCOMPARE(retainedBytes, LiveLogMaximumBytes);
+    const auto idle = readLiveLog(bytes.cursor, path);
+    QVERIFY(idle.lines.isEmpty()); QVERIFY(idle.bytesRead <= 128);
+  }
+  void guidanceFollowsContentAndKeepsConfigurationSearch() {
+    const QStringList contents = {
+      "Short guidance.",
+      QString("Step: inspect the local indication.\n").repeated(12),
+      QString(100, 'W'),
+      QString("Detailed instruction: " + QString(120, 'W') + '\n').repeated(400)
+    };
+    QVector<QSize> sizes;
+    for (const auto& content : contents) {
+      auto doc = sample(); doc.root->setOption("GUIDANCE_TEXT", content);
+      auto w = std::make_unique<Window>(std::move(doc), options(false), false);
+      w->show();
+      w->findChild<QAction*>("Display Guidance")->trigger();
+      QDialog* guidance = nullptr;
+      for (auto dialog : w->findChildren<QDialog*>())
+        if (dialog->windowTitle().startsWith("Guidance:")) guidance = dialog;
+      QVERIFY(guidance);
+      auto text = guidance->findChild<QPlainTextEdit*>(); QVERIFY(text);
+      QCOMPARE(text->toPlainText(), content);
+      QVERIFY(!guidance->findChild<QLineEdit*>("findText"));
+      const auto available = guidance->screen()->availableGeometry();
+      QVERIFY(guidance->width() <= available.width() - 64);
+      QVERIFY(guidance->height() <= available.height() - 80);
+      sizes << guidance->size();
+      if (sizes.size() == contents.size())
+        QTRY_VERIFY(text->verticalScrollBar()->maximum() > 0);
+      w->findChild<QAction*>("Configuration File")->trigger();
+      QDialog* configuration = nullptr;
+      for (auto dialog : w->findChildren<QDialog*>())
+        if (dialog->windowTitle() == "Configuration File") configuration = dialog;
+      QVERIFY(configuration);
+      QVERIFY(configuration->findChild<QLineEdit*>("findText"));
+    }
+    QVERIFY(sizes[1].height() > sizes[0].height());
+    QVERIFY(sizes[2].width() > sizes[0].width());
+    QVERIFY(sizes[3].height() > sizes[1].height());
   }
   void lifecycle() {
     for (int i = 0; i < 20; ++i) {

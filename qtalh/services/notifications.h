@@ -32,8 +32,14 @@ public:
   void attach(Engine*, const QVector<Node*>&, const QString& configuration);
   void detach();
   void enable(bool);
+  // Replaces the personal settings; the configuration file's are kept.
   void apply(const NotificationSettings&);
   void reload();
+  // Settings defined by the open configuration file's $NOTIFY directives. They
+  // apply with the personal ones but are never saved to the personal store.
+  void setConfiguration(const Document&);
+  const NotificationSettings& personal() const { return personal_; }
+  const NotificationSettings& configured() const { return configured_; }
   void sendTest(const QString& destination);
   void pump();
   QString status() const;
@@ -52,6 +58,8 @@ private:
   QVector<Node*> nodes;
   QString configuration;
   QSet<QString> unique;
+  NotificationSettings personal_, configured_;
+  NotificationSettings merged() const;
   int inFlight = 0, failed = 0;
   void watch();
   // The pump runs only while notifications are enabled or deliveries remain;

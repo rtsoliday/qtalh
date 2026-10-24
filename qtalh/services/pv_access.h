@@ -68,10 +68,17 @@ private:
     struct Write { double value; WriteKind kind; };
     quint64 id = 0;
     QString name;
-    const void* tag = nullptr;
     std::function<void(Event)> alarm;
     QHash<const void*, AlarmObserver> observers;
-    std::function<void(double)> numeric;
+    // Force PV and CALC inputs share the channel, as in ChannelAccess.
+    struct Number {
+      const void* tag;
+      std::function<void(double)> callback;
+      quint64 id; // Unique per input, as owners may be null.
+    };
+    std::vector<Number> numbers;
+    double number = 0;
+    bool haveNumber = false;
     std::function<void(QString)> text;
     bool cancelled = false, prepared = false, connected = false;
     qint64 connectionDeadline = 0;
@@ -124,6 +131,7 @@ private:
   void report(const QString&);
   void writeFailed(Channel*, const QString&);
   void numericUnavailable(Channel*, const QString&);
+  void deliverNumber(Channel*, double);
   void noteDeadline(const Channel*);
   void checkDeadlines();
   void changeRecord(const QString&);

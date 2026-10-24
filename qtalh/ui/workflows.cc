@@ -22,7 +22,7 @@ void Window::activateRuntime() {
   if (!options.editor) return;
   try {
     // Validate and clone the edited configuration; runtime masks must not mutate the editor.
-    auto snapshot = parseConfig(writeCheckedConfig(doc));
+    auto snapshot = parseConfig(writeCheckedConfig(doc, ConfigText::Edit));
     if (doc.filename.isEmpty()) {
       save(true);
       if (doc.filename.isEmpty()) return;
@@ -62,7 +62,7 @@ void Window::showLiveLog(bool alarm) {
   auto status = new QLabel;
   status->setObjectName("liveLogStatus"); status->setWordWrap(true);
   layout->addWidget(status);
-  const QString limit = "Live view: latest 1,000 records, up to 256 KiB. Use the log browser for older records.";
+  const QString limit = "Live view: latest 10,000 records, up to 2.5 MiB. Use the log browser for older records.";
   if (!legacyAppearance()) {
     filename->setForegroundRole(QPalette::PlaceholderText);
     filename->setTextInteractionFlags(Qt::TextSelectableByMouse);
@@ -283,6 +283,9 @@ void Window::shelveDialog(Node* target, bool change) {
   duration->addItem("Custom minutes", 0);
   duration->addItem("Custom hours", -60);
   duration->addItem("Custom days", -1440);
+  // A deadline such as the end of a run; the engine accepts 1 minute to 365 days ahead.
+  constexpr int untilChoice = -2;
+  duration->addItem("Until date and time", untilChoice);
   duration->setCurrentIndex(2);
   auto custom = new QSpinBox;
   custom->setObjectName("shelfCustomMinutes");
@@ -291,17 +294,27 @@ void Window::shelveDialog(Node* target, bool change) {
   custom->setSuffix(" minutes");
   custom->setValue(60);
   custom->setEnabled(false);
+  const auto opened = QDateTime::fromMSecsSinceEpoch(engine->now());
+  auto until = new QDateTimeEdit(QDateTime(opened.date().addDays(1), QTime(opened.time().hour(), opened.time().minute())));
+  until->setObjectName("shelfUntil");
+  until->setDisplayFormat("yyyy-MM-dd HH:mm");
+  until->setCalendarPopup(true);
+  until->setDateTimeRange(opened.addSecs(60), opened.addDays(365));
+  until->setEnabled(false);
   QLabel* customLabel = nullptr;
   if (legacyAppearance()) {
     form->addRow("Duration", duration);
     customLabel = new QLabel("Custom minutes");
     form->addRow(customLabel, custom);
+    form->addRow("Until", until);
   } else {
-    // The custom amount appears beside Duration only when a custom unit is chosen.
+    // The custom amount or deadline appears beside Duration only when chosen.
     auto durationRow = new QHBoxLayout;
     durationRow->addWidget(duration, 1);
     durationRow->addWidget(custom, 1);
+    durationRow->addWidget(until, 1);
     custom->hide();
+    until->hide();
     form->addRow("Duration", durationRow);
   }
   auto username = new QLineEdit;
@@ -343,9 +356,14 @@ void Window::shelveDialog(Node* target, bool change) {
   connect(duration, QOverload<int>::of(&QComboBox::currentIndexChanged), dialog,
           [=] {
             const int value = duration->currentData().toInt();
-            custom->setEnabled(value <= 0);
-            if (!customLabel) custom->setVisible(value <= 0);
-            if (value > 0) return;
+            const bool deadline = value == untilChoice;
+            custom->setEnabled(value <= 0 && !deadline);
+            until->setEnabled(deadline);
+            if (!customLabel) {
+              custom->setVisible(value <= 0 && !deadline);
+              until->setVisible(deadline);
+            }
+            if (value > 0 || deadline) return;
             const int unit = qMax(1, -value);
             const int minutes = custom->value() * custom->property("minutesPerUnit").toInt();
             custom->setRange(1, Engine::MaximumShelfMinutes / unit);
@@ -362,8 +380,13 @@ void Window::shelveDialog(Node* target, bool change) {
     if (!dialog->isEnabled()) return;
     try {
       const int value = duration->currentData().toInt();
-      const int minutes = value > 0 ? value : custom->value() * qMax(1, -value);
-      engine->shelve(target, minutes, reason->text(), username->text(), change);
+      if (value == untilChoice) {
+        engine->shelveUntil(target, until->dateTime().toMSecsSinceEpoch(), reason->text(),
+                            username->text(), change);
+      } else {
+        const int minutes = value > 0 ? value : custom->value() * qMax(1, -value);
+        engine->shelve(target, minutes, reason->text(), username->text(), change);
+      }
       dialog->accept();
       refresh();
     } catch (const std::exception& e) { status->setText(e.what()); }

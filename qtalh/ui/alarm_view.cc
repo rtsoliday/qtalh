@@ -1,5 +1,6 @@
 // Motif-style presentation only; alarm state remains in the item model.
 #include "alarm_view.h"
+#include "core/model.h"
 #include <QAccessible>
 #include <QHeaderView>
 #include <QApplication>
@@ -9,6 +10,7 @@
 #include <QMimeData>
 #include <QToolTip>
 #include <QPainter>
+#include <QHBoxLayout>
 #include <QScrollBar>
 #include <QStyledItemDelegate>
 #include <QTimer>
@@ -179,8 +181,80 @@ AlarmView::AlarmView(bool isTree, QWidget* parent) : QTreeView(parent), tree(isT
   }
   header()->setMinimumSectionSize(0);
   header()->setStretchLastSection(false);
-  connect(this, &QTreeView::expanded, this, [this] { scheduleExtent(); });
-  connect(this, &QTreeView::collapsed, this, [this] { scheduleExtent(); });
+  connect(this, &QTreeView::expanded, this, [this] { scheduleExtent(); scheduleOffscreen(); });
+  connect(this, &QTreeView::collapsed, this, [this] { scheduleExtent(); scheduleOffscreen(); });
+  offscreenBar = new QWidget(this);
+  offscreenBar->setObjectName("offscreenAlarmBar");
+  offscreenBar->setAutoFillBackground(true);
+  offscreenBar->setBackgroundRole(QPalette::Base);
+  auto bar = new QHBoxLayout(offscreenBar);
+  bar->setContentsMargins(2, 1, 2, 1);
+  alarmsAbove = new MotifButton;
+  alarmsAbove->setObjectName("offscreenAlarmsAbove");
+  alarmsAbove->setToolTip("Alarms above the visible rows; click to show the nearest");
+  alarmsBelow = new MotifButton;
+  alarmsBelow->setObjectName("offscreenAlarmsBelow");
+  alarmsBelow->setToolTip("Alarms below the visible rows; click to show the nearest");
+  bar->addWidget(alarmsAbove);
+  bar->addStretch();
+  bar->addWidget(alarmsBelow);
+  offscreenBar->hide();
+  connect(alarmsAbove, &QPushButton::clicked, this, [this] {
+    if (nearestAbove.isValid()) scrollTo(nearestAbove, QAbstractItemView::PositionAtCenter);
+  });
+  connect(alarmsBelow, &QPushButton::clicked, this, [this] {
+    if (nearestBelow.isValid()) scrollTo(nearestBelow, QAbstractItemView::PositionAtCenter);
+  });
+  // Alarm updates can arrive several times a second; count at most every 100 ms.
+  offscreenTimer.setSingleShot(true);
+  offscreenTimer.setInterval(100);
+  connect(&offscreenTimer, &QTimer::timeout, this, [this] { updateOffscreen(); });
+  connect(verticalScrollBar(), &QScrollBar::valueChanged, this, [this] { updateOffscreen(); });
+}
+void AlarmView::resizeEvent(QResizeEvent* event) {
+  QTreeView::resizeEvent(event);
+  updateOffscreen();
+}
+void AlarmView::updateOffscreen() {
+  offscreenTimer.stop();
+  nearestAbove = nearestBelow = QModelIndex();
+  int above = 0, below = 0, worstAbove = 0, worstBelow = 0;
+  // Measure a button, not the bar, whose hint shrinks while both are hidden.
+  const auto margins = offscreenBar->layout()->contentsMargins();
+  const int height = alarmsBelow->sizeHint().height() + margins.top() + margins.bottom();
+  // A row is hidden when its middle is outside the visible band, which excludes
+  // the strip the bar covers whenever it is shown.
+  const int limit = viewport()->height() - height;
+  for (auto index = model() ? model()->index(0, 0, rootIndex()) : QModelIndex(); index.isValid();
+       index = indexBelow(index)) {
+    const int severity = index.data(AlarmSeverityRole).toInt();
+    if (severity <= 0) continue;
+    const int middle = QTreeView::visualRect(index).center().y();
+    if (middle < 0) {
+      ++above;
+      worstAbove = qMax(worstAbove, severity);
+      nearestAbove = index;
+    } else if (middle > limit) {
+      ++below;
+      worstBelow = qMax(worstBelow, severity);
+      if (!nearestBelow.isValid()) nearestBelow = index;
+    }
+  }
+  auto show = [](MotifButton* button, int count, int severity, const QString& arrow) {
+    button->setVisible(count > 0);
+    if (!count) return;
+    button->setText(arrow + ' ' + QString::number(count) + ' ' + severityName(severity));
+    button->background = severityColor(severity);
+    button->update();
+  };
+  show(alarmsAbove, above, worstAbove, QStringLiteral("\u25B2"));
+  show(alarmsBelow, below, worstBelow, QStringLiteral("\u25BC"));
+  // The classic style sheet stops inheritance, so follow the pane's color.
+  offscreenBar->setPalette(viewport()->palette());
+  const auto pane = viewport()->geometry();
+  offscreenBar->setGeometry(pane.left(), pane.bottom() - height + 1, pane.width(), height);
+  offscreenBar->setVisible(above || below);
+  offscreenBar->raise();
 }
 void AlarmView::setSilenced(bool silenced) {
   // Roles left unset follow the application palette. Alarm, acknowledgement
@@ -197,6 +271,7 @@ void AlarmView::setSilenced(bool silenced) {
   // inheritance, so the viewport (the pane background) is set directly.
   setPalette(colors);
   viewport()->setPalette(colors);
+  scheduleOffscreen();
 }
 void AlarmView::setModel(QAbstractItemModel* next) {
   if (next == model())
@@ -220,9 +295,10 @@ void AlarmView::setModel(QAbstractItemModel* next) {
   // consecutively within each row, as ALH does, rather than in fixed columns.
   for (int column = 1; column < 9; ++column)
     hideColumn(column);
-  connect(next, &QAbstractItemModel::modelReset, this, [this] { scheduleExtent(); });
-  connect(next, &QAbstractItemModel::rowsInserted, this, [this] { scheduleExtent(); });
-  connect(next, &QAbstractItemModel::rowsRemoved, this, [this] { scheduleExtent(); });
+  connect(next, &QAbstractItemModel::modelReset, this, [this] { scheduleExtent(); scheduleOffscreen(); });
+  connect(next, &QAbstractItemModel::rowsInserted, this, [this] { scheduleExtent(); scheduleOffscreen(); });
+  connect(next, &QAbstractItemModel::rowsRemoved, this, [this] { scheduleExtent(); scheduleOffscreen(); });
+  connect(next, &QAbstractItemModel::layoutChanged, this, [this] { scheduleOffscreen(); });
   connect(next, &QAbstractItemModel::dataChanged, this,
           [this](const QModelIndex& topLeft, const QModelIndex& bottomRight) {
             const auto parent = topLeft.parent();
@@ -230,6 +306,7 @@ void AlarmView::setModel(QAbstractItemModel* next) {
               for (int row = topLeft.row(); row <= bottomRight.row(); ++row)
                 extentRows.push_back(model()->index(row, 0, parent));
             scheduleExtent(false, false);
+            scheduleOffscreen();
           });
   extentFull = extentRepaint = true;
   updateExtent();
@@ -417,12 +494,13 @@ void AlarmView::drawRow(QPainter* painter, const QStyleOptionViewItem& option,
         painter->setPen(Qt::black);
         painter->drawRect(rect.adjusted(2, 2, -2, -2));
       }
-      painter->setPen(color == red ? Qt::white : Qt::black);
+      painter->setPen(column == 2 ? contrastingText(color) : color == red ? Qt::white : Qt::black);
       const int textOffset = column == 2 ? 2 : 0;
       painter->drawText(rect.adjusted(2, 0, -2, 0).translated(0, textOffset), Qt::AlignCenter, text);
     } else if (column == 1) {
-      // ALH's severity box keeps its color, so it shows on a silenced pane.
-      painter->fillRect(rect.adjusted(0, 2, 0, -2), color);
+      // Match the latched indicator's full bounds while keeping the current
+      // severity flat and visible on a silenced pane.
+      painter->fillRect(rect, color);
       if (!text.trimmed().isEmpty()) {
         painter->setPen(color == red ? Qt::white : Qt::black);
         painter->drawText(rect, Qt::AlignCenter, text);
@@ -692,7 +770,10 @@ void AlarmView::drawStyledRow(QPainter* painter, const QStyleOptionViewItem& opt
       break;
     }
     case 2:
-      painter->setPen(text);
+      // A shelf colors only the name; row selection and alarm/mask chips keep
+      // their own meaning. Contrast follows the fill even on a dark desktop.
+      if (color.isValid()) drawChip(painter, rect, color, color.darker(125));
+      painter->setPen(color.isValid() ? contrastingText(color) : text);
       drawLabel(painter, rect.adjusted(6, 0, -4, 0), value, font, false);
       break;
     case 3:

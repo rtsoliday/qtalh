@@ -38,11 +38,20 @@ QString Node::option(QLatin1String key, const QString& fallback) const {
   return fallback;
 }
 void Node::setOption(const QString& key, const QString& value) {
+  // Replace the first value in place, keeping its position and comments.
+  int first = -1;
   for (int i = directives.size() - 1; i >= 0; --i)
-    if (directives[i].key == key)
-      directives.removeAt(i);
-  if (!value.isEmpty())
+    if (directives[i].key == key) {
+      if (first >= 0) directives.removeAt(first);
+      first = i;
+    }
+  if (value.isEmpty()) {
+    if (first >= 0) directives.removeAt(first);
+  } else if (first >= 0) {
+    directives[first].value = value;
+  } else {
     directives.push_back({key, value});
+  }
 }
 QString Node::label() const {
   return option("ALIAS", name);
@@ -114,15 +123,67 @@ QString statusName(int v) {
                                   QStringLiteral("NO_WRITE_ACCESS")};
   return v >= 0 && v < int(sizeof(names) / sizeof(*names)) ? names[v] : QString::number(v);
 }
-std::shared_ptr<Node> cloneNode(const Node& n, Node* parent) {
+std::shared_ptr<Node> cloneNode(const Node& n, Node* parent, bool keepOrigins) {
   auto c = std::make_shared<Node>();
   c->name = n.name;
   c->group = n.group;
   c->mask = n.mask;
   c->directives = n.directives;
+  c->before = n.before;
+  c->source = n.source;
+  if (keepOrigins) {
+    c->origin = n.origin;
+    c->includes = n.includes;
+    c->documentLines = n.documentLines;
+  }
   c->parent = parent;
   for (auto& child : n.children)
-    c->children.push_back(cloneNode(*child, c.get()));
+    c->children.push_back(cloneNode(*child, c.get(), keepOrigins));
   return c;
+}
+std::shared_ptr<Node> takeChild(Node& group, int index) {
+  auto child = group.children.at(index);
+  group.children.erase(group.children.begin() + index);
+  for (auto& l : group.includes)
+    if (l.children > index) --l.children;
+  return child;
+}
+void insertChild(Node& group, int index, std::shared_ptr<Node> child) {
+  group.children.insert(group.children.begin() + index, std::move(child));
+  for (auto& l : group.includes)
+    if (l.children > index) ++l.children;
+}
+QVector<Directive> keepDirectiveSources(const QVector<Directive>& before,
+                                        const QVector<Directive>& after) {
+  QHash<QString, QVector<int>> values; // Indexes into `after`, by key.
+  QHash<QString, int> last;            // Each key's last index in `before`.
+  for (int i = 0; i < after.size(); ++i) values[after[i].key] << i;
+  for (int i = 0; i < before.size(); ++i) last[before[i].key] = i;
+  QVector<bool> placed(after.size());
+  QHash<QString, int> used;
+  QVector<Directive> result;
+  for (int i = 0; i < before.size(); ++i) {
+    const auto& old = before[i];
+    const auto& list = values[old.key];
+    int& next = used[old.key];
+    if (next < list.size()) {
+      Directive d = after[list[next]];
+      placed[list[next++]] = true;
+      // The source text is written again only while the value is unchanged.
+      d.before = old.before;
+      d.source = old.source;
+      d.sourceValue = old.sourceValue;
+      result << d;
+    }
+    // A removed value is dropped with the comments before it.
+    if (last[old.key] == i)
+      while (next < list.size()) {
+        placed[list[next]] = true;
+        result << after[list[next++]];
+      }
+  }
+  for (int i = 0; i < after.size(); ++i)
+    if (!placed[i]) result << after[i];
+  return result;
 }
 } // namespace alh

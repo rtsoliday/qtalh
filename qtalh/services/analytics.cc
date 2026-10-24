@@ -35,24 +35,31 @@ void AnalyticsService::attach(Engine* e, const QString& file) {
     analytics.reset(monotonicNow(), utcNow());
   }
   analytics.configuration = configuration;
-  QVector<ChannelUpdate> all;
+  // Channels the configuration file itself disables or cancels are left out
+  // entirely; runtime mask changes remain observed and labeled as suppression.
+  excluded.clear();
   for (auto n : e->document.channels())
-    all << e->channelUpdate(n);
-  analytics.reconcile(all, monotonicNow(), utcNow());
+    if (n->mask[Disable] || n->mask[Cancel]) excluded.insert(Engine::nodeIdentity(n));
+  analytics.reconcile(included(), monotonicNow(), utcNow());
   observer = e->observe([this](const AlarmObservation& o) {
+    if (excluded.contains(o.after.identity)) return;
     checkClock();
     analytics.observe(o, monotonicNow(), utcNow());
   });
   lastMono = monotonicNow();
   lastUtc = utcNow();
 }
+QVector<ChannelUpdate> AnalyticsService::included() const {
+  QVector<ChannelUpdate> all;
+  for (auto n : engine->document.channels())
+    if (!excluded.contains(Engine::nodeIdentity(n))) all << engine->channelUpdate(n);
+  return all;
+}
 void AnalyticsService::reset() {
   analytics.reset(monotonicNow(), utcNow());
   if (!engine)
     return;
-  QVector<ChannelUpdate> all;
-  for (auto n : engine->document.channels())
-    all << engine->channelUpdate(n);
+  const auto all = included();
   analytics.reconcile(all, monotonicNow(), utcNow());
   for (const auto& s : all)
     analytics.observe({{}, s, ObservationCause::Suppression}, monotonicNow(), utcNow());

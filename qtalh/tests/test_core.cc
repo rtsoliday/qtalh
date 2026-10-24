@@ -1,6 +1,7 @@
 #include "test_compat.h"
 #include "core/engine.h"
 #include "core/model.h"
+#include "core/notifications.h"
 #include "core/phoebus.h"
 #include "services/ipc.h"
 #include "services/options.h"
@@ -878,6 +879,275 @@ private slots:
     e.event(n, {3, 2, 0, 1, "new alarm"}); e.event(n, {});
     QCOMPARE(e.state(n).unack, 0); // Subsequent alarm transitions use NoAckT.
   }
+  void listingShowsSourceAndIncludes() {
+    QTemporaryDir dir;
+    auto write = [&](const QString& name, const QByteArray& text) {
+      QFile f(dir.filePath(name));
+      return f.open(QIODevice::WriteOnly) && f.write(text) == text.size();
+    };
+    // The nested file lacks a final newline, the middle one uses CRLF, and a
+    // NUL ends only its own line's text, as when ALH reads with fgets().
+    QVERIFY(write("leaf", "CHANNEL leaf deep\n# last line"));
+    QVERIFY(write("middle", "GROUP NULL leaf\r\n\r\nINCLUDE leaf leaf\r\n"));
+    const char top[] = "# top\0hidden\nGROUP NULL root\nINCLUDE root middle\nCHANNEL root pv\n";
+    QVERIFY(write("main", QByteArray(top, sizeof(top) - 1)));
+    const auto listed = loadConfig(dir.filePath("main"));
+    QCOMPARE(writeConfig(listed, ConfigText::Listing),
+             QString("# top\nGROUP NULL root\nINCLUDE root middle\n"
+                     "   GROUP NULL leaf\n\n   INCLUDE leaf leaf\n"
+                     "      CHANNEL leaf deep\n      # last line\nCHANNEL root pv\n"));
+    // Source text expands the INCLUDE files in place.
+    QCOMPARE(writeConfig(listed, ConfigText::Source),
+             QString("# top\nGROUP NULL root\nGROUP NULL leaf\n\nCHANNEL leaf deep\n# last line\n"
+                     "CHANNEL root pv\n"));
+    QCOMPARE(writeConfig(parseConfig(writeConfig(listed, ConfigText::Source))), writeConfig(listed));
+  }
+  void sourceTextKeepsCommentsAndChangesLinesInPlace() {
+    const QString text =
+        "# Facility alarms\n"
+        "\n"
+        "GROUP   NULL   root   # the root\n"
+        "$GUIDANCE\nCall the operators.\n$END   # guidance\n"
+        "$GUIDANCE\n$END\n"
+        "\n"
+        "# Vacuum\n"
+        "GROUP root vac\n"
+        "  CHANNEL vac gauge1 -D---   # flaky\n"
+        "  $ALIAS  Gauge one\n"
+        "  $FORCEPV gate D 1.0 0   # interlock\n"
+        "  CHANNEL vac gauge2\n"
+        "#%qtalh-text looks like a marker\n"
+        "GROUP NULL sub\n"
+        "CHANNEL sub pv3 -----\n"
+        "# end\n";
+    auto d = parseConfig(text);
+    QCOMPARE(d.nodes()[2]->option("FORCEPV"), QString("gate -D--- 1 0"));
+    QCOMPARE(d.nodes()[4]->parent, d.nodes()[1]); // GROUP NULL after a channel names its group.
+    QCOMPARE(writeConfig(d, ConfigText::Source), text);
+    QCOMPARE(writeConfig(d, ConfigText::Listing), text);
+    // The editor's own text keeps everything, including a comment that looks
+    // like one of its markers.
+    const auto edit = writeConfig(d, ConfigText::Edit);
+    QCOMPARE(writeConfig(parseConfig(edit), ConfigText::Source), text);
+    QCOMPARE(writeConfig(parseConfig(edit)), writeConfig(d));
+    // Legacy text has no comments.
+    QVERIFY(!writeConfig(d).contains('#'));
+    // A changed statement is written in place in the standard form, without
+    // its trailing comment; the comments around it remain.
+    auto gauge1 = d.nodes()[2], gauge2 = d.nodes()[3];
+    gauge1->mask = Mask::parse("-----");
+    gauge1->setOption("ALIAS", "First");
+    gauge2->setOption("ALIAS", "Second");
+    QString expected = text;
+    expected.replace("  CHANNEL vac gauge1 -D---   # flaky\n", "CHANNEL vac gauge1 -----\n");
+    expected.replace("  $ALIAS  Gauge one\n", "$ALIAS First\n");
+    expected.replace("  CHANNEL vac gauge2\n", "  CHANNEL vac gauge2\n$ALIAS Second\n");
+    QCOMPARE(writeConfig(d, ConfigText::Source), expected);
+    // A NULL parent is written as a name once the line would read differently.
+    auto inserted = std::make_shared<Node>();
+    inserted->group = true;
+    inserted->name = "inserted";
+    inserted->parent = d.nodes()[1];
+    d.nodes()[1]->children.insert(d.nodes()[1]->children.begin() + 2, inserted);
+    expected.replace("  CHANNEL vac gauge2\n$ALIAS Second\n",
+                     "  CHANNEL vac gauge2\n$ALIAS Second\nGROUP vac inserted\n");
+    expected.replace("GROUP NULL sub\n", "GROUP vac sub\n");
+    QCOMPARE(writeConfig(d, ConfigText::Source), expected);
+    QCOMPARE(writeConfig(parseConfig(expected)), writeConfig(d));
+    // Removing a channel removes the comments before it.
+    d.nodes()[1]->children.erase(d.nodes()[1]->children.begin());
+    expected.replace("CHANNEL vac gauge1 -----\n$ALIAS First\n  $FORCEPV gate D 1.0 0   # interlock\n", "");
+    QCOMPARE(writeConfig(d, ConfigText::Source), expected);
+  }
+  void documentLinesKeepTheirPlace() {
+    const QString text = "GROUP NULL TopUp\n$BEEPSEVERITY  MAJOR  # loud\n\nCHANNEL TopUp pv -D---\n"
+                         "$COMMAND show\n$HEARTBEATPV hb 2 1   # beat\nCHANNEL TopUp other\n";
+    auto d = parseConfig(text);
+    QCOMPARE(d.beepSeverity, 2);
+    QCOMPARE(d.root->option("HEARTBEATPV"), QString("hb 2 1"));
+    QCOMPARE(writeConfig(d, ConfigText::Source), text);
+    QCOMPARE(writeConfig(parseConfig(writeConfig(d, ConfigText::Edit)), ConfigText::Source), text);
+    // The heartbeat followed a channel, so the legacy form moves it to the root.
+    QVERIFY(writeConfig(d).startsWith("$BEEPSEVERITY MAJOR\nGROUP NULL TopUp\n$HEARTBEATPV hb 2 1\n"));
+    // A changed value is written in place; removing the channel keeps both.
+    d.beepSeverity = 3;
+    d.root->setOption("HEARTBEATPV", "hb 5 1");
+    d.root->children.erase(d.root->children.begin());
+    QCOMPARE(writeConfig(d, ConfigText::Source),
+             QString("GROUP NULL TopUp\n$BEEPSEVERITY INVALID\n$HEARTBEATPV hb 5 1\nCHANNEL TopUp other\n"));
+    d.root->setOption("HEARTBEATPV", QString());
+    QCOMPARE(writeConfig(d, ConfigText::Source),
+             QString("GROUP NULL TopUp\n$BEEPSEVERITY INVALID\nCHANNEL TopUp other\n"));
+    // Without a line of its own, a beep severity is written first, as legacy ALH does.
+    auto plain = parseConfig("GROUP NULL root\n");
+    plain.beepSeverity = 2;
+    QCOMPARE(writeConfig(plain, ConfigText::Source), QString("$BEEPSEVERITY MAJOR\nGROUP NULL root\n"));
+  }
+  void configFilesKeepIncludeFiles() {
+    QTemporaryDir dir;
+    auto write = [&](const QString& name, const QString& text) {
+      QFile f(dir.filePath(name));
+      return f.open(QIODevice::WriteOnly) && f.write(text.toUtf8()) == text.toUtf8().size();
+    };
+    const QString main = "# main\nGROUP NULL root\nINCLUDE root part.alhConfig   # parts\n"
+                         "$COMMAND rootcmd\nCHANNEL root top\n\nINCLUDE root empty.alhConfig\n";
+    const QString part = "# part\nGROUP NULL part\n\nCHANNEL part a   # A\nCHANNEL part b\n# end of part\n";
+    const QString empty = "# nothing here yet\n";
+    QVERIFY(write("main.alhConfig", main));
+    QVERIFY(write("part.alhConfig", part));
+    QVERIFY(write("empty.alhConfig", empty));
+    const auto path = dir.filePath("main.alhConfig");
+    auto d = loadConfig(path);
+    QCOMPARE(d.root->option("COMMAND"), QString("rootcmd")); // After an INCLUDE, its parent group.
+    auto texts = [&](const Document& doc) {
+      QStringList result;
+      for (const auto& f : writeConfigFiles(doc, path))
+        result << QFileInfo(f.path).fileName() + ":\n" + f.text;
+      return result;
+    };
+    const QStringList written{"main.alhConfig:\n" + main, "part.alhConfig:\n" + part,
+                              "empty.alhConfig:\n" + empty};
+    QCOMPARE(texts(d), written);
+    auto edited = parseConfig(writeConfig(d, ConfigText::Edit));
+    QCOMPARE(texts(edited), written);
+    QCOMPARE(writeConfig(edited, ConfigText::Listing),
+             QString("# main\nGROUP NULL root\nINCLUDE root part.alhConfig   # parts\n"
+                     "   # part\n   GROUP NULL part\n\n   CHANNEL part a   # A\n   CHANNEL part b\n"
+                     "   # end of part\n$COMMAND rootcmd\nCHANNEL root top\n\nINCLUDE root empty.alhConfig\n"
+                     "   # nothing here yet\n"));
+    // An edit inside an INCLUDE file changes only that file.
+    edited.channels()[1]->mask = Mask::parse("D");
+    auto changed = written;
+    changed[1].replace("CHANNEL part b\n", "CHANNEL part b -D---\n");
+    QCOMPARE(texts(edited), changed);
+    // A node added to an included group belongs to that file; one added to
+    // the root group belongs to the top-level file.
+    auto addTo = [](Node* parent, const QString& name) {
+      auto n = std::make_shared<Node>();
+      n->name = name;
+      n->parent = parent;
+      parent->children.push_back(n);
+    };
+    addTo(edited.nodes()[1], "c");
+    addTo(edited.root.get(), "bottom");
+    edited = parseConfig(writeConfig(edited, ConfigText::Edit));
+    changed[1].replace("CHANNEL part b -D---\n", "CHANNEL part b -D---\nCHANNEL part c -----\n");
+    changed[0].replace("INCLUDE root empty.alhConfig\n",
+                       "INCLUDE root empty.alhConfig\nCHANNEL root bottom -----\n");
+    QCOMPARE(texts(edited), changed);
+    // Removing everything a file declared removes its INCLUDE line.
+    takeChild(*edited.root, 0);
+    edited = parseConfig(writeConfig(edited, ConfigText::Edit));
+    QCOMPARE(texts(edited),
+             (QStringList{"main.alhConfig:\n# main\nGROUP NULL root\n$COMMAND rootcmd\nCHANNEL root top\n\n"
+                          "INCLUDE root empty.alhConfig\nCHANNEL root bottom -----\n",
+                          "empty.alhConfig:\n" + empty}));
+    // From another directory, the relative INCLUDE lines would name other files.
+    QTemporaryDir other;
+    QVERIFY_THROWS_EXCEPTION(ParseError, writeConfigFiles(d, other.filePath("main.alhConfig")));
+    QCOMPARE(writeConfigFiles(d, other.filePath("main.alhConfig"), dir.path()).size(), 3);
+  }
+  void keepDirectiveSourcesFollowsEarlierDirectives() {
+    const QVector<Directive> before{{"COMMAND", "a", "# run\n", "$COMMAND   a", "a"},
+                                    {"ALIAS", "x"},
+                                    {"SEVRCOMMAND", "UP_MAJOR one", "# first\n"},
+                                    {"SEVRCOMMAND", "UP_MAJOR two", "# second\n", "$SEVRCOMMAND  UP_MAJOR two",
+                                     "UP_MAJOR two"},
+                                    {"STATCOMMAND", "HIHI gone", "# removed\n"}};
+    const QVector<Directive> after{{"ALIAS", "x"}, {"COMMAND", "a"}, {"SEVRCOMMAND", "UP_MAJOR one"},
+                                   {"SEVRCOMMAND", "UP_MAJOR changed"}, {"SEVRCOMMAND", "UP_MAJOR added"},
+                                   {"GUIDANCE", "https://example.org"}};
+    const auto result = keepDirectiveSources(before, after);
+    QStringList shown;
+    for (const auto& d : result)
+      shown << d.before + d.key + "=" + d.value + (d.source.isEmpty() ? QString() : "|" + d.source);
+    QCOMPARE(shown, (QStringList{"# run\nCOMMAND=a|$COMMAND   a", "ALIAS=x", "# first\nSEVRCOMMAND=UP_MAJOR one",
+                                 "# second\nSEVRCOMMAND=UP_MAJOR changed|$SEVRCOMMAND  UP_MAJOR two",
+                                 "SEVRCOMMAND=UP_MAJOR added",
+                                 "GUIDANCE=https://example.org"}));
+    // setOption() replaces the first value in place and removes later ones.
+    Node n;
+    n.directives = {{"ALIAS", "a", "# alias\n"}, {"COMMAND", "c"}, {"ALIAS", "b"}};
+    n.setOption("ALIAS", "z");
+    QCOMPARE(n.directives.size(), 2);
+    QCOMPARE(n.directives[0].key + n.directives[0].value + n.directives[0].before, QString("ALIASz# alias\n"));
+  }
+  void notificationDirectivesParseAndRoundTrip() {
+    const QString text =
+        "GROUP NULL root\n"
+        "$NOTIFY_EMAIL ops a@example.org,b@example.org from=alh@example.org # on-call list\n"
+        "$NOTIFY_WEBHOOK pager env:PAGER_URL bearer=env:PAGER_TOKEN\n"
+        "GROUP root section\n"
+        "$NOTIFY MAJOR ops 600:pager pv=S1* cooldown=900 resolution\n"
+        "CHANNEL section pv1\n"
+        "$NOTIFY MINOR 60:ops name=Single\n";
+    auto d = parseConfig(text);
+    const auto written = writeConfig(d);
+    QVERIFY(written.contains("$NOTIFY_EMAIL ops a@example.org,b@example.org from=alh@example.org\n"));
+    QVERIFY(written.contains("$NOTIFY MAJOR ops 600:pager pv=S1* cooldown=900 resolution\n"));
+    QCOMPARE(writeConfig(parseConfig(written)), written);
+    const auto s = configurationNotifications(d, "/config", "qtalh@host", "/usr/sbin/sendmail");
+    validateNotifications(s);
+    QCOMPARE(s.destinations.size(), 2);
+    QCOMPARE(s.destinations[0].id, QString("file:ops"));
+    QCOMPARE(s.destinations[0].kind, QString("email"));
+    QCOMPARE(s.destinations[0].recipients, (QStringList{"a@example.org", "b@example.org"}));
+    QCOMPARE(s.destinations[0].sender, QString("alh@example.org"));
+    QCOMPARE(s.destinations[0].program, QString("/usr/sbin/sendmail"));
+    QCOMPARE(s.destinations[1].id, QString("file:pager"));
+    QCOMPARE(s.destinations[1].urlEnvironment, QString("PAGER_URL"));
+    QCOMPARE(s.destinations[1].bearerEnvironment, QString("PAGER_TOKEN"));
+    QCOMPARE(s.subscriptions.size(), 2);
+    const auto& group = s.subscriptions[0];
+    QVERIFY(fromConfigurationFile(group.id));
+    QCOMPARE(group.name, QString("section"));
+    QCOMPARE(group.configuration, QString("/config"));
+    QCOMPARE(group.scope, Engine::nodeIdentity(d.root->children[0].get()));
+    QCOMPARE(group.minimumSeverity, 2);
+    QCOMPARE(group.wildcard, QString("S1*"));
+    QCOMPARE(group.cooldownSeconds, 900);
+    QVERIFY(group.resolution);
+    QCOMPARE(group.stages.size(), 2);
+    QCOMPARE(group.stages[0].delaySeconds, 0);
+    QCOMPARE(group.stages[0].destinations, QStringList{"file:ops"});
+    QCOMPARE(group.stages[1].delaySeconds, 600);
+    QCOMPARE(group.stages[1].destinations, QStringList{"file:pager"});
+    const auto& channel = s.subscriptions[1];
+    QCOMPARE(channel.name, QString("Single"));
+    QCOMPARE(channel.minimumSeverity, 1);
+    QCOMPARE(channel.stages[0].delaySeconds, 60);
+    QCOMPARE(channel.scope, Engine::nodeIdentity(d.channels()[0]));
+    // Reloading the same file gives the same IDs, so running episodes survive.
+    QCOMPARE(configurationNotifications(parseConfig(written), "/config", "x@y", "z").subscriptions[0].id, group.id);
+    // A default sender applies only where from= is absent.
+    auto defaults = parseConfig("GROUP NULL root\n$NOTIFY_EMAIL ops a@example.org\n$NOTIFY MAJOR ops\n");
+    QCOMPARE(configurationNotifications(defaults, "/c", "qtalh@host", "sendmail").destinations[0].sender,
+             QString("qtalh@host"));
+  }
+  void notificationDirectiveErrors_data() {
+    QTest::addColumn<QString>("text");
+    QTest::addColumn<QString>("message");
+    const QString head = "GROUP NULL root\n$NOTIFY_EMAIL ops a@example.org\n$NOTIFY_WEBHOOK pager https://example.org/h\n";
+    QTest::newRow("severity") << head + "$NOTIFY HIGH ops\n" << "Line 4: $NOTIFY severity must be";
+    QTest::newRow("no-destination") << head + "$NOTIFY MAJOR\n" << "Line 4: $NOTIFY needs";
+    QTest::newRow("escalation-delay") << head + "$NOTIFY MAJOR ops pager\n" << "escalation stages need a delay";
+    QTest::newRow("delay-order") << head + "$NOTIFY MAJOR 600:ops 60:pager\n" << "stage delays must increase";
+    QTest::newRow("option") << head + "$NOTIFY MAJOR ops colour=red\n" << "Unknown $NOTIFY option colour=red";
+    QTest::newRow("webhook-url") << head + "$NOTIFY_WEBHOOK hook ftp://example.org\n" << "http(s) URL or env:VARIABLE";
+    QTest::newRow("email-recipients") << head + "$NOTIFY_EMAIL mail\n" << "Line 4: $NOTIFY_EMAIL needs a name and recipients";
+    QTest::newRow("undefined") << head + "$NOTIFY MAJOR nobody\n" << "uses undefined destination nobody";
+    QTest::newRow("repeated") << head + "$NOTIFY_EMAIL ops c@example.org\n" << "ops is defined twice";
+    QTest::newRow("no-node") << "$NOTIFY_EMAIL ops a@example.org\nGROUP NULL root\n" << "requires a group/channel";
+  }
+  void notificationDirectiveErrors() {
+    QFETCH(QString, text); QFETCH(QString, message);
+    try {
+      parseConfig(text);
+      QFAIL("The configuration was accepted");
+    } catch (const ParseError& e) {
+      QVERIFY2(QString::fromUtf8(e.what()).contains(message), e.what());
+    }
+  }
   void topLevelNullParentsMatchIncludes() {
     const QString body = "GROUP NULL branch\n$BEEPSEVR MAJOR\n$FORCEPV gate D 1 0\n"
         "CHANNEL branch direct\nGROUP NULL leaf\nCHANNEL leaf nested\n";
@@ -1156,6 +1426,27 @@ private slots:
         parseConfig("GROUP NULL root\n$FORCEPV_CALC A + # invalid expression\n"));
   }
 
+  void calcInputsThroughL() {
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\n$FORCEPV CALC D 1 0\n"
+                         "$FORCEPV_CALC A+G+L>2\n$FORCEPV_CALC_A 1\n$FORCEPV_CALC_G input:g\n$FORCEPV_CALC_L 1\n");
+    // Legacy ALH ignores G-L and would evaluate them as 0; loading says so per line.
+    QCOMPARE(d.warnings.size(), 2);
+    QVERIFY2(d.warnings[0].startsWith("Line 6: $FORCEPV_CALC_G is a QtALH extension"), qPrintable(d.warnings[0]));
+    QVERIFY(d.warnings[1].startsWith("Line 7: $FORCEPV_CALC_L"));
+    QCOMPARE(parseConfig(writeConfig(d)).channels()[0]->option("FORCEPV_CALC_L"), QString("1"));
+    FakePv pv; Engine e(d, {}, &pv); e.start();
+    auto n = d.channels()[0];
+    QVERIFY(pv.numbers.contains("input:g"));
+    QVERIFY(!e.state(n).mask[Disable]); // Waits for input G.
+    pv.numbers["input:g"](0);           // 1 + 0 + 1 > 2 is false.
+    QVERIFY(!e.state(n).mask[Disable]);
+    pv.numbers["input:g"](1);           // 1 + 1 + 1 > 2 forces Disable.
+    QVERIFY(e.state(n).mask[Disable]);
+    QVERIFY(parseConfig("GROUP NULL root\nCHANNEL root pv\n$FORCEPV CALC D 1 0\n$FORCEPV_CALC A\n"
+                        "$FORCEPV_CALC_F 1\n").warnings.isEmpty());
+    // EPICS calc stops at L.
+    QVERIFY_THROWS_EXCEPTION(ParseError, parseConfig("GROUP NULL root\nCHANNEL root pv\n$FORCEPV_CALC_M 1\n"));
+  }
   void addThenDisableCachedAlarm_data() {
     QTest::addColumn<bool>("global"); QTest::addColumn<bool>("passive");
     QTest::addColumn<bool>("group"); QTest::addColumn<bool>("automatic");
@@ -2091,6 +2382,23 @@ private slots:
     time -= 100000; e.tick(); QCOMPARE(e.presentation(root).shelved, 3);
     time = deadline + 86400000; e.tick(); QCOMPARE(e.presentation(root).shelved, 0);
   }
+  void shelvingDurationUsesOneClockReading() {
+    // A shelf of N minutes lasts N minutes from the moment it is applied, even
+    // when the wall clock ticks between readings. A second reading once made
+    // a one-minute shelf fall just short of its minimum and be refused.
+    auto d = parseConfig("GROUP NULL root\nCHANNEL root pv\nCHANNEL root other\n");
+    Engine e(d);
+    qint64 time = 1000;
+    e.now = [&] { return time++; };
+    const auto channels = d.channels();
+    const auto start = time;
+    QCOMPARE(e.shelve(channels[0], 1, "brief", "tester"), 1);
+    QCOMPARE(e.state(channels[0]).shelf.until, start + 60000);
+    QCOMPARE(e.shelve(channels[1], Engine::MaximumShelfMinutes, "longest", "tester"), 1);
+    // An absolute deadline still needs a full minute from the time it is applied.
+    QVERIFY_THROWS_EXCEPTION(ParseError, e.shelveUntil(channels[0], time + 59999, "late", "tester", true));
+    QCOMPARE(e.shelveUntil(channels[0], time + 60001, "until", "tester", true), 1);
+  }
   void shelvingPreservesExternalEffects_data() {
     QTest::addColumn<bool>("global"); QTest::addColumn<bool>("passive");
     QTest::newRow("local") << false << false;
@@ -2919,14 +3227,14 @@ $GUIDANCE https://example.invalid/guide
     QCOMPARE(d.channels()[0]->option("GUIDANCE_TEXT"), QString::fromLatin1("Stra\xdf" "e \xe4ndern"));
     saveConfig(d, dir.filePath("saved"));
     QCOMPARE(read("saved"), latin1);
-    // Included ISO-8859-1 names survive the expanded save.
+    // Included ISO-8859-1 names survive the expanded save, written as read.
     QVERIFY(write("child", "GROUP NULL K\xfc" "hlung\nCHANNEL K\xfc" "hlung pv2\n"));
     QVERIFY(write("main", "GROUP NULL root\nINCLUDE root child\n"));
     d = loadConfig(dir.filePath("main"));
     QCOMPARE(d.channels()[0]->parent->name, QString::fromLatin1("K\xfc" "hlung"));
     saveConfig(d, dir.filePath("saved"));
-    QCOMPARE(read("saved"), QByteArray("GROUP NULL root\nGROUP root K\xfc" "hlung\n"
-                                       "CHANNEL K\xfc" "hlung pv2 -----\n"));
+    QCOMPARE(read("saved"), QByteArray("GROUP NULL root\nGROUP NULL K\xfc" "hlung\n"
+                                       "CHANNEL K\xfc" "hlung pv2\n"));
     // Valid locale text, including a literal U+FFFD, keeps its encoding.
     const QByteArray utf8 = "GROUP NULL root\nCHANNEL root pv -----\n$ALIAS K\xc3\xbchler \xef\xbf\xbd\n";
     QVERIFY(write("utf8", utf8));
@@ -3374,6 +3682,21 @@ $GUIDANCE https://example.invalid/guide
         QDir(useEnvironment ? config : logs).filePath(path)).absoluteFilePath();
     QCOMPARE(o.alarmFile, expectedLog); QCOMPARE(o.opmodFile, expectedLog);
   }
+  void shelvingNeedsEnvironmentSwitch() {
+    // Shelving is shown only when USE_SHELVING is exactly 1.
+    const auto previous = qgetenv("USE_SHELVING");
+    const bool wasSet = qEnvironmentVariableIsSet("USE_SHELVING");
+    qunsetenv("USE_SHELVING");
+    QVERIFY(!parseOptions({"qtalh", "linac.alhConfig"}).shelving);
+    for (const auto& value : {QByteArray(""), QByteArray("0"), QByteArray("yes"), QByteArray("true"), QByteArray(" 1")}) {
+      qputenv("USE_SHELVING", value);
+      QVERIFY2(!parseOptions({"qtalh", "linac.alhConfig"}).shelving, value.constData());
+    }
+    qputenv("USE_SHELVING", "1");
+    QVERIFY(parseOptions({"qtalh", "linac.alhConfig"}).shelving);
+    if (wasSet) qputenv("USE_SHELVING", previous);
+    else qunsetenv("USE_SHELVING");
+  }
   void attachedPathValues() {
     // A workspace script wrote "-p/usr/share/...": ALH prints its usage and
     // exits. QtALH splits the attached path for -a, -o, -f, -l and -p.
@@ -3385,6 +3708,8 @@ $GUIDANCE https://example.invalid/guide
     QCOMPARE(o.alarmFile, QFileInfo("./alarms").absoluteFilePath());
     QCOMPARE(o.config, QFileInfo(QDir("./configs").filePath("linac.alhConfig")).absoluteFilePath());
     QVERIFY(o.maskColor);
+    QVERIFY(!o.notifications); // Runtimes start with notifications paused.
+    QVERIFY(parseOptions({"qtalh", "-notifications", "linac.alhConfig"}).notifications);
     QCOMPARE(o.maxRecords, 2000);
     // After "--" the argument is a configuration name, not an option.
     o = parseOptions({"qtalh", "--", "-p/x"});
@@ -4535,7 +4860,7 @@ $GUIDANCE https://example.invalid/guide
       tokens.insert(token);
     for (const char* option : {"-c", "-global", "-S", "-D", "-caputackt", "-a", "-o", "-f", "-l",
                                "-m", "-T", "-xml", "-L", "-Lfile", "-B", "-P", "-O", "-s", "-p",
-                               "-filter", "-mainwindow", "-maskcolor", "-noerrorpopup",
+                               "-filter", "-mainwindow", "-maskcolor", "-noerrorpopup", "-notifications",
                                "-desc_field", "-debug", "-style", "-style=name", "-display",
                                "--display", "-geometry", "-fn", "-font", "-platform", "-help",
                                "--help", "-h", "-version", "--version", "-v", "--validate",

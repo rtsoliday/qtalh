@@ -7,6 +7,11 @@ struct Options {
        xml = false;
   bool lock = false, broadcast = false, noErrorPopup = false, maskColor = false, debug = false;
   bool help = false, version = false, validate = false;
+  // Enable this runtime's saved notification subscriptions at startup.
+  bool notifications = false;
+  // Shelving stays out of the menus unless USE_SHELVING=1: its shared,
+  // attributed change workflow is not implemented yet.
+  bool shelving = false;
   // An empty lockFile follows config; -Lfile remains an explicit override.
   QString config, configDir, logDir = ".", alarmFile = "ALH-default.alhAlarm",
                              opmodFile = "ALH-default.alhOpmod", lockFile, sound, font, geometry;

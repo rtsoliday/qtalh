@@ -275,8 +275,9 @@ void Window::showNotifications() {
   auto status = new QLabel(notifications->status());
   status->setObjectName("notificationStatus");
   layout->addWidget(status);
-  auto note = new QLabel("Personal settings. Every runtime starts paused; enabling multiple "
-                         "runtimes can send duplicate messages.");
+  auto note = new QLabel("Personal settings, with read-only entries from the configuration file's "
+                         "$NOTIFY directives. Every runtime starts paused unless started with "
+                         "-notifications; enabling multiple runtimes can send duplicate messages.");
   note->setWordWrap(true);
   layout->addWidget(note);
   auto tabs = new QTabWidget;
@@ -306,8 +307,11 @@ void Window::showNotifications() {
   tabs->addTab(destinationsPage, "Destinations");
   tabs->addTab(rulesPage, "Subscriptions");
   tabs->addTab(activity, "Activity");
-  auto draft = std::make_shared<NotificationSettings>(notifications->policy.settings());
-  tabs->setCurrentWidget(draft->destinations.isEmpty() ? destinationsPage : rulesPage);
+  // Only personal settings are edited and saved; the file's entries are listed read-only.
+  auto draft = std::make_shared<NotificationSettings>(notifications->personal());
+  const auto& fromFile = notifications->configured();
+  tabs->setCurrentWidget(draft->destinations.isEmpty() && fromFile.subscriptions.isEmpty()
+                             ? destinationsPage : rulesPage);
   auto dirty = std::make_shared<bool>(false);
   auto save = new QPushButton("Save and Apply");
   save->setObjectName("saveNotifications");
@@ -326,10 +330,22 @@ void Window::showNotifications() {
                                         rules);
         item->setData(Qt::UserRole, r.id);
       }
+    for (const auto& r : notifications->configured().subscriptions) {
+      auto item = new QListWidgetItem(QString("%1 — %2 stages [configuration file]")
+                                          .arg(r.name, QString::number(r.stages.size())), rules);
+      item->setData(Qt::UserRole, r.id);
+      item->setToolTip("Defined by a $NOTIFY directive; edit the configuration file to change it.");
+    }
     destinations->clear();
     for (const auto& d : draft->destinations) {
       auto item = new QListWidgetItem(d.name + " (" + d.kind + ")", destinations);
       item->setData(Qt::UserRole, d.id);
+    }
+    for (const auto& d : notifications->configured().destinations) {
+      auto item = new QListWidgetItem(d.name + " (" + d.kind + ") [configuration file]", destinations);
+      item->setData(Qt::UserRole, d.id);
+      item->setToolTip("Defined by a $NOTIFY_EMAIL or $NOTIFY_WEBHOOK directive; edit the configuration "
+                       "file to change it.");
     }
     test->setEnabled(!*dirty);
   };
@@ -339,7 +355,9 @@ void Window::showNotifications() {
   auto addRule = new QPushButton("Add subscription");
   addRule->setObjectName("addNotificationSubscription");
   auto editRule = new QPushButton("Edit");
+  editRule->setObjectName("editNotificationSubscription");
   auto removeRule = new QPushButton("Remove");
+  removeRule->setObjectName("removeNotificationSubscription");
   auto preview = new QPushButton("Preview message");
   for (auto b : {addRule, editRule, removeRule, preview})
     ruleRow->addWidget(b);
@@ -364,7 +382,7 @@ void Window::showNotifications() {
     }
     int at = -1;
     if (!add) {
-      if (!rules->currentItem())
+      if (!rules->currentItem() || fromConfigurationFile(rules->currentItem()->data(Qt::UserRole).toString()))
         return;
       for (int i = 0; i < draft->subscriptions.size(); ++i)
         if (draft->subscriptions[i].id == rules->currentItem()->data(Qt::UserRole).toString())
@@ -385,7 +403,7 @@ void Window::showNotifications() {
   connect(addRule, &QPushButton::clicked, dialog, [=] { editSubscription(true); });
   connect(editRule, &QPushButton::clicked, dialog, [=] { editSubscription(false); });
   connect(removeRule, &QPushButton::clicked, dialog, [=] {
-    if (!rules->currentItem())
+    if (!rules->currentItem() || fromConfigurationFile(rules->currentItem()->data(Qt::UserRole).toString()))
       return;
     auto id = rules->currentItem()->data(Qt::UserRole).toString();
     for (int i = draft->subscriptions.size() - 1; i >= 0; --i)
@@ -397,7 +415,7 @@ void Window::showNotifications() {
   connect(preview, &QPushButton::clicked, dialog, [=] {
     if (!rules->currentItem())
       return;
-    for (const auto& r : draft->subscriptions)
+    for (const auto& r : draft->subscriptions + notifications->configured().subscriptions)
       if (r.id == rules->currentItem()->data(Qt::UserRole).toString()) {
         NotificationEnvelope e;
         e.id = "preview";
@@ -428,13 +446,15 @@ void Window::showNotifications() {
   auto addDest = new QPushButton("Add destination");
   addDest->setObjectName("addNotificationDestination");
   auto editDest = new QPushButton("Edit");
+  editDest->setObjectName("editNotificationDestination");
   auto removeDest = new QPushButton("Remove");
+  removeDest->setObjectName("removeNotificationDestination");
   for (auto b : {addDest, editDest, removeDest, test})
     destRow->addWidget(b);
   if (!legacyAppearance()) destRow->addStretch();
   auto editDestination = [=](bool add) {
     int i = destinations->currentRow();
-    if (!add && i < 0)
+    if (!add && (i < 0 || i >= draft->destinations.size()))
       return;
     NotificationDestination d = add ? NotificationDestination{} : draft->destinations[i];
     if (add)
@@ -452,7 +472,7 @@ void Window::showNotifications() {
   connect(editDest, &QPushButton::clicked, dialog, [=] { editDestination(false); });
   connect(removeDest, &QPushButton::clicked, dialog, [=] {
     int i = destinations->currentRow();
-    if (i < 0)
+    if (i < 0 || i >= draft->destinations.size())
       return;
     auto id = draft->destinations[i].id;
     for (const auto& r : draft->subscriptions)
@@ -467,6 +487,15 @@ void Window::showNotifications() {
     *dirty = true;
     refresh();
   });
+  auto readOnly = [=] {
+    const auto rule = rules->currentItem(), destination = destinations->currentItem();
+    const bool fileRule = rule && fromConfigurationFile(rule->data(Qt::UserRole).toString());
+    const bool fileDestination = destination && fromConfigurationFile(destination->data(Qt::UserRole).toString());
+    editRule->setEnabled(!fileRule); removeRule->setEnabled(!fileRule);
+    editDest->setEnabled(!fileDestination); removeDest->setEnabled(!fileDestination);
+  };
+  connect(rules, &QListWidget::currentRowChanged, dialog, readOnly);
+  connect(destinations, &QListWidget::currentRowChanged, dialog, readOnly);
   connect(test, &QPushButton::clicked, dialog, [=] {
     if (destinations->currentItem())
       notifications->sendTest(destinations->currentItem()->data(Qt::UserRole).toString());
@@ -494,7 +523,7 @@ void Window::showNotifications() {
   connect(reload, &QPushButton::clicked, dialog, [=] {
     try {
       notifications->reload();
-      *draft = notifications->policy.settings();
+      *draft = notifications->personal();
       *dirty = false;
       refresh();
     } catch (const std::exception& e) {

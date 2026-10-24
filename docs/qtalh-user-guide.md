@@ -61,6 +61,13 @@ to open the main tree and group contents. Closing the main runtime window hides
 it while monitoring continues. Closing the compact window or using File
 Exit/Close asks for confirmation before stopping that runtime.
 
+When rows showing an active or unacknowledged alarm are scrolled out of either
+pane, a bar along the bottom of that pane shows **▲** with their count and highest
+severity for rows above, and **▼** for rows below. Click either to scroll the
+nearest such row into view. Shelved channels, rows removed by the display filter,
+and rows inside collapsed groups are not counted; a collapsed group's own row
+still is.
+
 ### Selection and alarm silence
 
 Changing the display filter preserves the selected alarm when it remains visible.
@@ -68,22 +75,28 @@ If filtering removes it, the selection clears, selection dialogs close, and
 selection-dependent actions stay disabled until you select another visible row.
 This also applies when an alarm clears while a filter is active.
 
-**Action → NoAck for One Hour** (Ctrl+N) applies as soon as you choose it. ALH
-opens a Modify NoAck Mask dialog with a NoAck For One Hour toggle; QtALH has no
-such dialog and asks for no confirmation. The command starts the one-hour NoAck
-for the selected group or channel, or ends it when that selection's timer is
-running. The runtime starts with the facility selected, so Ctrl+N before you
-select another row removes the acknowledgement requirement from every channel.
-The mask summary then shows `H`; choose the command again, or restore the NoAck
-row in **View → Runtime Overrides…**, to end the timer early.
+**Action → NoAck for One Hour…** (Ctrl+N) opens the Modify NoAck Mask dialog, as in ALH.
+It names the selected group or channel and, for a group, shows how many channels
+are affected. Turning on **NoAck For One Hour** removes the acknowledgement
+requirement from the selected channel, or from every channel in the selected
+group, and starts a one-hour timer. Turning it off, or the timer expiring,
+restores the configured masks. The toggle applies at once, and the dialog
+follows the selection. The runtime starts with the facility selected, so
+turning the toggle on before you select another row affects every channel.
+The mask summary shows `H` while the timer runs; clear the toggle, or restore
+the NoAck row in **View → Runtime Overrides…**, to end the timer early.
 
 Changing **Setup → Silence Time Interval** to a different duration ends any
 active timed silence, matching ALH. Enable the silence checkbox again to start
 that duration. Choosing the same interval leaves the countdown unchanged.
-While timed silence is on, the status area at the bottom of the main window
+While timed silence or Silence Forever is on, the status area at the bottom of the main window
 turns blue, as in ALH. Without `-maskcolor` the alarm panes turn blue too; with
 it, blue is reserved for masks that silence alarms and the panes keep their
 color.
+The **Silence Forever: On** label also has an amber background. The facility's
+**ALH Beep Severity** label has an amber background whenever its threshold differs
+from MINOR, and an amber **Display Filter** label identifies either alarm-only
+filter. These indications apply in every appearance.
 Timed silence, Silence Current, Silence Forever, interval changes, and timed
 silence expiry are recorded in the operation log when file logging is enabled.
 
@@ -96,6 +109,8 @@ threshold. Both thresholds and the silence settings affect whether an alarm
 sounds; changing the threshold does not acknowledge an alarm. Runtime changes
 do not modify the configuration file, but runtime **File → Save As…** writes the
 current thresholds. **View → Runtime Overrides…** lists and restores them.
+Audible alarms repeat at two-second intervals; a custom sound already playing is
+allowed to finish before it is played again.
 
 ### Preview guidance and commands
 
@@ -109,7 +124,8 @@ These tooltips work with both the modern and Motif appearances.
 
 ## Timed shelving
 
-Select a channel or group and choose **Action → Shelve Alarms…**, or right-click
+Shelving is hidden unless QtALH starts with `USE_SHELVING=1` in its environment;
+otherwise the commands below are absent from the menus. Select a channel or group and choose **Action → Shelve Alarms…**, or right-click
 it and choose **Shelve this channel…** or **Shelve this group…**. Choose 15 or
 30 minutes, 1, 4, or 8 hours, or **Custom minutes**, **Custom hours**, or
 **Custom days** and enter a whole number in that unit, up to 365 days (525,600
@@ -184,7 +200,7 @@ INCLUDE paths retain their separate configuration-directory rule.
 | `-S` | Passive mode: suppress CA and pvAccess writes and operator acknowledgement. |
 | `-caputackt` | In global active mode, write each record's configured transient acknowledgement (ACKT) setting once, when a configured channel first becomes writable after startup or reload. This includes an IOC that connects, or grants write access, later. Force PVs can also write ACKT without it; see `$FORCEPV`. |
 | `-D` | Disable alarm and operation **file** logging. Does not disable CA writes or configured helper queues. |
-| `-s` | Start with Silence Forever enabled; it can be changed in Setup. |
+| `-s` | Start with Silence Forever enabled, so the status area (and, without `-maskcolor`, the alarm panes) starts blue; it can be changed in Setup. |
 | `-p file` | Play a local audio file instead of the system beep. Formats depend on the installed Qt Multimedia backend; the suite exercises Ogg/Vorbis. |
 | `-f dir` | Configuration and INCLUDE directory. Default: `ALARMHANDLER`, or the working directory (`.`). |
 | `-l dir` | Log directory. Default: the configuration directory. Create it before starting. |
@@ -200,8 +216,9 @@ INCLUDE paths retain their separate configuration-directory rule.
 | `-O key` | Send database records to a System V queue; positive decimal integer, Linux/macOS only. Unlike ALH, `-L` is not required; without it every instance sends its alarm records. |
 | `-filter no\|active\|unack` | Initial display filter; default `no`. Active includes active or unacknowledged alarms. Filtering does not stop monitoring. |
 | `-mainwindow` | Open the main runtime window at startup. |
-| `-maskcolor` | Show masks with Cancel, Disable or NoAck set in blue; timed silence then colors only the status area. |
+| `-maskcolor` | Show masks with Cancel, Disable or NoAck set in blue; timed silence and Silence Forever then color only the status area. |
 | `-noerrorpopup` | Suppress error message boxes; errors still appear in the window message area, Qt diagnostic output, and operation log when logging is enabled. |
+| `-notifications` | Start with this configuration's saved notification subscriptions enabled. Without it, every runtime starts with notifications paused. |
 | `-desc_field` | Subscribe to each channel record's `.DESC` field for descriptions. |
 | `-debug` | Timestamped startup, alarm, CA, command, logging, and broadcast diagnostics on stderr. Default: off. |
 | `-display display`, `--display display` | Set `DISPLAY` before opening the GUI (for X11). |
@@ -263,10 +280,11 @@ are hidden from operator menus otherwise. See
 [Active alarms, search & details](site/operate/alarm-tools.md) and
 [Phoebus XML import & export](site/configure/phoebus.md).
 
-Other menu commands follow ALH. **View → Configuration File** shows the loaded
-configuration as read-only text with Find. **Setup → New Alarm Log File…** and
-**Setup → New Operation Modification Log File…** switch this runtime's log files;
-see [Read alarm logs](site/operate/logs.md#change-log-files). The editor's
+Other menu commands follow ALH. **View → Configuration File** shows the running
+configuration as read-only text with Find, including source comments and blank
+lines; runtime changes appear in place. Log files are chosen at startup with
+`-a` and `-o`; QtALH omits ALH's Setup commands for changing them while running
+(see [Read alarm logs](site/operate/logs.md#choose-log-files)). The editor's
 **File → Report…**, **File → Print…**, **File → Close All**, and
 **Insert → Configuration File…** are described in
 [Create & edit a configuration](site/configure/editor.md#reports-printing-and-inserting-files).
@@ -278,11 +296,10 @@ layout, menus, keyboard shortcuts, alarm colors and letters, mask and count
 notation, and the actions of every dialog it provides, with a cleaner presentation:
 flat severity chips, a tinted selection, a frameless status area, an
 expandable alarm legend, tabbed Properties, a state-showing Modify Mask
-Settings dialog, a tabular Current Alarm History, and a shared find bar in text
-viewers. The palette follows a dark desktop. Modeless dismiss buttons are
-labeled Close; Apply, Cancel, and Reset retain their behavior. Neither
-appearance has ALH's Modify NoAck Mask dialog; see **NoAck for One Hour** under
-Selection and alarm silence.
+Settings dialog, a tabular Current Alarm History, and a shared find bar in log and
+configuration text viewers. Guidance omits search and sizes to its content within
+the available screen. The palette follows a dark desktop. Modeless dismiss buttons are
+labeled Close; Apply, Cancel, and Reset retain their behavior.
 
 Use `qtalh -style motif -mainwindow facility.alhConfig` (or `qtalh -c -style motif
 facility.alhConfig` for the editor) to retain the original Motif-influenced
@@ -385,8 +402,9 @@ instead, so legacy Latin-1 names, aliases, guidance, and command text display
 correctly rather than as U+FFFD replacement characters. Such a configuration
 is saved in ISO-8859-1 again, byte for byte when unchanged; if edits add
 characters that ISO-8859-1 cannot represent, it is saved in the locale encoding.
-Saving expands INCLUDEs into one file, so if any included file was ISO-8859-1
-the whole saved file uses ISO-8859-1 when it can represent every character.
+A save that writes the INCLUDE files into one file uses ISO-8859-1 for the
+whole file when any included file was ISO-8859-1 and it can represent every
+character.
 As in ALH, a NUL byte ends the text of its line; the following lines still load.
 
 Directives normally apply to the preceding group/channel. A file, including an
@@ -407,10 +425,13 @@ rather than applying them to the INCLUDE's parent group.
 | `$SEVRPV` | Output PV for the node's severity (0–4); disabled channels publish -1. Writes require global active mode. `-` leaves the output unset; the first real PV replaces earlier `-` placeholders and takes precedence over later directives. |
 | `$FORCEPV` | `pv mask [force_value [reset_value]]`; default force 1, reset 0. At force, apply the mask; at reset, restore configured channel masks. `NE` or a reset equal to force resets on leaving the force value. Applies to descendant channels for a group. The first value counts as a change, so a Force PV already at its reset value restores the configured masks at startup. In global active mode, a force or reset writes the resulting `T` bit to the IOC's ACKT, even without `-caputackt`: when it differs from the current ACKT, and always before that ACKT has been read. Removing Disable or NoAck can also acknowledge cleared transients (ACKS and `$ACKPV`). |
 | `$FORCEPV_CALC` | EPICS CALC expression required when the FORCEPV name is `CALC`. |
-| `$FORCEPV_CALC_A` through `$FORCEPV_CALC_F` | Numeric constants or PV inputs for CALC. An input is a constant only when the whole token is a number (`0`, `-2`, `2e0`); other tokens, including names beginning with a digit such as `1ID:gate`, are PVs. ALH used a token's leading number instead (see the [compatibility inventory](qtalh-compatibility.md)). Unspecified inputs default to zero; all named PV inputs must become available before evaluation. |
+| `$FORCEPV_CALC_A` through `$FORCEPV_CALC_L` | Numeric constants or PV inputs for CALC, twelve as in EPICS. Legacy ALH reads only A through F and evaluates G through L as 0, so loading and `--validate` warn when G through L are used. An input is a constant only when the whole token is a number (`0`, `-2`, `2e0`); other tokens, including names beginning with a digit such as `1ID:gate`, are PVs. ALH used a token's leading number instead (see the [compatibility inventory](qtalh-compatibility.md)). Unspecified inputs default to zero; all named PV inputs must become available before evaluation. |
 | `$SEVRCOMMAND` | `UP_severity command` or `DOWN_severity command`, matching direction and destination severity; `ANY` matches any change in that direction, `UP_ALARM` matches leaving NO_ALARM. Channel startup is evaluated from ERROR, matching ALH. Repeat to add commands. |
 | `$STATCOMMAND` | `status command`; channel only, runs when entering that status. Repeat to add commands. Status names follow EPICS alarm names and the additional connection/access states in `qtalh/core/model.cc`. |
 | `$ALARMCOUNTFILTER` | `count seconds`; channel only. Omitted count and seconds each default to 1. Legacy alarm count/time filtering: count -1 delays alarm onset, 0 also holds clearing transitions, positive counts track repeated alarm edges within the interval. Zero seconds disables filtering. Accepted count range: -1 through 1,000,000; seconds must be a nonnegative integer. |
+| `$NOTIFY_EMAIL` | `name recipient[,recipient...] [from=address] [program=path]`; a notification destination for the whole file. Without `from=` the sender is `qtalh@` and the host name; without `program=`, the local `sendmail`. QtALH only; see [notifications](site/operate/notifications.md#define-notifications-in-the-configuration-file). |
+| `$NOTIFY_WEBHOOK` | `name https-url\|env:VARIABLE [bearer=env:VARIABLE]`; a webhook destination for the whole file. QtALH only. |
+| `$NOTIFY` | `severity [delay:]destination[,destination...] [delay:destination...] [pv=wildcard] [cooldown=seconds] [resolution] [name=text]`; a subscription for the node and everything beneath it. The first stage defaults to no delay; each later stage needs a delay in seconds, increasing. QtALH only. |
 
 Fixed-argument directives accept trailing comments beginning with a
 whitespace-separated `#`, for example `$SEVRPV output # severity mirror`.
@@ -507,10 +528,13 @@ heartbeat/severity/acknowledgement outputs stop, and the operation log records
 `Setup Config File`. Logs, locks and broadcast files stay those of the startup
 configuration. Configuration tool **File → Open…** opens another editor window.
 Open/insert failures leave the current document intact. Save uses an atomic
-file replacement, expands includes, normalizes masks, orders channels before
-child groups, and discards comments and original formatting. Runtime Save As
-exports masks without changing the original configuration's reload, lock, or
-broadcast identity; editor Save As changes the document filename.
+file replacement and keeps comments, blank lines, formatting and INCLUDE lines;
+changed lines are written in standard form, and edited INCLUDE files are saved
+after a confirmation that lists them (see
+[Save comments and INCLUDE files](site/configure/editor.md#save-comments-and-include-files)).
+Runtime Save As exports masks to one file, with INCLUDE files written into it,
+without changing the original configuration's reload, lock, or broadcast
+identity; editor Save As changes the document filename.
 
 QtALH rejects the whole configuration when any line in it or its includes is
 invalid. Legacy ALH logs an `Input error` for many such lines, or ignores them,
@@ -609,7 +633,7 @@ siblings, sort by time, and support local From/To times and case-sensitive With
 text across complete records, including legacy continuation lines. For circular logs, a checkpoint matching the complete file preserves
 insertion order among equal timestamps, including when results are limited.
 Without a matching checkpoint, equal timestamps retain physical file order. They report cancellation, unreadable files, and the 100,000-record/10 MiB
-result limits. Live viewers and the ten-entry in-memory alarm history are separate.
+result limits. Live viewers and the 100-entry in-memory alarm history are separate.
 
 Runtime errors are appended to the operation log when logging is enabled and
 the destination is writable. Failure to audit an error still leaves it visible
@@ -622,7 +646,7 @@ Recovery preserves the other log and resumes recording new events. Events missed
 while a destination was unavailable are not replayed.
 
 **View → Alarm Log File** and **Operation Log File** show a live tail limited to
-1,000 records or 256 KiB. They follow destination changes and the current local
+10,000 records or 2.5 MiB. They follow destination changes and the current local
 date with `-T`. File reads run in the background; unchanged append-only files are
 not reread in full. The alarm viewer uses a valid checkpoint to display wrapped
 records in insertion order, including equal timestamps. Without a matching
@@ -716,6 +740,7 @@ preventing file logging. Windows does not build these helpers and rejects
 | Acknowledgement or output PV does not change | Check local/global/passive mode and IOC write access. Failed acknowledgements remain visible; manual ACKT changes require an explicit retry. A refused `$ACKPV` stays pending in **View → Runtime Overrides…** until a **Retry ACKPV** submission is accepted, or Cancel or a reload discards it. |
 | "Channel Access Exception" messages | Asynchronous CA errors, such as an IOC rejecting a write or a lost virtual circuit, are reported in the message area and operation log (and as a popup unless `-noerrorpopup`), as in ALH. After 25 reports one "Too many exceptions" notice is shown; later exceptions are printed only. |
 | Cannot open logs or lock files | Create the parent directory and check permissions on the selected files and checkpoint sidecar. A failed log destination change preserves the current destination. `Cannot lock logging lock file` means the lock file opened but its filesystem rejected POSIX locks (for example, NFS without a lock service); the instance stays Slave, so place the `-Lfile` lock on a filesystem with lock support. |
+| "Open files are near this process's limit" | QtALH raises its soft open-file limit to the hard limit at startup and warns, once, when 80% of it is in use; programs it starts keep the original limit. Ask the administrator to raise the hard limit (`ulimit -Hn`), or split a very large configuration. |
 | Sound fails | Check the audio path, Qt Multimedia plugins/backend, output device, Silence Forever, and beep threshold. Muted fixture playback verifies decoding, not speaker output. |
 | Helper or visual tests fail | Check the [test prerequisites](../qtalh/tests/README.md); missing rpcbind, legacy executables, softIoc, or X11 are failures, not skipped coverage. |
 

@@ -18,11 +18,11 @@ The browser searches the selected current log and its `.yyyy-MM-dd` siblings. It
 | --- | --- |
 | Alarm log | Alarm status/severity transitions and global acknowledgement changes. Value-only updates do not create alarm records. |
 | Operator log | Operator changes, actions, and runtime errors. This file appends independently of the bounded alarm ring. |
-| Current alarm history | The ten most recent in-memory history entries, separate from the files. |
+| Current alarm history | The 100 most recent in-memory history entries, separate from the files. |
 | Live log-file viewer | Viewing the current file separately from a historical search. |
 
 Choose **View → Alarm Log File** or **Operation Log File** for a live tail of up to
-**1,000 records or 256 KiB**. The viewer follows changes to the log destination
+**10,000 records or 2.5 MiB**. The viewer follows changes to the log destination
 and daily rollover with `-T`. A valid alarm checkpoint preserves insertion order
 after the ring wraps, including records with identical timestamps. Without a
 matching checkpoint, the viewer scans the file and retains the newest timestamps
@@ -32,31 +32,31 @@ historical browser to search older records.
 ## Read current history
 
 Choose **View → Current Alarm History** for the most recent in-memory entries.
-The newest entry is listed first. Legacy ALH lists the oldest first and the
-newest last.
-The modern appearance shows a table with Time, Process Variable, Status,
-Severity and Value columns, with severity cells in the alarm colors; the classic
-appearance shows aligned fixed-width text. Outside Motif mode, the
+The newest entry is listed first by default. Click a column heading to sort by
+that column, and click it again to reverse the order. **Time** sorts
+chronologically, so ascending order matches legacy ALH's oldest-first list;
+**Severity** sorts by rank, and numeric values sort as numbers. The chosen order
+lasts until the runtime exits.
+Every appearance shows an aligned, scrollable table with Time, Process Variable,
+Status, Severity and Value columns, with severity cells in the alarm colors.
+Outside Motif mode, the
 [font-size shortcuts](/operate/appearance#adjust-the-font-while-running)
 also work while this dialog has focus.
 
 ![Modern current alarm history showing a synthetic HIHI/MAJOR transition](/images/modern-history.png)
 
-## Change log files
+## Choose log files
 
-In a runtime, **Setup → New Alarm Log File…** and **Setup → New Operation
-Modification Log File…** switch this runtime's alarm or operation log to the
-file you choose; **Cancel** keeps the current file. Without `-T` or `-L`,
-choosing an existing alarm log empties it, as described under **Understand
-circular files** below. With `-T`, the date suffix is
-added to the chosen name, as in ALH. If you choose an existing dated file such
-as `alarm.log.2026-10-17`, QtALH asks whether to **Use Log Series** (continue
-the dated series of `alarm.log`) or **Use as Basename** (keep the date as part
-of the name and add the current date after it).
+A runtime's log files are chosen when it starts: `-a` names the alarm log and
+`-o` the operation log (see the [command-line reference](/reference/command-line)).
+With `-T`, QtALH appends the local date to each name and continues in a new file
+each day. To log to different files, restart the runtime with new options.
+QtALH does not provide ALH's **Setup → New Alarm Log File Name…** or
+**New Oper. Log File Name…** commands.
 
 ## Understand circular files
 
-The default alarm file holds 2000 records unless `-L` is used, which defaults to unlimited retention as in ALH. An explicit `-m count` overrides either default (`0` means unlimited). Without `-T` or `-L`, starting QtALH or choosing another file with **Setup → New Alarm Log File…** empties that alarm file, as ALH does; with `-T` or `-L`, an existing alarm file is reopened without being emptied. If such a file is bounded (`-T`, or `-L` with an explicit `-m`) and already holds more records than the limit, the first alarm keeps only its newest records; ALH appends instead. Copy the file first or use `-m 0` to keep every record. After wrapping, physical line order is not chronological. The historical browser sorts recognized timestamps; events sharing one-second timestamps may still have ambiguous relative order.
+The default alarm file holds 2000 records unless `-L` is used, which defaults to unlimited retention as in ALH. An explicit `-m count` overrides either default (`0` means unlimited). Without `-T` or `-L`, starting QtALH empties the alarm file, as ALH does; with `-T` or `-L`, an existing alarm file is reopened without being emptied. If such a file is bounded (`-T`, or `-L` with an explicit `-m`) and already holds more records than the limit, the first alarm keeps only its newest records; ALH appends instead. Copy the file first or use `-m 0` to keep every record. After wrapping, physical line order is not chronological. The historical browser sorts recognized timestamps; events sharing one-second timestamps may still have ambiguous relative order.
 
 PV values and descriptions containing line breaks appear as `\n` and `\r` in text logs, or `&#10;` and `&#13;` in XML logs. Each new alarm remains one physical line. Bounded-log recovery also repairs older multiline records when their record boundaries can be recognized.
 

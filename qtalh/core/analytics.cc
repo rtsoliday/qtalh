@@ -233,6 +233,12 @@ void AlarmAnalytics::reconcile(const QVector<ChannelUpdate>& all, qint64 now, qi
   QHash<QString, int> counts;
   for (const auto& s : all)
     ++counts[s.identity];
+  // Appending one channel at a time grows the vector geometrically, leaving up
+  // to half of a large configuration's channel records allocated but unused.
+  int added = 0;
+  for (auto it = counts.cbegin(); it != counts.cend(); ++it)
+    if (!index.contains(it.key())) ++added;
+  data.channels.reserve(data.channels.size() + added);
   QSet<QString> seen;
   for (const auto& s : all) {
     if (seen.contains(s.identity))

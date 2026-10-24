@@ -4,6 +4,7 @@
 #include "services/pv_router.h"
 #include "services/logging.h"
 #include "services/options.h"
+#include "services/process_limits.h"
 #include "services/notifications.h"
 #include "services/analytics.h"
 #include <QAbstractItemModel>
@@ -40,6 +41,10 @@ public:
   void setFilter(int);
   void refresh();
   bool coloredMasks = false;
+  // How a node differs from its configuration in this runtime (non-zero marks
+  // its name), and the tooltip lines describing it. Unset in the editor.
+  std::function<int(Node*)> modifications;
+  std::function<QString(Node*)> modificationText;
 
 private:
   Document* doc;
@@ -54,12 +59,12 @@ private:
   // whose signature changed, so views repaint those rows instead of everything.
   struct RowSignature {
     std::array<int, 5> counts{};
-    int severity = 0, unack = 0, shelved = 0, status = 0, beep = 0, flags = 0;
+    int severity = 0, unack = 0, shelved = 0, status = 0, beep = 0, flags = 0, modified = 0;
     QString label;
     bool operator==(const RowSignature& o) const {
       return counts == o.counts && severity == o.severity && unack == o.unack &&
              shelved == o.shelved && status == o.status && beep == o.beep && flags == o.flags &&
-             label == o.label;
+             modified == o.modified && label == o.label;
     }
     // The first displayed column whose content differs. Cells are laid out
     // consecutively, so everything from that column to the row's end repaints.
@@ -77,7 +82,7 @@ private:
   const NodeInfo& info(Node*) const;
   // Fonts are requested for every painted and measured cell.
   QFont font(int column, bool group) const;
-  mutable QFont legacyText, legacyName, styledBase;
+  mutable QFont legacyText, legacyName, legacyIndicator, styledBase;
   mutable std::array<QFont, 2> styledName;
   mutable bool legacyFonts = false, styledFonts = false;
 };
@@ -110,6 +115,10 @@ private:
   Document doc;
   Options options;
   bool connectPv, modified = false, quitting = false, dirty = true;
+  // INCLUDE file texts as last read or saved, by path: the editor rewrites
+  // only those that change.
+  QHash<QString, QString> savedIncludes;
+  void rememberIncludes();
   std::unique_ptr<PvRouter> ca;
   std::unique_ptr<Engine> engine;
   std::unique_ptr<Logging> logging;
@@ -119,7 +128,8 @@ private:
   QTreeView *treeView = nullptr, *groupView = nullptr;
   QLabel *execution = nullptr, *filename = nullptr, *messageArea = nullptr, *beepLabel = nullptr,
          *silenceForeverLabel = nullptr, *disabledForceLabel = nullptr, *shelvedLabel = nullptr,
-         *notificationsEnabledLabel = nullptr;
+         *notificationsEnabledLabel = nullptr, *displayFilterLabel = nullptr,
+         *runtimeNotificationsEnabledLabel = nullptr;
   QWidget *runtime = nullptr, *messageBanner = nullptr;
   QPushButton* runtimeButton = nullptr;
   QString runtimeSizedText;
@@ -129,7 +139,9 @@ private:
   // during a silence interval (as are the panes, unless -maskcolor).
   QWidget *footer = nullptr, *paneWidth = nullptr;
   bool silenceColored = false;
-  QTimer refreshTimer, beepTimer, heartbeatTimer;
+  QTimer refreshTimer, statusTimer, beepTimer, heartbeatTimer;
+  int statusTicks = 0;
+  OpenFileMonitor openFileMonitor;
   int silenceMinutes = 30;
   QMediaPlayer* sound = nullptr;
   Node *selection = nullptr, *selectedGroup = nullptr;
@@ -140,10 +152,12 @@ private:
   QPointer<QDialog> historyDialog, shelfListDialog, notificationDialog, analyticsDialog;
   QPointer<QMessageBox> errorPopup, exitPopup;
   QVector<QPointer<QAction>> selectionActions;
-  QPointer<QPlainTextEdit> historyText;
   QPointer<QTableWidget> historyTable;
   // The engine history last shown; unchanged history leaves the view untouched.
   QVector<QString> shownHistory;
+  // The operator's Current Alarm History sort; newest first by default.
+  int historySortColumn = 0;
+  Qt::SortOrder historySortOrder = Qt::DescendingOrder;
   void refreshHistory();
   struct SelectionDialog {
     QPointer<QDialog> window;
@@ -163,9 +177,16 @@ private:
   // Operator tools (ui/tools.cc): active alarm list, search, alarm details,
   // runtime overrides, summary panel, and Phoebus XML import/export.
   QPointer<QDialog> activeAlarmsDialog, findDialog, overridesDialog, summaryDialog;
-  // BEEPSEVR as loaded; Engine::setBeep rewrites the node's option at runtime.
+  // BEEPSEVR as loaded, when other than MINOR (the default for absent nodes);
+  // Engine::setBeep rewrites the node's option at runtime.
   QHash<Node*, int> configuredBeep;
   int configuredBeepSeverity = 1;
+  // Force PV settings as loaded, and nodes whose settings the Force PV dialog
+  // changed since. Both are rebuilt with the engine for each document.
+  QHash<const Node*, QVector<Directive>> configuredForce;
+  QSet<const Node*> forceEdited;
+  int modifications(Node*) const;
+  QString modificationText(Node*) const;
   void showActiveAlarms();
   void findAlarm();
   void alarmDetails();
@@ -197,6 +218,7 @@ private:
   void select(Node*);
   void error(const QString&);
   void showMessage(const QString&);
+  void showLoadWarnings();
   void open(bool insert = false);
   void save(bool as = false);
   void replace(Document, bool snapshot = true);
@@ -206,9 +228,9 @@ private:
   void related(Node* target = nullptr);
   void masks(bool forced = false);
   void beepSeverity(bool global);
-  QDialog* showText(const QString&, const QString&, bool monospace = false);
+  void noAckDialog();
+  QDialog* showText(const QString&, const QString&, bool monospace = false, bool searchable = true);
   void showLiveLog(bool alarm);
-  void selectLogFile(bool alarm);
   void showHistory();
   void broadcast(int mode);
   void cut(bool remove);
@@ -216,6 +238,9 @@ private:
   void clearNode();
   void exitApplication();
   QModelIndex treeIndex(Node*) const;
+  // Select a node as replace() and addNode() leave it: highlighted in the tree
+  // or in its group's contents.
+  void showSelection(Node*);
   void expandOneLevel(const QModelIndex&);
   void expandBranch(const QModelIndex&);
 };

@@ -14,8 +14,8 @@ Beyond ALH, the runtime offers an Active Alarms table, Find Alarm, Alarm Details
 (including the record's alarm limits read from the IOC), Runtime Overrides, an
 Alarm Summary panel, and Phoebus alarm XML import/export (also `--to-phoebus` and
 `--from-phoebus`). These work in every appearance, including `-style motif`.
-QtALH also adds timed shelving, opt-in personal notifications and escalation,
-and session alarm analytics.
+QtALH also adds timed shelving (shown when `USE_SHELVING=1`), opt-in personal
+notifications and escalation, and session alarm analytics.
 PV names prefixed with `pva://` are monitored over pvAccess; all other names
 use Channel Access as in ALH (see
 [pvAccess channels](docs/qtalh-user-guide.md#pvaccess-channels)).
@@ -53,7 +53,8 @@ tables and charts as CSV for further analysis.
 
 ### Manage maintenance with timed shelving
 
-Shelve alarms with an operator name, a reason, and an expiry time. The shelf
+With `USE_SHELVING=1` in the environment, shelve alarms with an operator name, a
+reason, and an expiry time. The shelf
 browser shows remaining time and current alarm state, with controls to change a
 shelf or end it early. Shelves expire automatically and apply only to the current
 runtime session.

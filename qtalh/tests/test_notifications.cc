@@ -2,6 +2,7 @@
 #include "test_compat.h"
 #include <QElapsedTimer>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QProcess>
 #include <QProcessEnvironment>
@@ -724,6 +725,46 @@ private slots:
     qunsetenv("QTALH_NOTIFICATION_TEST_MISSING");
     QVERIFY(!NotificationService::validateWebhook(d).isEmpty());
   }
+  void configurationDirectivesNotifyWithoutSaving() {
+    QTemporaryDir dir;
+    Receiver receiver;
+    receiver.codes = {204, 204};
+    auto doc = parseConfig("GROUP NULL root\n$NOTIFY_WEBHOOK hook " + receiver.url() + "\n"
+                           "GROUP root watched\n$NOTIFY MAJOR hook\nCHANNEL watched inside\n"
+                           "GROUP root other\nCHANNEL other outside\n");
+    Engine engine(doc, {});
+    NotificationService service(nullptr, dir.filePath("settings.json"));
+    qint64 now = 0;
+    service.monotonicNow = [&] { return now; };
+    service.attach(&engine, doc.channels(), "/test.alh");
+    service.setConfiguration(doc);
+    QCOMPARE(service.configured().subscriptions.size(), 1);
+    QCOMPARE(service.configured().subscriptions[0].configuration, service.configurationPath());
+    QVERIFY(service.personal().subscriptions.isEmpty());
+    QCOMPARE(service.policy.settings().subscriptions.size(), 1);
+    // Personal edits apply alongside the file's entries, and only they are saved.
+    service.apply(settings());
+    QCOMPARE(service.policy.settings().subscriptions.size(), 2);
+    service.store.save(service.personal());
+    QFile saved(dir.filePath("settings.json")); QVERIFY(saved.open(QIODevice::ReadOnly));
+    QVERIFY(!saved.readAll().contains("file:"));
+    service.apply(NotificationSettings{});
+    QCOMPARE(service.policy.settings().subscriptions.size(), 1);
+    // Only alarms within the directive's group are sent, at its zero-delay first stage.
+    service.enable(true);
+    engine.event(doc.channels()[1], {3, 2, 2, 1, "outside"});
+    engine.event(doc.channels()[0], {3, 2, 2, 1, "inside"});
+    service.pump(); // Opens the 10-second batch.
+    now = 10000;
+    service.pump();
+    QTRY_COMPARE(receiver.requests.size(), 1);
+    QVERIFY(receiver.requests[0].contains("inside"));
+    QVERIFY(!receiver.requests[0].contains("\"channel\":\"outside\""));
+    // A reload that removes the directives removes the subscription.
+    service.setConfiguration(parseConfig("GROUP NULL root\nCHANNEL root inside\n"));
+    QVERIFY(service.configured().subscriptions.isEmpty());
+    QVERIFY(service.policy.settings().subscriptions.isEmpty());
+  }
   void webhookRetryAndSecrets() {
     QTemporaryDir dir;
     Receiver receiver;
@@ -798,7 +839,9 @@ private slots:
     auto mail = f.readAll();
     QVERIFY(mail.startsWith("From: qtalh@example.invalid\r\n"));
     auto body = QByteArray::fromBase64(mail.mid(mail.indexOf("\r\n\r\n") + 4));
-    QVERIFY(body.contains("QTALH:TEST"));
+    QVERIFY(body.contains("\n\nSynthetic test:\n  QTALH:TEST\n    Value: Test only;"));
+    QVERIFY(body.contains("severity: MAJOR (2); status: NO_ALARM (0); unacknowledged severity: MAJOR (2)"));
+    QVERIFY(body.contains("\nDelivery details: stage test; message ID "));
     QVERIFY(!service.activity.join('\n').contains("mailer-secret"));
   }
   void mailDateHeaderIsRfc5322() {
@@ -1054,6 +1097,10 @@ private slots:
   }
   void placeholdersInTextAreLiteral() {
     NotificationEnvelope e;
+    e.subscriptionName = "Rule%2";
+    e.configuration = "/config%3.alh";
+    e.stage = "stage%4";
+    e.id = "message%5";
     auto a = alarm();
     a.path = "Root/Tank%5";
     a.value = "Pump 2%1";
@@ -1061,8 +1108,11 @@ private slots:
     a.status = 1;
     a.unack = 2;
     e.alarms << NotificationAlarm{"x", a};
-    QVERIFY(notificationText(e).contains(
-        "Root/Tank%5 (pv)\n  Value: Pump 2%1; severity: 2; status: 1; unacknowledged severity: 2\n"));
+    QCOMPARE(notificationText(e), QString(
+        "QtALH alarm: Rule%2\nConfiguration: /config%3.alh\n\n"
+        "Root:\n  Tank%5 (pv)\n"
+        "    Value: Pump 2%1; severity: MAJOR (2); status: READ (1); unacknowledged severity: MAJOR (2)\n"
+        "\nDelivery details: stage stage%4; message ID message%5\n"));
     QTemporaryDir dir;
     Receiver receiver;
     NotificationService service(nullptr, dir.filePath("settings.json"));
@@ -1074,6 +1124,82 @@ private slots:
     QTRY_VERIFY(service.activity.join('\n').contains("Accepted/submitted"));
     QVERIFY(service.activity.join('\n').contains(QRegularExpression(
         "Submitting: Pager%1; message [^;]+; attempt 1(\n|$)")));
+  }
+  void textGroupsChannelsAndRetainsJson() {
+    NotificationEnvelope e;
+    e.id = "stable-id";
+    e.stage = "escalate";
+    e.subscriptionName = "Cooling water";
+    e.configuration = "/test.alh";
+    auto first = alarm("pv:one");
+    first.path = "/Root/Shared/pv:one";
+    first.value = "12";
+    first.status = 3;
+    first.unack = 3;
+    auto other = alarm("pv:two");
+    other.path = "/Root/Other/Shared/pv:two";
+    other.value = "8";
+    other.severity = 1;
+    other.status = 4;
+    auto last = alarm("pv:three");
+    last.path = "/Root/Shared/pv:three";
+    last.value = "0";
+    last.severity = 0;
+    e.alarms = {{"one", first}, {"two", other}, {"three", last}};
+    const auto payload = QJsonDocument::fromJson(notificationPayload(e)).object();
+    const auto text = notificationText(e);
+    QCOMPARE(text, QString(
+        "QtALH alarm: Cooling water\nConfiguration: /test.alh\n\n"
+        "Root:\n"
+        "  Shared:\n"
+        "    pv:one\n"
+        "      Value: 12; severity: MAJOR (2); status: HIHI (3); unacknowledged severity: INVALID (3)\n"
+        "    pv:three\n"
+        "      Value: 0; severity: NO_ALARM (0); status: NO_ALARM (0); unacknowledged severity: MAJOR (2)\n"
+        "  Other:\n"
+        "    Shared:\n"
+        "      pv:two\n"
+        "        Value: 8; severity: MINOR (1); status: HIGH (4); unacknowledged severity: MAJOR (2)\n"
+        "\nDelivery details: stage escalate; message ID stable-id\n"));
+    QCOMPARE(text.count("Root:"), 1);
+    QVERIFY(!text.contains(first.path));
+    const auto after = QJsonDocument::fromJson(notificationPayload(e)).object();
+    QCOMPARE(after.value("alarms"), payload.value("alarms"));
+    QCOMPARE(after.value("messageId").toString(), QString("stable-id"));
+    QCOMPARE(after.value("stage").toString(), QString("escalate"));
+    const auto alarms = after.value("alarms").toArray();
+    QCOMPARE(alarms[0].toObject().value("path").toString(), first.path);
+    QCOMPARE(alarms[0].toObject().value("severity").toInt(), 2);
+    QCOMPARE(alarms[0].toObject().value("status").toInt(), 3);
+    QCOMPARE(alarms[0].toObject().value("unacknowledgedSeverity").toInt(), 3);
+  }
+  void textKeepsEscapedPathComponents() {
+    NotificationEnvelope e;
+    auto a = alarm("pv\\pump%2");
+    a.path = "/Root%1/Tank\\/West%5/pv\\\\pump%2";
+    a.value = "value%3";
+    e.alarms << NotificationAlarm{"x", a};
+    auto b = alarm("other");
+    b.path = "/Root%1/Tank/West%5/other";
+    e.alarms << NotificationAlarm{"y", b};
+    const auto text = notificationText(e);
+    QVERIFY(text.contains("Root%1:\n  Tank/West%5:\n    pv\\pump%2\n      Value: value%3;"));
+    QVERIFY(text.contains("  Tank:\n    West%5:\n      other\n"));
+    QCOMPARE(text.count("Root%1:"), 1);
+  }
+  void textHandlesChannelsWithoutParents() {
+    NotificationEnvelope e;
+    auto a = alarm("root-pv%1");
+    a.path.clear();
+    a.status = 99;
+    e.alarms << NotificationAlarm{"x", a};
+    auto b = alarm("root-pv2");
+    b.path = "/root-pv2";
+    e.alarms << NotificationAlarm{"y", b};
+    const auto text = notificationText(e);
+    QVERIFY(text.contains("\nroot-pv%1\n  Value: "));
+    QVERIFY(text.contains("status: 99;"));
+    QVERIFY(text.contains("\nroot-pv2\n  Value: "));
   }
   void configurationChangeRecordsPause() {
     QTemporaryDir dir;
