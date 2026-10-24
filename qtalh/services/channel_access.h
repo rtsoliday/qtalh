@@ -91,7 +91,7 @@ private:
   void report(int, const QString&);
   void numericUnavailable(Channel*, const QString&);
   void deliverNumber(Channel*, double);
-  void replayNumber(Channel*, const void* tag);
+  void replayNumber(Channel*, quint64 input);
   struct Read;
   struct ReadItem {
     ChannelAccess* owner = nullptr;
@@ -118,7 +118,7 @@ private:
     enum Kind { Connection, Access, Update, ReadConnection, ReadValue, NumberReplay } kind = Connection;
     quint64 channel = 0, epoch = 0, read = 0;
     ReadItem* item = nullptr;
-    const void* tag = nullptr;
+    quint64 input = 0;
     long op = 0;
     int status = 0;
     long type = 0;

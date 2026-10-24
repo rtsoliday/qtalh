@@ -35,4 +35,7 @@ Other standard `EPICS_CA_*` and `EPICS_PVA_*` variables are handled by EPICS Bas
 | Explicit `-Lfile` basename | Process working directory. |
 | Guidance filename | Document directory. |
 
-Absolute paths bypass directory joining. The C++ `loadConfig` API has a separate default: without an explicit configuration directory, includes resolve against the top-level file's directory.
+Absolute paths bypass directory joining. Configuration filenames and `-a`/`-o`
+log filenames beginning with `./` or `../` also resolve from the process working
+directory, bypassing `-f`/`ALARMHANDLER` or `-l` respectively. Relative INCLUDE
+filenames still use the configured directory. The C++ `loadConfig` API has a separate default: without an explicit configuration directory, includes resolve against the top-level file's directory.

@@ -221,6 +221,8 @@ void validateNotifications(const NotificationSettings& s) {
             "Subscription name and saved configuration are required");
     require(r.minimumSeverity >= 1 && r.minimumSeverity <= 4 && r.cooldownSeconds >= 0,
             "Invalid subscription severity or cooldown");
+    require(QRegularExpression(pvWildcard(r.wildcard)).isValid(),
+            "Invalid notification PV wildcard");
     require(!r.stages.isEmpty(), "A subscription needs an initial stage");
     QSet<QString> stages;
     int previous = -1;
@@ -315,6 +317,8 @@ NotifyDirective parseNotify(const QString& value) {
     }
   }
   if (result.stages.isEmpty()) throw ParseError("$NOTIFY needs at least one destination");
+  if (!QRegularExpression(pvWildcard(result.wildcard)).isValid())
+    throw ParseError("$NOTIFY pv= has an invalid wildcard");
   return result;
 }
 NotificationDestination parseDestination(const QString& name, const QString& value) {

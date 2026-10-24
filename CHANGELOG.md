@@ -26,6 +26,9 @@ Changes that operators and site maintainers should review before deployment:
   the environment variable `USE_SHELVING` is `1`.
 - Personal notification subscriptions with escalation, and session alarm
   analytics.
+- Optional binary SDDS alarm snapshots and analytics table/chart exports.
+  Compatible SDDS headers and libraries are detected at build time; normal
+  operation does not require SDDS.
 - Commands starting with `medm` launch `qtedm` from `PATH` instead.
 - New `--help`, `--version` and `--validate` conveniences. Unknown switches
   and Xt resource overrides are errors. A path attached to `-a`, `-o`, `-f`,
@@ -56,6 +59,10 @@ Changes that operators and site maintainers should review before deployment:
 
 Additional 1.0.0 audit decisions and corrections:
 
+- Notification subscriptions reject invalid PV wildcard ranges instead of
+  silently matching no channels.
+- Shared numeric inputs receive the latest monitored value when added, and
+  queued replays for cancelled inputs are discarded.
 - Editor Clear and Cut reject changes that would leave notification references
   unresolved. Copy and Paste carry required notification destinations between
   editor windows, reuse matching definitions and reject conflicting definitions.

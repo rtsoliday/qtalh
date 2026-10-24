@@ -628,19 +628,20 @@ void PvAccess::number(const QString& n, std::function<void(double)> callback, co
       auto found = tag ? std::find_if(c->numbers.begin(), c->numbers.end(),
                                       [&](const auto& number) { return number.tag == tag; })
                        : c->numbers.end();
+      const auto input = found == c->numbers.end() ? ++nextId : found->id;
       if (found != c->numbers.end())
         found->callback = std::move(callback);
       else
-        c->numbers.push_back({tag, std::move(callback), ++nextId});
+        c->numbers.push_back({tag, std::move(callback), input});
       // This input missed the monitor's first sample; give it the latest one
       // later, as a new monitor would, not during this call.
-      if (c->haveNumber && tag) {
+      if (c->haveNumber) {
         const auto id = c->id;
-        QTimer::singleShot(0, this, [this, id, tag] {
+        QTimer::singleShot(0, this, [this, id, input] {
           auto c = channelsById.value(id);
           if (!c || c->cancelled || !c->haveNumber) return;
           auto found = std::find_if(c->numbers.begin(), c->numbers.end(),
-                                    [&](const auto& number) { return number.tag == tag; });
+                                    [&](const auto& number) { return number.id == input; });
           if (found == c->numbers.end()) return;
           const auto callback = found->callback;
           if (callback) callback(c->number);

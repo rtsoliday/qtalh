@@ -244,7 +244,8 @@ plugins from a separate SDK. On Windows, `COMSPEC` selects the command shell
 (default `cmd.exe`). Sound paths and an explicit relative `-Lfile` basename
 resolve from the process working directory, rather than `-f` or `-l`.
 Unknown switches and arbitrary Xt resource overrides are errors. CDEV and
-CMLOG extensions are not supported by QtALH. A path may follow `-a`, `-o`,
+CMLOG extensions are not supported by QtALH; the legacy `-aCM` and `-oCM`
+CMLOG switches are rejected. A path may follow `-a`, `-o`,
 `-f`, `-l` or `-p` without a space when it starts with `/` or `.`, as in
 `-p/usr/share/sounds/freedesktop/stereo/bell.oga`; ALH rejects that form.
 If the configuration file does not exist, QtALH prints the path it looked

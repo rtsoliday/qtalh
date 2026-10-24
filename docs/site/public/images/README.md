@@ -1,8 +1,10 @@
 # Screenshot provenance
 
-The modern screenshots were regenerated on 2026-10-15 with macOS, Qt 5.15.19,
-and the `offscreen` platform to restore the missing referenced assets.
-`main-window.png` retains its 2026-09-11 Linux capture.
+`modern-main.png` and `modern-force-pv.png` were refreshed on 2026-10-24
+with Linux, Qt 5.15.9, and the `offscreen` platform using the scripted captures
+below. They show the current silence colors and all twelve CALC inputs (A–L).
+The other modern screenshots retain their 2026-10-15 macOS, Qt 5.15.19
+`offscreen` captures. `main-window.png` retains its 2026-09-11 Linux capture.
 They show repository-owned synthetic test data; no
 production PVs were connected. The modern captures use the default appearance
 and its smaller default font. Native window decorations, fonts, colors, and

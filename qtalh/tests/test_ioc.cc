@@ -826,6 +826,48 @@ private slots:
     QTest::qWait(200);
     QCOMPARE(values, before + 1 + tail.size());
   }
+  void numericReplayTracksInputs() {
+    // A queued initial value belongs to its input, even if a later input
+    // reuses the owner tag. Default-owner inputs must receive it too.
+    const auto name = prefix + "force";
+    ChannelAccess driver;
+    driver.prepare(name);
+    QTRY_VERIFY(driver.put(name, 2));
+    ChannelAccess ca;
+    int anchor = 0, owner = 0;
+    QVector<double> initial;
+    ca.number(name, [&](double v) { initial << v; }, &anchor);
+    QTRY_COMPARE(initial, QVector<double>{2});
+    int removed = 0, replacement = 0;
+    ca.number(name, [&](double) { ++removed; }, &owner);
+    ca.cancelNumbers(&owner);
+    ca.number(name, [&](double v) { QCOMPARE(v, 2.0); ++replacement; }, &owner);
+    QCOMPARE(removed, 0);
+    QCOMPARE(replacement, 0);
+    ca.poll();
+    QCOMPARE(removed, 0);
+    QCOMPARE(replacement, 1);
+    ca.cancelNumbers(&owner);
+    int cancelled = 0;
+    ca.number(name, [&](double) { ++cancelled; });
+    ca.cancelNumbers(nullptr);
+    QVector<double> first, second;
+    ca.number(name, [&](double v) { first << v; });
+    ca.number(name, [&](double v) { second << v; });
+    QVERIFY(first.isEmpty());
+    QVERIFY(second.isEmpty());
+    QTRY_COMPARE(first, QVector<double>{2});
+    QTRY_COMPARE(second, QVector<double>{2});
+    QCOMPARE(cancelled, 0);
+    QCOMPARE(ChannelAccessTestAccess::channelCount(ca), 1);
+    ca.cancelNumbers(nullptr);
+    QVERIFY(driver.put(name, 5));
+    QTRY_COMPARE(initial, (QVector<double>{2, 5}));
+    QCOMPARE(first, QVector<double>{2});
+    QCOMPARE(second, QVector<double>{2});
+    QCOMPARE(cancelled, 0);
+    QVERIFY(driver.put(name, 0));
+  }
   void forceInputsShareOneChannel() {
     // Inputs reading one PV share its channel. One added later receives the
     // latest value after the call returns, as a new monitor would.

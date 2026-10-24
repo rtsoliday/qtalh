@@ -4,7 +4,7 @@ The documentation is a VitePress site built from Markdown. The repository keeps 
 
 ## Build and view locally
 
-Install Node.js 22 or newer with npm, and Python 3. From the repository root:
+Install Node.js 22 or newer with npm, and Python 3.9 or newer. From the repository root:
 
 ```sh
 make docs

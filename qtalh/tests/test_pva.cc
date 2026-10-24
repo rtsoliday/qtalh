@@ -891,6 +891,45 @@ private slots:
     output->writer->ready();
     QTRY_COMPARE(output->writer->submitted, QVector<double>{2});
   }
+  void numericReplayTracksInputs() {
+    // A queued initial value belongs to its input, even if a later input
+    // reuses the owner tag. Default-owner inputs must receive it too.
+    PvAccess pv;
+    int anchor = 0, owner = 0;
+    QVector<double> initial;
+    pv.number("pva://input", [&](double v) { initial << v; }, &anchor);
+    auto monitor = provider->channels.back()->monitor;
+    monitor->post(5);
+    QTRY_COMPARE(initial, QVector<double>{5});
+    int removed = 0, replacement = 0;
+    pv.number("pva://input", [&](double) { ++removed; }, &owner);
+    pv.cancelNumbers(&owner);
+    pv.number("pva://input", [&](double v) { QCOMPARE(v, 5.0); ++replacement; }, &owner);
+    QCOMPARE(removed, 0);
+    QCOMPARE(replacement, 0);
+    QTest::qWait(50);
+    QCOMPARE(removed, 0);
+    QCOMPARE(replacement, 1);
+    pv.cancelNumbers(&owner);
+    int cancelled = 0;
+    pv.number("pva://input", [&](double) { ++cancelled; });
+    pv.cancelNumbers(nullptr);
+    QVector<double> first, second;
+    pv.number("pva://input", [&](double v) { first << v; });
+    pv.number("pva://input", [&](double v) { second << v; });
+    QVERIFY(first.isEmpty());
+    QVERIFY(second.isEmpty());
+    QTRY_COMPARE(first, QVector<double>{5});
+    QTRY_COMPARE(second, QVector<double>{5});
+    QCOMPARE(cancelled, 0);
+    QCOMPARE(provider->channels.size(), size_t(1));
+    pv.cancelNumbers(nullptr);
+    monitor->post(6);
+    QTRY_COMPARE(initial, (QVector<double>{5, 6}));
+    QCOMPARE(first, QVector<double>{5});
+    QCOMPARE(second, QVector<double>{5});
+    QCOMPARE(cancelled, 0);
+  }
   void forceInputsShareOneChannel() {
     // Inputs reading one PV share its channel. One added later receives the
     // latest value after the call returns, as a new monitor would.

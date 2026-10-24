@@ -420,6 +420,9 @@ private slots:
     QTest::newRow("excluded-class") << "[!x]*" << "x/pv" << false;
     QTest::newRow("literal-class-slash") << "system[/]pv" << "system/pv" << true;
     QTest::newRow("literal-bracket") << "pv[]]" << "pv]" << true;
+    QTest::newRow("unmatched-bracket") << "pv[" << "pv[" << true;
+    QTest::newRow("initial-hyphen") << "pv[-ab]" << "pv-" << true;
+    QTest::newRow("final-hyphen") << "pv[ab-]" << "pv-" << true;
     QTest::newRow("literal-regex") << "pv.+(1)" << "pv.+(1)" << true;
     QTest::newRow("no-regex-expansion") << "pv.+(1)" << "pvXYZ1" << false;
   }
@@ -439,6 +442,31 @@ private slots:
     NotificationEnvelope e;
     QCOMPARE(p.take(e, 70000), matches);
     if (matches) QCOMPARE(e.alarms[0].state.pv, pv);
+  }
+  void invalidPvWildcards_data() {
+    QTest::addColumn<QString>("pattern");
+    QTest::newRow("letters") << "[z-a]*";
+    QTest::newRow("digits") << "SR:[9-0]";
+  }
+  void invalidPvWildcards() {
+    QFETCH(QString, pattern);
+    auto s = settings();
+    s.subscriptions[0].wildcard = pattern;
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error, validateNotifications(s));
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error,
+                             parseNotifications(QJsonDocument(notificationJson(s)).toJson()));
+    NotificationPolicy policy;
+    configure(policy);
+    QVERIFY_THROWS_EXCEPTION(std::runtime_error, policy.configure(s, "/test.alh"));
+    QCOMPARE(policy.settings().subscriptions[0].wildcard, QString("*"));
+    const auto config = "GROUP NULL root\n$NOTIFY_WEBHOOK ops http://127.0.0.1:1/test\n"
+                        "$NOTIFY MAJOR ops pv=" + pattern + "\nCHANNEL root pv\n";
+    try {
+      parseConfig(config);
+      QFAIL("Invalid wildcard range accepted in configuration");
+    } catch (const ParseError& e) {
+      QVERIFY(QString::fromUtf8(e.what()).startsWith("Line 3: $NOTIFY pv= has an invalid wildcard"));
+    }
   }
   void scopesAndDuplicateReload() {
     NotificationPolicy p;

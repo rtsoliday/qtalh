@@ -91,6 +91,16 @@ per line. It is a capture receiver, not a simulation of email or Slack/Teams del
 
 ## Test timed shelving
 
+Shelving is hidden by default. To try this optional exercise, quit the lab and
+restart it with shelving enabled:
+
+```sh
+USE_SHELVING=1 python3 examples/feature-lab/run.py
+```
+
+Retain any `--epics-bin`, port, or other options you used above. This enables
+the shelving menus only for the lab process.
+
 1. Enter `maintenance`; select the maintenance channel under **Diagnostics**.
 2. Choose **Action → Shelve Alarms…**, choose **Custom minutes**, enter **1**, and
    enter your username and a reason such as `Lab maintenance`. Apply it.

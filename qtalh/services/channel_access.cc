@@ -148,11 +148,11 @@ void ChannelAccess::deliverNumber(Channel* c, double value) {
       callback(value);
   }
 }
-void ChannelAccess::replayNumber(Channel* c, const void* tag) {
+void ChannelAccess::replayNumber(Channel* c, quint64 input) {
   if (c->cancelled || !c->haveNumber)
     return;
   auto found = std::find_if(c->numbers.begin(), c->numbers.end(),
-                            [&](const auto& n) { return n.tag == tag; });
+                            [&](const auto& n) { return n.id == input; });
   if (found == c->numbers.end())
     return;
   const auto callback = found->callback;
@@ -235,17 +235,18 @@ void ChannelAccess::number(const QString& n, std::function<void(double)> callbac
         auto found = tag ? std::find_if(c->numbers.begin(), c->numbers.end(),
                                         [&](const auto& number) { return number.tag == tag; })
                          : c->numbers.end();
+        const auto input = found == c->numbers.end() ? ++nextSerial : found->id;
         if (found != c->numbers.end())
           found->callback = std::move(callback);
         else
-          c->numbers.push_back({tag, std::move(callback), ++nextSerial});
+          c->numbers.push_back({tag, std::move(callback), input});
         // This input missed the monitor's first event; give it the latest
         // value later, as a new monitor would, not during this call.
-        if (c->haveNumber && tag) {
+        if (c->haveNumber) {
           Callback replay;
           replay.kind = Callback::NumberReplay;
           replay.channel = c->serial;
-          replay.tag = tag;
+          replay.input = input;
           defer(std::move(replay));
         }
         return;
@@ -340,7 +341,7 @@ void ChannelAccess::dispatch() {
     if (!c)
       continue;
     if (callback.kind == Callback::NumberReplay)
-      replayNumber(c, callback.tag);
+      replayNumber(c, callback.input);
     else if (callback.kind == Callback::Connection)
       connected(c, callback.op);
     else if (callback.kind == Callback::Access)

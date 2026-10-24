@@ -27,6 +27,8 @@ They do not alter the ALH configuration file.
 PV wildcards match the entire PV name. `*` matches any number of characters and
 `?` matches one character, including `/` and `\`. Character classes such as
 `[a-c]` and `[!x]` are supported; separators entered literally match themselves.
+Invalid character ranges, such as `[z-a]`, are rejected when saving a
+subscription or loading settings/configuration.
 
 Every runtime starts **paused**, even when saved subscriptions are enabled,
 unless it is started with `-notifications`. That option enables them once at
