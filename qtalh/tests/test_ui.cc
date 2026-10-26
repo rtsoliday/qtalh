@@ -25,6 +25,7 @@
 #include <QtEndian>
 #include <atomic>
 #include <clocale>
+#include <cmath>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #include <QAudioOutput>
 #endif
@@ -870,6 +871,113 @@ private slots:
       for (bool editor : {false, true}) {
         auto w = std::make_unique<Window>(sample(), options(editor), false);
         QCOMPARE(phoebusActions(w.get()), value && QByteArray(value) == "1" ? 2 : 0);
+      }
+    }
+  }
+  void compactIndicatorFlashesWhileSilenced_data() {
+    QTest::addColumn<int>("severity");
+    for (int severity = 1; severity <= 4; ++severity)
+      QTest::newRow(qPrintable(severityName(severity))) << severity;
+  }
+  void compactIndicatorFlashesWhileSilenced() {
+    QFETCH(int, severity);
+    auto w = std::make_unique<Window>(parseConfig("GROUP NULL root\nCHANNEL root pv\n"), options(false), false);
+    QWidget* compact = nullptr;
+    for (auto widget : QApplication::topLevelWidgets())
+      if (widget->objectName() == "runtimeWindow") compact = widget;
+    QVERIFY(compact);
+    auto button = compact->findChild<QPushButton*>("runtimeAlarm"); QVERIFY(button);
+    auto timer = w->findChild<QTimer*>("runtimeStatusTimer"); QVERIFY(timer);
+    QCOMPARE(timer->interval(), 1000);
+    timer->stop();
+    auto& engine = w->alarmEngine();
+    qint64 time = 2000;
+    engine.now = engine.monotonicNow = [&] { return time; };
+    engine.setSilenceUntil(time + 30 * 60000);
+    auto channel = w->document().channels()[0];
+    engine.event(channel, {3, severity, severity, 1, "alarm"});
+    QVERIFY(!engine.audible());
+    auto tick = [&] { return QMetaObject::invokeMethod(timer, "timeout", Qt::DirectConnection); };
+    auto fill = [&] {
+      const auto image = button->grab().toImage();
+      return image.pixelColor(QPoint(10, 5) * image.devicePixelRatio());
+    };
+    QVERIFY(tick());
+    // ALH alternates its neutral blue-gray with the highest unacknowledged
+    // severity, including white INVALID/ERROR, even during timed silence.
+    const QColor neutral("#b0c3ca");
+    QCOMPARE(fill(), neutral);
+    time += 1000; QVERIFY(tick());
+    QCOMPARE(fill(), severityColor(severity));
+    time += 1000; QVERIFY(tick());
+    QCOMPARE(fill(), neutral);
+    engine.acknowledge(channel);
+    for (int phase = 0; phase < 2; ++phase) {
+      time += 1000; QVERIFY(tick());
+      QCOMPARE(fill(), severityColor(severity)); // Acknowledged alarms stay solid.
+    }
+    engine.event(channel, {});
+    engine.acknowledge(channel);
+    QVERIFY(tick());
+    QCOMPARE(fill(), neutral);
+  }
+  void alarmLegendContrast_data() {
+    QTest::addColumn<bool>("dark");
+    QTest::newRow("light") << false;
+    QTest::newRow("dark") << true;
+  }
+  void alarmLegendContrast() {
+    if (legacyAppearance()) QSKIP("The collapsible legend belongs to the modern appearance");
+    QFETCH(bool, dark);
+    struct RestorePalette {
+      QPalette palette = QApplication::palette();
+      ~RestorePalette() { QApplication::setPalette(palette); }
+    } restore;
+    auto palette = restore.palette;
+    palette.setColor(QPalette::Window, QColor(dark ? "#202227" : "#f3f4f6"));
+    palette.setColor(QPalette::Button, QColor(dark ? "#2c2f35" : "#fbfbfc"));
+    for (auto role : {QPalette::WindowText, QPalette::ButtonText})
+      palette.setColor(role, QColor(dark ? "#e5e7eb" : "#1f2329"));
+    QApplication::setPalette(palette);
+    auto o = options(false); o.silent = false;
+    auto w = std::make_unique<Window>(sample(), o, false);
+    w->resize(1000, 600); w->show();
+    auto toggle = w->findChild<QToolButton*>("alarmLegendToggle"); QVERIFY(toggle);
+    auto legend = w->findChild<QWidget*>("alarmLegend"); QVERIFY(legend);
+    auto silence = w->findChild<QCheckBox*>("silenceInterval"); QVERIFY(silence);
+    auto linear = [](double c) { return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4); };
+    auto luminance = [&](QColor c) {
+      return .2126 * linear(c.redF()) + .7152 * linear(c.greenF()) + .0722 * linear(c.blueF());
+    };
+    for (bool silenced : {false, true, false}) {
+      silence->setChecked(silenced);
+      for (bool open : {false, true}) {
+        toggle->setChecked(open);
+        QCOMPARE(legend->isHidden(), !open);
+        QCOMPARE(toggle->arrowType(), open ? Qt::DownArrow : Qt::RightArrow);
+        QCoreApplication::processEvents();
+        toggle->clearFocus();
+        const auto image = toggle->grab().toImage().convertToFormat(QImage::Format_RGB32);
+        // The dominant interior color is the actual button surface, including
+        // the checked-state fill. Check rendered glyph pixels against it.
+        QHash<QRgb, int> colors;
+        for (int y = 3; y < image.height() - 3; ++y)
+          for (int x = 3; x < image.width() - 3; ++x) ++colors[image.pixel(x, y)];
+        QRgb surface = 0; int count = 0;
+        for (auto it = colors.cbegin(); it != colors.cend(); ++it)
+          if (it.value() > count) { surface = it.key(); count = it.value(); }
+        const double background = luminance(QColor(surface));
+        int readable = 0;
+        for (int y = 4; y < image.height() - 4; ++y)
+          for (int x = image.width() / 3; x < image.width() * 3 / 4; ++x) {
+            const double text = luminance(image.pixelColor(x, y));
+            if ((qMax(text, background) + .05) / (qMin(text, background) + .05) >= 4.5) ++readable;
+          }
+        if (silenced && open) {
+          QDir().mkpath(TEST_OUTPUT);
+          QVERIFY(w->grab().save(QString(TEST_OUTPUT) + "/legend-silenced-" + (dark ? "dark" : "light") + ".png"));
+        }
+        QVERIFY2(readable >= 10, "Alarm legend text must contrast with its rendered button surface");
       }
     }
   }

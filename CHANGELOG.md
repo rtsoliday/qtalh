@@ -43,6 +43,10 @@ Changes since 1.0.0:
 - Silence colors the status area and, unless `-maskcolor` is set, the alarm panes
   blue. Persistent footer indicators identify Silence Forever, a nondefault
   facility beep threshold, a display filter, and disabled Force PVs.
+- The compact Alarm Handler indicator uses ALH's neutral blue-gray between
+  flashes, so white INVALID/ERROR alarms remain visible in the modern appearance.
+  The Alarm legend disclosure keeps readable text when expanded or hovered on
+  the blue silence background.
 - Selection, middle-click copy/drag, guidance and command previews, tree expansion,
   dialog layouts and default font size have been updated from operator feedback.
   Configuration-disabled or cancelled channels are excluded from analytics.

@@ -117,6 +117,33 @@ void applyInitialGeometry(QWidget* window, const QString& geometry) {
         ? available.bottom() + 1 - frame.height() + offsets[1] : available.top() + offsets[1]);
   window->move(position);
 }
+// Keep the disclosure label on the footer's surface. Native tool buttons can
+// paint a light checked/hover fill underneath the silenced footer's white text.
+class LegendToggle : public QToolButton {
+protected:
+  void paintEvent(QPaintEvent*) override {
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+    const auto foreground = palette().color(QPalette::WindowText);
+    const auto background = palette().color(QPalette::Window);
+    if (isChecked() || underMouse() || isDown()) {
+      painter.setPen(Qt::NoPen);
+      painter.setBrush(blend(background, foreground, isDown() ? 0.16 : 0.08));
+      painter.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 3, 3);
+    }
+    QStyleOptionToolButton option;
+    initStyleOption(&option);
+    option.palette.setColor(QPalette::ButtonText, foreground);
+    style()->drawControl(QStyle::CE_ToolButtonLabel, &option, &painter, this);
+    if (hasFocus()) {
+      QStyleOptionFocusRect focus;
+      focus.initFrom(this);
+      focus.rect = rect().adjusted(2, 2, -2, -2);
+      focus.backgroundColor = background;
+      style()->drawPrimitive(QStyle::PE_FrameFocusRect, &focus, &painter, this);
+    }
+  }
+};
 // Pane divider drawn directly: classic ALH uses a black rule, the modern view a
 // one-pixel line that highlights while hovered. No style sheet reaches the views.
 class PaneSplitter : public QSplitter {
@@ -1083,7 +1110,7 @@ void Window::buildUi() {
       label->setForegroundRole(QPalette::PlaceholderText);
       legendLayout->addWidget(label);
     }
-    auto toggle = new QToolButton;
+    auto toggle = new LegendToggle;
     toggle->setObjectName("alarmLegendToggle");
     toggle->setText("Alarm legend");
     toggle->setCheckable(true);
@@ -1400,7 +1427,9 @@ void Window::refreshStatus() {
   shelvedLabel->setVisible(!options.editor && shown.shelved > 0);
   int color = shown.unack ? ((engine->now() / 1000) % 2 ? shown.unack : 0) : shown.severity;
   auto button = static_cast<MotifButton*>(runtimeButton);
-  const auto background = severityColor(color);
+  // ALH's neutral blue-gray keeps the off phase visible against white INVALID
+  // and ERROR alarms; the modern button palette is otherwise almost white.
+  const auto background = color ? severityColor(color) : QColor("#b0c3ca");
   if (button->background != background) {
     button->background = background;
     button->update();
