@@ -630,7 +630,14 @@ Window::Window(Document d, Options o, bool connections)
         const bool playing = sound->state() == QMediaPlayer::PlayingState;
 #endif
         if (!playing) {
+#if defined(Q_OS_LINUX) && QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+          // Qt 5's GStreamer backend can truncate short Ogg sounds when
+          // seeking after EndOfMedia. Reload so every beep plays the full
+          // clip, as ALH's fresh `play` process does.
+          sound->setMedia(sound->media());
+#else
           sound->setPosition(0);
+#endif
           sound->play();
         }
       }

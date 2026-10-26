@@ -57,6 +57,9 @@ Changes since 1.0.0:
   views show up to 10,000 records or 2.5 MiB. Audible alarms repeat every two
   seconds, and a custom sound that is still playing is not restarted. Alarm
   Analytics opens on unsuppressed activity.
+- On Linux with Qt 5, repeated custom alarm sounds play their full duration.
+  Reloading the clip avoids GStreamer truncating short Ogg sounds after the
+  first beep, matching ALH's playback of the same sound file.
 - A missing configuration file is named on standard error, and the file chooser
   preselects a file whose name differs only in case. `-aCM`, `-oCM` and Xt
   resource switches report specific errors.

@@ -326,7 +326,7 @@ ALH already skips; silently ignored lines produce no entry.
 | Group/channel properties, cut/copy/paste/clear, undo/redo | Editor and snapshot model | Add/undo/redo/save and cross-window clipboard tests; properties dialog smoke test |
 | Reports and printing | Text report, QPrinter | Implemented; actual paper output unverified |
 | Guidance URL/file/text, related processes, help | QDesktopServices, detached QProcess | Guidance dialog tested; external browser/command integration needs operator review |
-| Beep and audio files, including Ogg/Vorbis | QApplication beep, QMediaPlayer | Threshold logic tested; bundled tests/alarm.ogg decoded and played twice muted; speaker output unverified |
+| Beep and audio files, including Ogg/Vorbis | QApplication beep, QMediaPlayer | Threshold logic tested; bundled tests/alarm.ogg played twice muted through the alarm callback; Linux Qt 5 repeated-beep duration matched ALH/SoX in an output-monitor recording (see tests/README.md); physical speaker output unverified |
 | Main/runtime fonts, geometry, display | options.cc and Window | Options parsed; screenshot checks at fixed scale |
 | Master/slave lock and message/stop-logging/reload broadcast | services/logging.cc | Legacy-format broadcast/reload/stop messages; native POSIX lock handoff and shared-window lock lifetime tests |
 | Alarm/opmod files, bounded rotation, dated names, XML-ish format | services/logging.cc | File logging, bounded rotation, and dated/XML tests |

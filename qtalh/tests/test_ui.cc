@@ -3266,6 +3266,8 @@ private slots:
     auto w = std::make_unique<Window>(sample(), o, false);
     auto player = w->findChild<QMediaPlayer*>("alarmSound");
     QVERIFY(player);
+    auto timer = w->findChild<QTimer*>("alarmBeepTimer"); QVERIFY(timer);
+    timer->stop();
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     player->audioOutput()->setMuted(true);
 #else
@@ -3275,10 +3277,22 @@ private slots:
                                  player->error() != QMediaPlayer::NoError,
                              10000);
     QVERIFY2(player->error() == QMediaPlayer::NoError, qPrintable(player->errorString()));
-    // Decode to completion twice: repeating alarms must restart after the first beep.
+    auto& engine = w->alarmEngine();
+    engine.setSilenceForever(false);
+    engine.event(w->document().channels()[0], {3, 2, 2, 1, "alarm"});
+    QVERIFY(engine.audible());
+    // Drive the production alarm callback, including its backend-specific
+    // restart, rather than duplicating playback logic in the test.
     for (int repeat = 0; repeat < 2; ++repeat) {
-      player->setPosition(0);
-      player->play();
+      QVERIFY(QMetaObject::invokeMethod(timer, "timeout", Qt::DirectConnection));
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+      QTRY_COMPARE(player->playbackState(), QMediaPlayer::PlayingState);
+#else
+      QTRY_COMPARE(player->state(), QMediaPlayer::PlayingState);
+#endif
+      QSignalSpy states(player, &QMediaPlayer::mediaStatusChanged);
+      QVERIFY(QMetaObject::invokeMethod(timer, "timeout", Qt::DirectConnection));
+      QCOMPARE(states.count(), 0); // An active clip must not restart.
       QTRY_VERIFY_WITH_TIMEOUT(player->mediaStatus() == QMediaPlayer::EndOfMedia ||
                                    player->error() != QMediaPlayer::NoError,
                                10000);

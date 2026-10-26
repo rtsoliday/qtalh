@@ -338,11 +338,24 @@ the README and compatibility inventory remain historical platform evidence.
 ## Audio fixture
 
 [alarm.ogg](alarm.ogg) is a generated 0.2-second, 880 Hz sine wave encoded as
-Ogg Vorbis. The UI test decodes and plays it twice with output muted, on both
-Qt 5 and Qt 6. It does not require a system sound theme, and does not verify
+Ogg Vorbis. The UI test decodes and plays it twice through the alarm timer
+callback with output muted, on both Qt 5 and Qt 6, and checks that a timer tick
+does not restart active playback. It does not require a system sound theme, and does not verify
 speaker output. On macOS the offscreen suite runs playback and missing-file
 fallback cases in Cocoa child processes, which supply the event loop needed by
 native media backends to report both playback completion and errors.
+
+On 2026-10-26, Linux Qt 5.15.9/GStreamer playback was also recorded from the
+desktop's PulseAudio output monitor at 48 kHz stereo, using
+`/usr/share/sounds/freedesktop/stereo/bell.oga` (164.286 ms including its quiet
+tail). Before the fix, three Qt plays produced audible spans of 125.271,
+75.500 and 78.188 ms. Reloading the media before each play produced 125.271 ms
+on all three repeats of the actual `Window` alarm callback, versus 125.292 ms
+on all three reference `play -q` invocations, matching within one recorded
+sample. Spans use the first and last samples with absolute signed 16-bit
+amplitude greater than 50, with gaps over 100 ms separating beeps. The test
+window had PV connections and logging disabled; the running alarm sessions
+were unchanged. This verifies output timing, not acoustic speaker output.
 
 The FFmpeg command-line tool and its libvorbis encoder are needed only to
 regenerate the fixture. From `qtalh/tests/`:
