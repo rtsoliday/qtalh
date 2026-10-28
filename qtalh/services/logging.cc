@@ -1,6 +1,7 @@
 #include "core/diagnostics.h"
 // ALH logging and interoperable Linux file locking/broadcast services.
 #include "logging.h"
+#include "core/bounded_file.h"
 #include "log_identity.h"
 #include "log_recovery.h"
 #include "ipc.h"
@@ -1111,7 +1112,11 @@ void Logging::tick(bool receiveBroadcast) {
   QFile f(options.config + ".MESS");
   if (!f.open(QIODevice::ReadOnly))
     return;
-  auto lines = QString::fromLocal8Bit(f.readAll()).split('\n');
+  QByteArray data;
+  qint64 remaining = MaximumBroadcastBytes;
+  if (readBoundedFile(f, data, remaining) != BoundedReadResult::Complete)
+    return;
+  auto lines = QString::fromLocal8Bit(data).split('\n');
   // Legacy senders publish in place. Do not consume an ID until the message,
   // date and sender lines have arrived, or a partial reload is lost forever.
   // The final sender line has no terminating newline in ALH's wire format.
@@ -1231,11 +1236,6 @@ bool Logging::sendBroadcast(const QString& entered, int minutes, bool reloadFaci
       reloadFacility ? "RELOAD_FACILITY: " + text
       : minutes ? QString("%1 MIN  ALH  WILL  NOT  SAVE ALARM LOG!!!! %2").arg(minutes).arg(text)
                 : text;
-  QFile f(options.config + ".MESS");
-  if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-    setLock(broadcastFd, false);
-    return false;
-  }
   // Legacy readers treat the first line as an opaque ID in a 30-byte buffer.
   static qint64 lastMessageTime = 0;
   lastMessageTime = qMax(time, lastMessageTime + 1);
@@ -1246,6 +1246,16 @@ bool Logging::sendBroadcast(const QString& entered, int minutes, bool reloadFaci
                  " host=" + QHostInfo::localHostName() +
                  " display=" + qEnvironmentVariable("DISPLAY");
   auto bytes = data.toLocal8Bit();
+  if (bytes.size() > MaximumBroadcastBytes) {
+    setLock(broadcastFd, false);
+    if (error) error("Message broadcast exceeds 64 KiB");
+    return false;
+  }
+  QFile f(options.config + ".MESS");
+  if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    setLock(broadcastFd, false);
+    return false;
+  }
   bool ok = f.write(bytes) == bytes.size() && f.flush();
   f.close();
   if (!ok) {

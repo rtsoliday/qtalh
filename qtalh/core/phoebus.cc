@@ -3,6 +3,7 @@
 // description, enabled, latching, annunciating, delay, count and filter, then
 // guidance/display/command/automated_action entries with <title>/<details>.
 #include "phoebus.h"
+#include "bounded_file.h"
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -15,14 +16,12 @@
 #include <limits>
 namespace alh {
 namespace {
-QByteArray readXmlFile(QFile& file) {
-  // A positive short read does not prove EOF. QFile can return a valid XML
-  // prefix while dropping the following read error; probe again before
-  // accepting the configuration, as the ALH text loader does.
-  QByteArray bytes = file.readAll();
-  for (QByteArray more; !(more = file.readAll()).isEmpty();)
-    bytes += more;
-  if (file.error() != QFileDevice::NoError)
+QByteArray readXmlFile(QFile& file, qint64& remaining) {
+  QByteArray bytes;
+  const auto result = readBoundedFile(file, bytes, remaining);
+  if (result == BoundedReadResult::TooLarge)
+    throw ParseError("Phoebus XML exceeds 32 MiB total: " + file.fileName());
+  if (result == BoundedReadResult::ReadError)
     throw ParseError("Cannot read " + file.fileName() + ": " + file.errorString());
   return bytes;
 }
@@ -194,15 +193,17 @@ struct Element {
   }
 };
 constexpr auto XInclude = "http://www.w3.org/2001/XInclude";
-Element readElement(QXmlStreamReader& xml, const QString& base, QSet<QString>& stack, int depth,
+Element readElement(QXmlStreamReader& xml, const QString& base, QSet<QString>& stack, qint64& remaining,
+                    int depth,
                     int nesting = 0);
-Element readRoot(const QByteArray& bytes, const QString& base, QSet<QString>& stack, int depth) {
+Element readRoot(const QByteArray& bytes, const QString& base, QSet<QString>& stack,
+                 qint64& remaining, int depth) {
   if (depth > 20) throw ParseError("Phoebus XML exceeds 20 nested includes");
   QXmlStreamReader xml(bytes);
   while (!xml.atEnd() && !xml.isStartElement()) xml.readNext();
   if (xml.hasError() || !xml.isStartElement())
     throw ParseError("Not a Phoebus alarm configuration: " + xml.errorString());
-  auto root = readElement(xml, base, stack, depth);
+  auto root = readElement(xml, base, stack, remaining, depth);
   // Consume the entire document: a valid first element must not hide trailing
   // declarations, broken comments, or a second configuration.
   while (!xml.atEnd()) xml.readNext();
@@ -210,8 +211,8 @@ Element readRoot(const QByteArray& bytes, const QString& base, QSet<QString>& st
     throw ParseError(QString("Phoebus XML line %1: %2").arg(xml.lineNumber()).arg(xml.errorString()));
   return root;
 }
-Element readElement(QXmlStreamReader& xml, const QString& base, QSet<QString>& stack, int depth,
-                    int nesting) {
+Element readElement(QXmlStreamReader& xml, const QString& base, QSet<QString>& stack,
+                    qint64& remaining, int depth, int nesting) {
   if (nesting > 100) throw ParseError("Phoebus XML nesting exceeds 100 levels");
   Element e;
   e.name = xml.name().toString();
@@ -242,7 +243,8 @@ Element readElement(QXmlStreamReader& xml, const QString& base, QSet<QString>& s
       QFile f(canonical);
       if (!f.open(QIODevice::ReadOnly)) throw ParseError("Cannot open Phoebus include: " + href);
       stack.insert(canonical);
-      auto included = readRoot(readXmlFile(f), file.absolutePath(), stack, depth + 1);
+      auto included = readRoot(readXmlFile(f, remaining), file.absolutePath(), stack,
+                              remaining, depth + 1);
       if (!pointer.isEmpty()) {
         // Phoebus uses XInclude shorthand ID pointers to select a component
         // from an included <config>. Never silently ignore an unsupported or
@@ -267,7 +269,7 @@ Element readElement(QXmlStreamReader& xml, const QString& base, QSet<QString>& s
       stack.remove(canonical);
       continue;
     }
-    e.children << readElement(xml, base, stack, depth, nesting + 1);
+    e.children << readElement(xml, base, stack, remaining, depth, nesting + 1);
   }
   e.text = e.text.trimmed();
   return e;
@@ -446,6 +448,8 @@ QByteArray writePhoebusXml(const Document& doc, QStringList* notes) {
   xml.writeStartDocument();
   writeNode(xml, *doc.root, collected);
   xml.writeEndDocument();
+  if (bytes.size() > MaximumConfigurationBytes)
+    throw ParseError("Phoebus XML exceeds 32 MiB total");
   collected.write(notes);
   return bytes;
 }
@@ -456,8 +460,12 @@ void savePhoebusXml(const Document& doc, const QString& path, QStringList* notes
     throw ParseError("Cannot write " + path + ": " + f.errorString());
 }
 Document parsePhoebusXml(const QByteArray& bytes, const QString& baseDir, QStringList* notes) {
+  if (bytes.size() > MaximumConfigurationBytes)
+    throw ParseError("Phoebus XML exceeds 32 MiB total");
+  qint64 remaining = MaximumConfigurationBytes - bytes.size();
   QSet<QString> stack;
-  const auto root = readRoot(bytes, baseDir.isEmpty() ? QDir::currentPath() : baseDir, stack, 0);
+  const auto root = readRoot(bytes, baseDir.isEmpty() ? QDir::currentPath() : baseDir,
+                             stack, remaining, 0);
   if (root.name != "config")
     throw ParseError("Expected a Phoebus <config> element, found <" + root.name + ">");
   Notes collected;
@@ -479,6 +487,7 @@ Document parsePhoebusXml(const QByteArray& bytes, const QString& baseDir, QStrin
 Document loadPhoebusXml(const QString& path, QStringList* notes) {
   QFile f(path);
   if (!f.open(QIODevice::ReadOnly)) throw ParseError("Cannot open " + path + ": " + f.errorString());
-  return parsePhoebusXml(readXmlFile(f), QFileInfo(path).absolutePath(), notes);
+  qint64 remaining = MaximumConfigurationBytes;
+  return parsePhoebusXml(readXmlFile(f, remaining), QFileInfo(path).absolutePath(), notes);
 }
 } // namespace alh

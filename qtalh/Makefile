@@ -3,6 +3,11 @@ QT_REQUIRED := 1
 QT_MODULES := Core Gui Widgets Network PrintSupport Multimedia
 EPICS_REQUIRED_LIBS := pvAccess pvData ca Com
 include ../Makefile.rules
+ifeq ($(OS),Linux)
+  # Harden QtALH executables without changing the shared library build rules.
+  CXXFLAGS += -fstack-protector-strong -fPIE
+  LDFLAGS += -pie -Wl,-z,relro,-z,now
+endif
 OBJ_DIR = O.$(OS)-$(ARCH)-qt$(QT_VERSION)
 include build/sdds.mk
 ifeq ($(OS),Windows)

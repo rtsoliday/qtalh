@@ -283,6 +283,8 @@ when `QTALH_PHOEBUS_MENU` is set (to a value other than empty or `0`); they
 are hidden from operator menus otherwise. See
 [Active alarms, search & details](site/operate/alarm-tools.md) and
 [Phoebus XML import & export](site/configure/phoebus.md).
+Phoebus XML imports, including their XInclude files, share a 32 MiB input limit.
+Exports that would exceed 32 MiB fail without replacing the destination file.
 
 Other menu commands follow ALH. **View → Configuration File** shows the running
 configuration as read-only text with Find, including source comments and blank
@@ -401,6 +403,9 @@ A device, FIFO, socket, or directory is rejected with
 exhaust memory at startup or reload. The top-level configuration may still be
 a pipe, such as `qtalh <(generator)`. The C++ `loadConfig` API uses
 the top-level file's directory when no configuration directory is supplied.
+The configuration and all files read through `INCLUDE` share a 32 MiB input
+limit. QtALH rejects a larger input, including one supplied through a pipe.
+Save checks the encoded output against the same limit before replacing a file.
 
 Configuration files are read in the locale encoding (normally UTF-8). A file,
 or an included file, that is not valid in that encoding is read as ISO-8859-1
@@ -705,6 +710,8 @@ Change the opening text, or use **Reload Facility** or **Stop Alarm Logging**
 for those actions. Explicit controls and broadcasts from legacy ALH retain
 their existing wire format. A broadcast is one line: pasted line breaks and
 other control characters are sent as spaces.
+Broadcasts over 64 KiB are ignored by receivers; QtALH also refuses to send
+one that exceeds this limit.
 As in ALH, on Linux/macOS a `-B` runtime handles SIGINT (Ctrl-C) as an Exit
 without confirmation. A sender refuses, with a warning, until its message has
 been delivered; send SIGINT again afterwards. Without `-B`, and for other

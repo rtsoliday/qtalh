@@ -1,6 +1,7 @@
 // ALH text format port from alConfig.c, with bounded transactional parsing.
 // See ../../LICENSE. INCLUDEs are expanded on save, matching legacy ALH.
 #include "model.h"
+#include "bounded_file.h"
 #include <algorithm>
 #include "notifications.h"
 #include <QDir>
@@ -14,6 +15,7 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <utility>
 #include <postfix.h>
 namespace alh {
 namespace {
@@ -54,18 +56,22 @@ QString decode(QByteArray bytes, bool& latin1) {
   latin1 = true;
   return QString::fromLatin1(bytes);
 }
+QByteArray encodeConfig(const Document& doc, const QString& text) {
+  // Edits may add text that ISO-8859-1 cannot represent; keep it, not '?'.
+  auto data = doc.latin1 ? text.toLatin1() : text.toLocal8Bit();
+  if (doc.latin1 && QString::fromLatin1(data) != text)
+    data = text.toLocal8Bit();
+  return data;
+}
 bool forceCalcInput(const QString& name) {
   static const QRegularExpression input("^FORCEPV_CALC_[A-L]$");
   return input.match(name).hasMatch();
 }
-// QFile drops a read error that follows a short read, so one readAll() can
-// return a valid prefix with no error. Read until no data remains; a failed
-// read then sets QFile::error(). ALH omits ferror() and accepts the prefix.
-bool readFile(QFile& f, QByteArray& data) {
-  data = f.readAll();
-  for (QByteArray more; !(more = f.readAll()).isEmpty();)
-    data += more;
-  return f.error() == QFileDevice::NoError;
+bool readFile(QFile& f, QByteArray& data, qint64& remaining) {
+  const auto result = readBoundedFile(f, data, remaining);
+  if (result == BoundedReadResult::TooLarge)
+    throw ParseError("Configuration exceeds 32 MiB total: " + f.fileName());
+  return result == BoundedReadResult::Complete;
 }
 class Parser {
 public:
@@ -78,6 +84,17 @@ public:
   QHash<QString, Node*> lineOwners;
   // Read order of document lines and INCLUDE lines (DocumentLine::sequence).
   int sequence = 0;
+  qint64 remainingBytes = MaximumConfigurationBytes;
+  void chargeBytes(qint64 bytes) {
+    if (bytes > remainingBytes)
+      throw ParseError("Configuration exceeds 32 MiB total");
+    remainingBytes -= bytes;
+  }
+  void chargeText(const QString& text) {
+    // Synthetic readback must count the bytes Save will write. The normal
+    // file path charges raw bytes in readBoundedFile instead.
+    chargeBytes(included ? encodeConfig(doc, text).size() : text.toUtf8().size());
+  }
   // Large configurations repeat directive keys and many values (commands,
   // Force PVs, count filters); nodes share one copy of each instead.
   QSet<QString> strings;
@@ -299,6 +316,7 @@ public:
           if (stack.contains(key))
             fail("Include cycle: " + path);
           text = *found;
+          chargeText(text);
         } else {
           const QFileInfo target(path);
           key = target.canonicalFilePath();
@@ -317,7 +335,7 @@ public:
           // A read error rejects the whole configuration so a partial include
           // cannot silently remove alarms during startup or reload.
           QByteArray data;
-          if (!readFile(f, data))
+          if (!readFile(f, data, remainingBytes))
             fail("Cannot read include: " + path + ": " + f.errorString());
           text = decode(data, doc.latin1);
         }
@@ -929,6 +947,7 @@ private:
 } // namespace
 Document parseConfig(const QString& text, const QString& base) {
   Parser p;
+  p.chargeText(text);
   // Only Edit text, which names itself on its first line, has markers.
   const bool markers = text.startsWith(QString(EditMarker) + "edit\n");
   p.read(markers ? text.mid(int(qstrlen(EditMarker)) + 5) : text,
@@ -946,7 +965,7 @@ Document loadConfig(const QString& path, const QString& configDir) {
   // Reject a read error instead of accepting a valid prefix as a smaller
   // configuration; callers keep the running document on ParseError.
   QByteArray text;
-  if (!readFile(f, text))
+  if (!readFile(f, text, p.remainingBytes))
     throw ParseError("Cannot read " + path + ": " + f.errorString());
   p.read(decode(text, p.doc.latin1),
          configDir.isEmpty() ? QFileInfo(path).absolutePath() : configDir);
@@ -1071,8 +1090,10 @@ QVector<ConfigFile> writeConfigFiles(const Document& doc, const QString& path,
   // Read the files back as loadConfig() would, before anything is written.
   Parser p;
   p.included = &included;
+  p.doc.latin1 = doc.latin1;
   p.stack.insert(absolute);
   try {
+    p.chargeText(result.front().text);
     p.read(result.front().text, configDir.isEmpty() ? QFileInfo(absolute).absolutePath() : configDir);
     p.validate();
   } catch (const ParseError& e) {
@@ -1088,7 +1109,12 @@ void saveConfig(const Document& doc, const QString& path) {
   const auto text = writeConfig(doc, ConfigText::Source);
   Document reread;
   try {
-    reread = parseConfig(text);
+    Parser p;
+    p.chargeBytes(encodeConfig(doc, text).size());
+    p.read(text, QDir::currentPath());
+    p.validate();
+    p.setHeartbeat();
+    reread = std::move(p.doc);
   } catch (const ParseError& e) {
     throw ParseError("Cannot save " + path + ": " + QString::fromStdString(e.what()));
   }
@@ -1097,15 +1123,6 @@ void saveConfig(const Document& doc, const QString& path) {
     throw ParseError(problem);
   saveConfigText(doc, path, text);
 }
-namespace {
-QByteArray encodeConfig(const Document& doc, const QString& text) {
-  // Edits may add text that ISO-8859-1 cannot represent; keep it, not '?'.
-  auto data = doc.latin1 ? text.toLatin1() : text.toLocal8Bit();
-  if (doc.latin1 && QString::fromLatin1(data) != text)
-    data = text.toLocal8Bit();
-  return data;
-}
-} // namespace
 void saveConfigText(const Document& doc, const QString& path, const QString& text) {
   QSaveFile f(path);
   if (!f.open(QIODevice::WriteOnly))

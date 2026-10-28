@@ -16,7 +16,8 @@ environment variable is set to a value other than empty or `0`, for example
 always available.
 
 - **File → Export Phoebus XML…** writes the current configuration (configured
-  masks, not runtime changes).
+  masks, not runtime changes). An export larger than 32 MiB fails without
+  replacing the destination file.
 - **File → Import Phoebus XML…** converts a Phoebus file and opens it in the
   configuration tool. Review it, then **Save As** an `.alhConfig` file.
   Imported commands become related processes: clicking **P** during review
@@ -78,6 +79,7 @@ Include targets must be regular files; symbolic links to regular files are
 accepted. Devices, FIFOs, and directories are rejected before opening them.
 A read error in the XML file or any XInclude rejects the import, even if the
 bytes read so far form a complete XML element.
+The XML file and its XInclude files share a 32 MiB input limit.
 Unresolved or unsupported selectors fail the import. Commands containing ALH
 menu delimiters (`!`) or line breaks are retained as guidance text with a
 conversion note. Guidance lines whose first non-blank character is `$` are

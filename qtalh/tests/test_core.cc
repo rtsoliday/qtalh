@@ -1,5 +1,6 @@
 #include "test_compat.h"
 #include "core/engine.h"
+#include "core/bounded_file.h"
 #include "core/model.h"
 #include "core/notifications.h"
 #include "core/phoebus.h"
@@ -3058,6 +3059,78 @@ $GUIDANCE https://example.invalid/guide
     QVERIFY_THROWS_EXCEPTION(ParseError,
                              parseConfig("GROUP NULL root\nINCLUDE root child", temp.path()));
   }
+  void configurationReadBudget() {
+    QTemporaryDir dir;
+    QFile top(dir.filePath("main"));
+    QVERIFY(top.open(QIODevice::WriteOnly));
+    QVERIFY(top.resize(MaximumConfigurationBytes + 1));
+    top.close();
+    try {
+      loadConfig(top.fileName());
+      QFAIL("Oversized configuration was accepted");
+    } catch (const ParseError& e) {
+      QVERIFY2(QString::fromStdString(e.what()).contains("exceeds 32 MiB"), e.what());
+    }
+
+    QFile child(dir.filePath("child"));
+    QVERIFY(child.open(QIODevice::WriteOnly));
+    QVERIFY(child.resize(MaximumConfigurationBytes / 2 + 1));
+    child.close();
+    QVERIFY(top.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    const QByteArray contents = "GROUP NULL root\nINCLUDE root child\nINCLUDE root child\n";
+    QCOMPARE(top.write(contents), qint64(contents.size()));
+    top.close();
+    try {
+      loadConfig(top.fileName());
+      QFAIL("Repeated includes exceeded the total budget");
+    } catch (const ParseError& e) {
+      QVERIFY2(QString::fromStdString(e.what()).contains("exceeds 32 MiB"), e.what());
+    }
+#ifndef Q_OS_WIN
+    // The top-level input can be a pipe. A device with no reported size must
+    // still stop after the byte budget rather than read forever.
+    QFile stream("/dev/zero");
+    QVERIFY(stream.open(QIODevice::ReadOnly));
+    QByteArray bounded;
+    qint64 remaining = 16;
+    QCOMPARE(readBoundedFile(stream, bounded, remaining), BoundedReadResult::TooLarge);
+#endif
+  }
+  void configurationSaveBudgetUsesEncodedBytes() {
+    QTemporaryDir dir;
+    QFile top(dir.filePath("main"));
+    QVERIFY(top.open(QIODevice::WriteOnly));
+    const QByteArray main = "GROUP NULL root\nINCLUDE root child\nINCLUDE root child\n";
+    QCOMPARE(top.write(main), qint64(main.size()));
+    top.close();
+    QFile child(dir.filePath("child"));
+    QVERIFY(child.open(QIODevice::WriteOnly));
+    QCOMPARE(child.write("#"), qint64(1));
+    const QByteArray comment(8400000, char(0xe9));
+    QCOMPARE(child.write(comment), qint64(comment.size()));
+    QCOMPARE(child.write("\n"), qint64(1));
+    child.close();
+
+    // Each include is about 8.4 MiB on disk but twice that in UTF-8.
+    // Readback validation must use the encoding that Save would write.
+    const auto doc = loadConfig(top.fileName());
+    const auto files = writeConfigFiles(doc, top.fileName());
+    QCOMPARE(files.size(), 2);
+    const auto expanded = dir.filePath("expanded");
+    saveConfig(doc, expanded);
+    QCOMPARE(loadConfig(expanded).root->name, QString("root"));
+
+    auto oversized = parseConfig("GROUP NULL root\n");
+    oversized.root->before = "#" + QString(int(MaximumConfigurationBytes), 'x') + '\n';
+    QFile destination(dir.filePath("saved"));
+    QVERIFY(destination.open(QIODevice::WriteOnly));
+    QCOMPARE(destination.write("original"), qint64(8));
+    destination.close();
+    QVERIFY_THROWS_EXCEPTION(ParseError, writeConfigFiles(oversized, destination.fileName()));
+    QVERIFY_THROWS_EXCEPTION(ParseError, saveConfig(oversized, destination.fileName()));
+    QVERIFY(destination.open(QIODevice::ReadOnly));
+    QCOMPARE(destination.readAll(), QByteArray("original"));
+  }
   // INCLUDE accepts regular files and symbolic links to them. Reading a device
   // such as /dev/zero never ends and opening a FIFO waits for a writer, so
   // other file types are rejected before they are opened.
@@ -4884,6 +4957,74 @@ $GUIDANCE https://example.invalid/guide
                               QByteArray("<!-- unterminated")})
       QVERIFY_THROWS_EXCEPTION(ParseError, parsePhoebusXml("<config name=\"root\"/>" + suffix));
     QVERIFY(parsePhoebusXml("<config name=\"root\"/><!-- allowed -->").root);
+  }
+  void phoebusReadBudget() {
+    QTemporaryDir dir;
+    QFile xml(dir.filePath("alarms.xml"));
+    QVERIFY(xml.open(QIODevice::WriteOnly));
+    QVERIFY(xml.resize(MaximumConfigurationBytes + 1));
+    xml.close();
+    try {
+      loadPhoebusXml(xml.fileName());
+      QFAIL("Oversized Phoebus XML was accepted");
+    } catch (const ParseError& e) {
+      QVERIFY2(QString::fromStdString(e.what()).contains("exceeds 32 MiB"), e.what());
+    }
+    QByteArray bytes(MaximumConfigurationBytes + 1, ' ');
+    QVERIFY_THROWS_EXCEPTION(ParseError, parsePhoebusXml(bytes));
+    QFile child(dir.filePath("child.xml"));
+    QVERIFY(child.open(QIODevice::WriteOnly));
+    QVERIFY(child.resize(MaximumConfigurationBytes + 1));
+    child.close();
+    const auto top = QByteArray("<config name=\"root\" xmlns:xi=\"http://www.w3.org/2001/XInclude\">"
+                                "<xi:include href=\"child.xml\"/></config>");
+    try {
+      parsePhoebusXml(top, dir.path());
+      QFAIL("Oversized Phoebus include was accepted");
+    } catch (const ParseError& e) {
+      QVERIFY2(QString::fromStdString(e.what()).contains("exceeds 32 MiB"), e.what());
+    }
+    QVERIFY(child.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    const QByteArray component = "<component name=\"part\"><pv name=\"one\"/></component>";
+    QCOMPARE(child.write(component), qint64(component.size()));
+    QCOMPARE(child.write("<!--"), qint64(4));
+    const QByteArray padding(MaximumConfigurationBytes / 2, ' ');
+    QCOMPARE(child.write(padding), qint64(padding.size()));
+    QCOMPARE(child.write("-->"), qint64(3));
+    child.close();
+    const auto repeated = QByteArray("<config name=\"root\" xmlns:xi=\"http://www.w3.org/2001/XInclude\">"
+                                     "<xi:include href=\"child.xml\"/>"
+                                     "<xi:include href=\"child.xml\"/></config>");
+    try {
+      parsePhoebusXml(repeated, dir.path());
+      QFAIL("Repeated Phoebus includes exceeded the total budget");
+    } catch (const ParseError& e) {
+      QVERIFY2(QString::fromStdString(e.what()).contains("exceeds 32 MiB"), e.what());
+    }
+  }
+  void phoebusExportRejectsOutputBeyondImportLimit() {
+    QString source = "GROUP NULL root\nCHANNEL root pv\n$GUIDANCE\n";
+    const QString line(400, '&');
+    for (int i = 0; i < 18000; ++i) source += line + '\n';
+    source += "$END\n";
+    const auto doc = parseConfig(source);
+    QVERIFY(source.toUtf8().size() < MaximumConfigurationBytes);
+
+    try {
+      writePhoebusXml(doc);
+      QFAIL("Export produced XML too large to import");
+    } catch (const ParseError& e) {
+      QVERIFY2(QString::fromStdString(e.what()).contains("exceeds 32 MiB"), e.what());
+    }
+
+    QTemporaryDir dir;
+    QFile destination(dir.filePath("alarms.xml"));
+    QVERIFY(destination.open(QIODevice::WriteOnly));
+    QCOMPARE(destination.write("original"), qint64(8));
+    destination.close();
+    QVERIFY_THROWS_EXCEPTION(ParseError, savePhoebusXml(doc, destination.fileName()));
+    QVERIFY(destination.open(QIODevice::ReadOnly));
+    QCOMPARE(destination.readAll(), QByteArray("original"));
   }
   void phoebusIncludesSelectedComponent() {
     QTemporaryDir dir;

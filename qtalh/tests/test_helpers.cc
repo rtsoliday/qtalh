@@ -1,4 +1,5 @@
 #include "services/ipc.h"
+#include "core/bounded_file.h"
 #include "services/logging.h"
 #include "services/log_recovery.h"
 #include "services/sha256.h"
@@ -1798,6 +1799,38 @@ private slots:
     QCOMPARE(log.commandsAllowed(), mode != 2);
     before = polls; QTRY_VERIFY(polls > before);
     QCOMPARE(messages, 1); QCOMPARE(reloads, mode == 1 ? 1 : 0);
+  }
+  void oversizedBroadcastIsIgnored() {
+    QTemporaryDir dir;
+    Options o; o.noLog = true; o.broadcast = true; o.config = dir.filePath("config");
+    Logging log(o, "root");
+    int messages = 0, reloads = 0;
+    QStringList errors;
+    log.message = [&](const QString&) { ++messages; };
+    log.reload = [&] { ++reloads; };
+    log.error = [&](const QString& e) { errors << e; };
+
+    const auto path = o.config + ".MESS";
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const QByteArray header = "id1\nRELOAD_FACILITY: oversized\nDate is test\nFROM: User=test";
+    QCOMPARE(file.write(header), qint64(header.size()));
+    QVERIFY(file.resize(MaximumBroadcastBytes + 1));
+    file.close();
+    QTest::qWait(2200);
+    QCOMPARE(messages, 0);
+    QCOMPARE(reloads, 0);
+
+    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    const QByteArray valid = "id1\nRELOAD_FACILITY: valid\nDate is test\nFROM: User=test";
+    QCOMPARE(file.write(valid), qint64(valid.size()));
+    file.close();
+    QTRY_COMPARE(reloads, 1);
+    QCOMPARE(messages, 1);
+    QVERIFY(!log.sendBroadcast(QString(MaximumBroadcastBytes, 'X')));
+    QCOMPARE(errors, QStringList{"Message broadcast exceeds 64 KiB"});
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll(), valid);
   }
   void broadcastLockRecovery_data() {
     QTest::addColumn<bool>("onSend");
