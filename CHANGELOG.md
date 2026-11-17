@@ -4,7 +4,7 @@
 in `qtalh/core/version.h`) and the Motif ALH release it is based on. Each
 release is tagged `v<version>`.
 
-## 1.1.0 (unreleased)
+## 1.1.0
 
 Changes since 1.0.0:
 
@@ -36,6 +36,9 @@ Changes since 1.0.0:
   Shelf deadlines reject timestamp arithmetic overflow.
 - Phoebus File menu commands are hidden unless `QTALH_PHOEBUS_MENU` is set to a
   value other than empty or `0`; command-line conversions remain available.
+- Native configuration and Phoebus XML imports each have a 32 MiB input limit
+  that includes referenced files. Saves and exports exceeding the limit leave
+  the destination intact. Broadcasts are limited to 64 KiB.
 - Runtime names mark changed settings with a pencil and explanatory tooltip.
   Bars below either alarm pane count alarms scrolled out of view and can reveal
   the nearest one. They leave room for the final row and update after font changes.
